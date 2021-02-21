@@ -12,12 +12,13 @@ sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
 sudo DEBIAN_FRONTEND=noninteractive apt-get -y install ntp build-essential cmake pkg-config libboost-all-dev libssl-dev libzmq3-dev libunbound-dev libsodium-dev libunwind8-dev liblzma-dev libreadline6-dev libldns-dev libexpat1-dev doxygen graphviz libpgm-dev
 cd ~
-git clone https://github.com/MoneroOcean/nodejs-pool.git
+git clone https://github.com/BACMpool/nodejs-pool.git
 sudo systemctl enable ntp
 cd /usr/local/src
-sudo git clone --recursive https://github.com/monero-project/monero.git
+sudo git clone https://github.com/monero-project/monero.git
 cd monero
 sudo git checkout v0.17.1.9
+sudo git submodule update --init --force
 sudo USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || sudo USE_SINGLE_BUILDDIR=1 make release || exit 0
 sudo cp ~/nodejs-pool/deployment/monero.service /lib/systemd/system/
 sudo useradd -m monerodaemon -d /home/monerodaemon
