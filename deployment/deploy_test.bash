@@ -21,7 +21,7 @@ sudo systemctl enable ntp
 cd /usr/local/src
 sudo git clone --recursive https://github.com/monero-project/monero.git
 cd monero
-sudo git checkout v0.18.3.1
+sudo git checkout v0.18.3.3
 sudo USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || sudo USE_SINGLE_BUILDDIR=1 make release || exit 0
 sudo cp ~/nodejs-pool/deployment/monero_test.service /lib/systemd/system/monero.service
 sudo useradd -m monerodaemon -d /home/monerodaemon
@@ -30,8 +30,8 @@ sudo systemctl enable monero
 sudo systemctl start monero
 curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash
 source ~/.nvm/nvm.sh
-nvm install v14.17.3
-nvm alias default v14.17.3
+nvm install v22.1.0
+nvm alias default v22.1.0
 cd ~/nodejs-pool
 npm install
 npm install -g pm2
@@ -71,7 +71,7 @@ sudo systemctl enable caddy.service
 sudo systemctl start caddy.service
 rm -rf $CADDY_DOWNLOAD_DIR
 cd ~
-sudo env PATH=$PATH:`pwd`/.nvm/versions/node/v8.11.3/bin `pwd`/.nvm/versions/node/v8.11.3/lib/node_modules/pm2/bin/pm2 startup systemd -u $CURUSER --hp `pwd`
+sudo env PATH=$PATH:`pwd`/.nvm/versions/node/v22.1.0/bin `pwd`/.nvm/versions/node/v22.1.0/lib/node_modules/pm2/bin/pm2 startup systemd -u $CURUSER --hp `pwd`
 cd ~/nodejs-pool
 sudo chown -R $CURUSER ~/.pm2
 echo "Installing pm2-logrotate in the background!"
@@ -82,5 +82,5 @@ mysql -u root --password=$ROOT_SQL_PASS pool -e "INSERT INTO pool.config (module
 pm2 start init.js --name=api --log-date-format="YYYY-MM-DD HH:mm Z" -- --module=api
 bash ~/nodejs-pool/deployment/install_lmdb_tools.sh
 cd ~/nodejs-pool/sql_sync/
-env PATH=$PATH:`pwd`/.nvm/versions/node/v8.11.3/bin node sql_sync.js
+env PATH=$PATH:`pwd`/.nvm/versions/node/v22.1.0/bin node sql_sync.js
 echo "You're setup!  Please read the rest of the readme for the remainder of your setup and configuration.  These steps include: Setting your Fee Address, Pool Address, Global Domain, and the Mailgun setup!"

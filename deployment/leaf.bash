@@ -17,7 +17,7 @@ sudo systemctl enable ntp
 cd /usr/local/src
 sudo git clone https://github.com/monero-project/monero.git
 cd monero
-sudo git checkout v0.18.3.1
+sudo git checkout v0.18.3.3
 sudo git submodule update --init
 sudo USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || sudo USE_SINGLE_BUILDDIR=1 make release || exit 0
 sudo cp ~/nodejs-pool/deployment/monero.service /lib/systemd/system/
@@ -27,14 +27,14 @@ sudo systemctl enable monero
 sudo systemctl start monero
 curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash
 source ~/.nvm/nvm.sh
-nvm install v14.17.3
-nvm alias default v14.17.3
+nvm install v22.1.0
+nvm alias default v22.1.0
 cd ~/nodejs-pool
 npm install
 npm install -g pm2
 openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
 cd ~
-sudo env PATH=$PATH:`pwd`/.nvm/versions/node/v8.11.3/bin `pwd`/.nvm/versions/node/v8.11.3/lib/node_modules/pm2/bin/pm2 startup systemd -u $CURUSER --hp `pwd`
+sudo env PATH=$PATH:`pwd`/.nvm/versions/node/v22.1.0/bin `pwd`/.nvm/versions/node/v22.1.0/lib/node_modules/pm2/bin/pm2 startup systemd -u $CURUSER --hp `pwd`
 sudo chown -R $CURUSER ~/.pm2
 echo "Installing pm2-logrotate in the background!"
 pm2 install pm2-logrotate
