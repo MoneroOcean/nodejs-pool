@@ -3,7 +3,7 @@ cd ~
 rm -rf node-lmdb
 git clone https://github.com/Venemo/node-lmdb.git
 cd node-lmdb
-git checkout 5941c1e553de4ae1d57a67d355b7c2dd87feaea6
+git checkout c3135a3809da1d64ce1f0956b37b618711e33519
 cd dependencies/lmdb/libraries/liblmdb
 make -j `nproc`
 mkdir ~/.bin
