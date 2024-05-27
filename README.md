@@ -234,6 +234,7 @@ If you'd like to make a one time donation, the addresses are as follows:
 * XNA - ```Nb931jkFtFN7QWpu4FqSThaoKajYjS5iFZ```
 * CLORE - ```AdXPHtV8yb86a8QKsbs8gmUpRpcxufRn8n```
 * RTM - ```RUCyaEZxQu3Eure73XPQ57si813RYAMQKC```
+* KCN - ```kc1qchtxq2gw9dc4r58hcegd6n4jspew6j9mu3yz8q```
 * BTRM - ```Bfhtr2g56tg73TNZBRCu6fJUD39Kur6SGG```
 * ERG - ```9fe533kUzAE57YfPP6o3nzsYMKN2W2uCxvg8KG8Vn5DDeJGetRw```
 * BTC - ```3HRbMgcvbqHVW7P34MNGvF2Gh3DE26iHdw```
