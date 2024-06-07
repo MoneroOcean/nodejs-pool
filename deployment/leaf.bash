@@ -86,7 +86,7 @@ curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | b
 source /home/user/.nvm/nvm.sh
 nvm install $NODEJS_VERSION
 nvm alias default $NODEJS_VERSION
-test -f /usr/bin/node || sudo ln -s $(which node) /usr/bin/node
+test -f /usr/bin/node || sudo ln -s \$(which node) /usr/bin/node
 set -x
 git clone https://github.com/MoneroOcean/nodejs-pool.git
 cd /home/user/nodejs-pool
