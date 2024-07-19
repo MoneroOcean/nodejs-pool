@@ -230,6 +230,7 @@ If you'd like to make a one time donation, the addresses are as follows:
 * CCX - ```ccx7dmnBBoRPuVcpKJSAVZKdSDo9rc7HVijFbhG34jsXL3qiqfRwu7A5ecem44s2rngDd8y8N4QnYK6WR3mXAcAZ5iXun9BQBx```
 * BLOC - ```abLoc5iUG4a6oAb2dqygxkS5M2uHWx16zHb9fUWMzpSEDwm6T7PSq2MLdHonWZ16CGfnJKRomq75aZyviTo6ZjHeYQMzNAEkjMg```
 * ZEPH - ```ZEPHYR2nic7ULkkmgZNX8a9i2tMbkxuCqjgWZYuee3awX7RhtmhoT98CwGEGrruWZVSKtA7Z7JC8m7oeYHtBD9cBEZzdEh9BSdq4q```
+* SAL - ```SaLvdWKnkz6MvVgxXr2TWSDSvESz6EBcz3wmMFch2sQuMYz2sUQGVNDYhkYaSuvkDr9GSYp5h6BeQHnGK8HzKhqGeZCZzG3AHS3```
 * RVN - ```RLVJv9rQNHzXS3Zn4JH8hfAHmm1LfECMxy```
 * XNA - ```Nb931jkFtFN7QWpu4FqSThaoKajYjS5iFZ```
 * CLORE - ```AdXPHtV8yb86a8QKsbs8gmUpRpcxufRn8n```
