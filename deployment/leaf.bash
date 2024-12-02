@@ -9,6 +9,7 @@ fi
 
 DEBIAN_FRONTEND=noninteractive apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y ntp sudo ufw
 timedatectl set-timezone Etc/UTC
 
 adduser --disabled-password --gecos "" user
@@ -44,7 +45,6 @@ set fo-=ro
 EOF
 chown user:user /home/user/.vimrc
 
-DEBIAN_FRONTEND=noninteractive apt-get install -y ntp sudo
 DEBIAN_FRONTEND=noninteractive apt-get install -y git make g++ cmake libssl-dev libunbound-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-filesystem-dev libboost-thread-dev libboost-chrono-dev libboost-locale-dev libboost-regex-dev libboost-regex-dev libboost-program-options-dev libzmq3-dev
 cd /usr/local/src
 git clone https://github.com/monero-project/monero.git
