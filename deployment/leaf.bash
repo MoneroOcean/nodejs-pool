@@ -21,7 +21,7 @@ if [ -f "/root/.ssh/authorized_keys" ]; then
   chmod 600 /home/user/.ssh/authorized_keys
   sed -i 's/#\?PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/sshd_config
   sed -i 's/#\?PermitRootLogin .\+/PermitRootLogin no/g' /etc/ssh/sshd_config
-  sed -i 's/#\?PermitEmptyPasswords .\+/PermitEmptyPasswords no/g' /etc/ssh/sshd_config
+  sed -i 's/#\?  .\+/PermitEmptyPasswords no/g' /etc/ssh/sshd_config
   service ssh restart
 fi
 
@@ -45,7 +45,7 @@ set fo-=ro
 EOF
 chown user:user /home/user/.vimrc
 
-DEBIAN_FRONTEND=noninteractive apt-get install -y git make g++ cmake libssl-dev libunbound-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-filesystem-dev libboost-thread-dev libboost-chrono-dev libboost-locale-dev libboost-regex-dev libboost-regex-dev libboost-program-options-dev libzmq3-dev
+DEBIAN_FRONTEND=noninteractive apt-get install -y vim git make g++ cmake libssl-dev libunbound-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-filesystem-dev libboost-thread-dev libboost-chrono-dev libboost-locale-dev libboost-regex-dev libboost-regex-dev libboost-program-options-dev libzmq3-dev
 cd /usr/local/src
 git clone https://github.com/monero-project/monero.git
 cd monero
