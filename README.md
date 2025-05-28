@@ -42,7 +42,7 @@ Deployment via Installer
 2. Run the [deploy script](https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/deploy.bash) as a **ROOT USER**. This is very important! This script will install the pool to new user "user"! Also. Go get a coffee, this sucker bootstraps the monero installation.
 3. Once it's complete, change as `config.json` appropriate. It is pre-loaded for a local install of everything, running on 127.0.0.1. This will work perfectly fine if you're using a single node setup. You'll also want to set `bind_ip` to the external IP of the pool server, and `hostname` to the resolvable hostname for the pool server. `pool_id` is mostly used for multi-server installations to provide unique identifiers in the backend. You will also want to run: source ~/.bashrc This will activate NVM and get things working for the following pm2 steps.
 4. You'll need to change the API endpoint for the frontend code in the `moneroocean-gui/script.js` -- This will usually be `http(s)://api.<your server FQDN>` unless you tweak nginx!
-5. The default database directory `/home/user/pool_db/` is already been created during startup. If you change the `db_storage_path` just make sure your user has write permissions for new path. Run: `pm2 restart api` to reload the API for usage. 
+5. The default database directory `/home/user/pool_db/` is already been created during startup. If you change the `db_storage_path` just make sure your user has write permissions for new path. Run: `pm2 restart api` to reload the API for usage.
 8. Once you're happy with the settings, go ahead and add pool daemon on main/leaf pool node:
 
 ```shell
@@ -231,6 +231,7 @@ If you'd like to make a one time donation, the addresses are as follows:
 * BLOC - ```abLoc5iUG4a6oAb2dqygxkS5M2uHWx16zHb9fUWMzpSEDwm6T7PSq2MLdHonWZ16CGfnJKRomq75aZyviTo6ZjHeYQMzNAEkjMg```
 * ZEPH - ```ZEPHYR2nic7ULkkmgZNX8a9i2tMbkxuCqjgWZYuee3awX7RhtmhoT98CwGEGrruWZVSKtA7Z7JC8m7oeYHtBD9cBEZzdEh9BSdq4q```
 * SAL - ```SaLvdWKnkz6MvVgxXr2TWSDSvESz6EBcz3wmMFch2sQuMYz2sUQGVNDYhkYaSuvkDr9GSYp5h6BeQHnGK8HzKhqGeZCZzG3AHS3```
+* XTM - ```12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5```
 * RVN - ```RLVJv9rQNHzXS3Zn4JH8hfAHmm1LfECMxy```
 * XNA - ```Nb931jkFtFN7QWpu4FqSThaoKajYjS5iFZ```
 * CLORE - ```AdXPHtV8yb86a8QKsbs8gmUpRpcxufRn8n```
