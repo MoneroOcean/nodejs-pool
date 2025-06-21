@@ -20,7 +20,7 @@ require("../init_mini.js").init(function() {
       console.error("Can't get last block info");
       process.exit(0);
     }
-    global.coinFuncs.getPortBlockHeaderByHashWithRewardDiff(port, hash, function (err_header, body_header) {
+    global.coinFuncs.getPortBlockHeaderByHash(port, hash, function (err_header, body_header) {
       if (err_header) {
         console.error("Can't get block info");
         console.error("err:"  + JSON.stringify(err_header));
