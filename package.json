@@ -19,7 +19,7 @@
     "concat-stream": "^1.6.0",
     "cors": "^2.8.1",
     "crypto-js": "^4.2.0",
-    "cryptoforknote-util": "git+https://github.com/MoneroOcean/node-cryptoforknote-util.git#v15.8.3",
+    "cryptoforknote-util": "git+https://github.com/MoneroOcean/node-cryptoforknote-util.git#v15.8.4",
     "cryptonight-hashing": "git+https://github.com/MoneroOcean/node-cryptonight-hashing.git#v29.1.1",
     "debug": "2.6.9",
     "express": "^4.17.1",
