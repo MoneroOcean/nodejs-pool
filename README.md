@@ -56,12 +56,12 @@ Install Script that assumes you have free Cloudflare DNS setup for your web (mon
 from https://dash.cloudflare.com/profile/api-tokens with "Zone.Zone (Read), Zone.DNS (Edit)" permissions and email for certbot updates:
 
 ```bash
-curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/deploy.bash | bash -s -- -s moneroocean.stream api.moneroocean.stream "Cloudflare API Token" support@moneroocean.stream
+curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/deploy.bash | bash -x -s -- moneroocean.stream api.moneroocean.stream "Cloudflare API Token" support@moneroocean.stream
 ```
 
 Leaf server install script (only for pool module that you need to add/start as shown above after install and updating config.json to connect to your main pool DB server):
 ```bash
-curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash
+curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash -x
 ```
 
 Assumptions for the installer
