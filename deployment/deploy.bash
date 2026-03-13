@@ -229,10 +229,9 @@ cd /home/user
 git clone https://github.com/MoneroOcean/moneroocean-gui.git
 cd moneroocean-gui
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y chromium-browser
-sudo snap install chromium
 npm install -g uglifycss uglify-js html-minifier
 npm install -D critical@latest
 EOF
 ) | su user -l
 
-echo 'Now logout server, loging again under "user" account and run ~/moneroocean-gui/build.sh to build web site'
+echo 'Now logout server, logging again under "user" account and run ~/moneroocean-gui/build.sh to build web site'
