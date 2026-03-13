@@ -33,13 +33,12 @@ CREATE TABLE `paid_blocks` (
   UNIQUE KEY `paid_blocks_hex` (`hex`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `block_balance` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `hex` varchar(128) NOT NULL,
   `payment_address` varchar(128) DEFAULT NULL,
   `payment_id` varchar(128) DEFAULT NULL,
   `amount` float(53) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `block_balance_id_uindex` (`id`),
   UNIQUE KEY `block_balance_hex_payment_address_payment_id_uindex` (`hex`, `payment_address`,`payment_id`),
   KEY `block_balance_hex_index` (`hex`),
   KEY `block_balance_payment_address_payment_id_index` (`payment_address`,`payment_id`)
