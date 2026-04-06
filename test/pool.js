@@ -987,6 +987,68 @@ test("malformed submit nonces are rejected and recorded as invalid shares", asyn
     }
 });
 
+test("authenticated submit without params is rejected before share handling", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            socket,
+            id: 12,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-submit-no-params"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 13,
+            method: "submit",
+            params: null
+        });
+
+        assert.equal(submitReply.replies.length, 0);
+        assert.deepEqual(submitReply.finals, [{ error: "No params specified", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("authenticated submit with a missing job id is rejected", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            socket,
+            id: 14,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-submit-missing-job"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 15,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                nonce: "0000000b",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: "Invalid job id", result: undefined }]);
+        assert.equal(submitReply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("shares for jobs that have fallen out of the template history are rejected as expired", async () => {
     const { runtime, database } = await startHarness();
     const socket = {};
@@ -1065,6 +1127,80 @@ test("eth subscribe and authorize fail cleanly when no extranonces are available
     }
 });
 
+test("eth submit sent before authorize is rejected as unauthenticated", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const subscribeReply = invokePoolMethod({
+            socket,
+            id: 52,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+        assert.equal(subscribeReply.replies[0].error, null);
+        assert.equal(subscribeReply.finals.length, 0);
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 53,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                "missing-job",
+                "0x0000000000000001",
+                `0x${"00".repeat(32)}`,
+                `0x${"ab".repeat(32)}`
+            ],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(submitReply.replies.length, 0);
+        assert.deepEqual(submitReply.finals, [{ error: "Unauthenticated", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("eth sockets cannot authorize twice on the same connection", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const subscribeReply = invokePoolMethod({
+            socket,
+            id: 54,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+        assert.equal(subscribeReply.replies[0].error, null);
+
+        const firstAuthorize = invokePoolMethod({
+            socket,
+            id: 55,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-worker-one"],
+            portData: global.config.ports[1]
+        });
+        assert.deepEqual(firstAuthorize.replies, [{ error: null, result: true }]);
+
+        const secondAuthorize = invokePoolMethod({
+            socket,
+            id: 56,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-worker-two"],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(secondAuthorize.replies.length, 0);
+        assert.deepEqual(secondAuthorize.finals, [{ error: "No double login is allowed", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("closing an eth stratum socket releases its extranonce for reuse", async () => {
     const { runtime } = await startHarness({ freeEthExtranonces: [7] });
     const firstClient = new JsonLineClient(ETH_PORT);
@@ -1122,6 +1258,18 @@ test("getjob without params is rejected", async () => {
         const reply = invokePoolMethod({ method: "getjob", params: null });
         assert.equal(reply.replies.length, 0);
         assert.deepEqual(reply.finals, [{ error: "No params specified", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("getjobtemplate before login is rejected as unauthenticated", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({ method: "getjobtemplate", params: {} });
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "Unauthenticated", timeout: undefined }]);
     } finally {
         await runtime.stop();
     }
@@ -1270,6 +1418,23 @@ test("mining.submit rejects arrays that are too short", async () => {
 
         assert.deepEqual(reply.replies, [{ error: "Not correct params specified", result: undefined }]);
         assert.equal(reply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("mining.authorize with an empty params array is rejected as malformed", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "mining.authorize",
+            params: [],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "No login specified", timeout: undefined }]);
     } finally {
         await runtime.stop();
     }
