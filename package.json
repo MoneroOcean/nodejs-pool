@@ -4,7 +4,7 @@
   "description": "Improved version of Snipa22 nodejs-pool",
   "main": "init.js",
   "scripts": {
-    "test": "node --test test/pool.js"
+    "test": "node --test --test-concurrency=1 test/pool.js"
   },
   "repository": {
     "type": "git",

@@ -459,6 +459,7 @@ function installTestGlobals() {
             shareAccTime: 0,
             minerThrottleShareWindow: 10,
             minerThrottleSharePerSec: 1000,
+            minerTimeout: 60,
             trustThreshold: 1,
             trustMin: 0,
             trustedMiners: false,
@@ -566,8 +567,12 @@ class JsonLineClient {
 
     async close() {
         if (!this.socket) return;
+        const socket = this.socket;
+        this.socket = null;
+        if (socket.destroyed) return;
         await new Promise((resolve) => {
-            this.socket.end(resolve);
+            socket.once("close", resolve);
+            socket.end();
         });
     }
 }
@@ -602,6 +607,34 @@ function assertNoSocketData(socket, timeout = 150) {
             resolve();
         }, timeout);
         socket.on("data", onData);
+    });
+}
+
+function waitForSocketJson(socket, timeout = 1000) {
+    return new Promise((resolve, reject) => {
+        let buffer = "";
+        const cleanup = () => {
+            clearTimeout(timer);
+            socket.off("data", onData);
+            socket.off("close", onClose);
+        };
+        const onData = (chunk) => {
+            buffer += chunk;
+            if (!buffer.includes("\n")) return;
+            cleanup();
+            const [line] = buffer.split("\n");
+            resolve(JSON.parse(line));
+        };
+        const onClose = () => {
+            cleanup();
+            reject(new Error("Socket closed before a JSON line was received"));
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            reject(new Error("Timed out waiting for JSON line"));
+        }, timeout);
+        socket.on("data", onData);
+        socket.on("close", onClose);
     });
 }
 
@@ -668,6 +701,7 @@ function invokePoolMethod({
     return { replies, finals, pushes, socket };
 }
 
+test.describe("pool", { concurrency: false }, () => {
 test("default stratum miner can login, keepalive, and submit a valid share", async () => {
     const { runtime, database } = await startHarness();
     const client = new JsonLineClient(MAIN_PORT);
@@ -2552,4 +2586,517 @@ test("socket parser destroys connections that exceed the maximum packet size", a
         socket.destroy();
         await runtime.stop();
     }
+});
+
+test("socket parser handles JSON requests split across multiple TCP chunks", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+    const request = JSON.stringify({
+        id: 181,
+        method: "login",
+        params: {
+            login: MAIN_WALLET,
+            pass: "split-packet"
+        }
+    });
+
+    try {
+        socket.write(request.slice(0, 30));
+        await assertNoSocketData(socket);
+
+        socket.write(`${request.slice(30)}\n`);
+        const reply = await waitForSocketJson(socket);
+
+        assert.equal(reply.id, 181);
+        assert.equal(reply.error, null);
+        assert.equal(reply.result.status, "OK");
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("closing a miner socket removes it from the active miner map", async () => {
+    const { runtime } = await startHarness();
+    const client = new JsonLineClient(MAIN_PORT);
+
+    try {
+        await client.connect();
+
+        const loginReply = await client.request({
+            id: 182,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "close-removes-miner"
+            }
+        });
+
+        assert.equal(loginReply.error, null);
+        assert.equal(runtime.getState().activeMiners.size, 1);
+
+        await client.close();
+        await flushTimers();
+
+        assert.equal(runtime.getState().activeMiners.size, 0);
+    } finally {
+        await client.close();
+        await runtime.stop();
+    }
+});
+
+test("ban threshold removes miners that cross the invalid share percentage", async () => {
+    const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+    const originalBanThreshold = global.config.pool.banThreshold;
+    const originalBanPercent = global.config.pool.banPercent;
+    const socket = {};
+    const ip = "10.0.0.88";
+
+    try {
+        cluster.isMaster = false;
+        global.config.pool.banThreshold = 3;
+        global.config.pool.banPercent = 50;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 183,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "ban-threshold"
+            },
+            ip
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        invokePoolMethod({
+            socket,
+            id: 184,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000e",
+                result: VALID_RESULT
+            },
+            ip
+        });
+
+        invokePoolMethod({
+            socket,
+            id: 185,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "not-a-nonce",
+                result: VALID_RESULT
+            },
+            ip
+        });
+
+        const secondBadShare = invokePoolMethod({
+            socket,
+            id: 186,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "still-not-a-nonce",
+                result: VALID_RESULT
+            },
+            ip
+        });
+
+        assert.deepEqual(secondBadShare.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(runtime.getState().activeMiners.has(socket.miner_id), false);
+        assert.equal(runtime.getState().bannedTmpIPs[ip], 1);
+
+        const reloginReply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "ban-threshold-retry"
+            },
+            ip
+        });
+        assert.deepEqual(reloginReply.finals, [{
+            error: "New connections from this IP address are temporarily suspended from mining (10 minutes max)",
+            timeout: undefined
+        }]);
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        global.config.pool.banThreshold = originalBanThreshold;
+        global.config.pool.banPercent = originalBanPercent;
+        await runtime.stop();
+    }
+});
+
+test("ban counters reset instead of banning when invalid share percentage stays below the threshold", async () => {
+    const { runtime } = await startHarness();
+    const originalBanThreshold = global.config.pool.banThreshold;
+    const originalBanPercent = global.config.pool.banPercent;
+    const socket = {};
+
+    try {
+        global.config.pool.banThreshold = 2;
+        global.config.pool.banPercent = 60;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 187,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "ban-reset"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        invokePoolMethod({
+            socket,
+            id: 188,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000f",
+                result: VALID_RESULT
+            }
+        });
+
+        invokePoolMethod({
+            socket,
+            id: 189,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "bad-reset-nonce",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.equal(runtime.getState().activeMiners.has(socket.miner_id), true);
+        assert.equal(miner.validShares, 0);
+        assert.equal(miner.invalidShares, 0);
+    } finally {
+        global.config.pool.banThreshold = originalBanThreshold;
+        global.config.pool.banPercent = originalBanPercent;
+        await runtime.stop();
+    }
+});
+
+test("whitelisted miners are not banned for invalid shares", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+    const ip = "10.0.0.90";
+
+    try {
+        runtime.getState().ip_whitelist[ip] = 1;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 190,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "whitelist-bypass"
+            },
+            ip
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const badShareReply = invokePoolMethod({
+            socket,
+            id: 191,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "not-whitelisted-nonce",
+                result: VALID_RESULT
+            },
+            ip
+        });
+
+        assert.deepEqual(badShareReply.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(runtime.getState().activeMiners.has(socket.miner_id), true);
+        assert.equal(runtime.getState().bannedTmpIPs[ip], undefined);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("registerPool stores the pool row and all configured ports", async () => {
+    const { runtime, mysql } = await startHarness();
+
+    try {
+        poolModule.registerPool();
+        await flushTimers();
+        await flushTimers();
+
+        assert.equal(mysql.queries[0].sql.includes("INSERT INTO pools"), true);
+        assert.equal(mysql.queries[1].sql.includes("DELETE FROM ports"), true);
+        assert.equal(mysql.queries.filter((entry) => entry.sql.includes("INSERT INTO ports")).length, 2);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("messageHandler sendRemote queues the payload in master mode", async () => {
+    const { runtime, database } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+
+    try {
+        cluster.isMaster = true;
+        poolModule.messageHandler({ type: "sendRemote", body: "abcd" });
+
+        assert.equal(database.sendQueue.length, 1);
+        assert.equal(database.sendQueue[0].body.equals(Buffer.from("abcd", "hex")), true);
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        await runtime.stop();
+    }
+});
+
+test("messageHandler newBlockTemplate updates the active template", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        poolModule.messageHandler({
+            type: "newBlockTemplate",
+            data: createBaseTemplate({
+                coin: "",
+                port: MAIN_PORT,
+                idHash: "main-template-message-handler",
+                height: 333
+            })
+        });
+
+        assert.equal(runtime.getState().activeBlockTemplates[""].height, 333);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("setNewCoinHashFactor marks matching miners for extra verification on hash-factor changes", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const socket = {};
+
+    try {
+        global.config.pool.trustedMiners = true;
+        invokePoolMethod({
+            socket,
+            id: 192,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "coin-hash-factor-refresh"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+
+        poolModule.setNewCoinHashFactor(true, "", 2, 777);
+
+        assert.equal(miner.trust.check_height, 777);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        await runtime.stop();
+    }
+});
+
+test("messageHandler minerPortCount stores the reported per-port counts in master mode", async () => {
+    const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+
+    try {
+        cluster.isMaster = true;
+        poolModule.messageHandler({
+            type: "minerPortCount",
+            data: {
+                worker_id: 7,
+                ports: { [MAIN_PORT]: 2, [ETH_PORT]: 1 }
+            }
+        });
+
+        assert.deepEqual(runtime.getState().minerCount[7], { [MAIN_PORT]: 2, [ETH_PORT]: 1 });
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        await runtime.stop();
+    }
+});
+
+test("retargetMiners updates miner counts and pushes a new job when difficulty changes", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 193,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "retarget"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+
+        loginReply.pushes.length = 0;
+        miner.calcNewDiff = () => miner.difficulty + 10;
+
+        poolModule.retargetMiners();
+
+        assert.equal(loginReply.pushes.length, 1);
+        assert.equal(loginReply.pushes[0].method, "job");
+        assert.equal(runtime.getState().minerCount[MAIN_PORT], 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("checkAliveMiners removes miners that exceed the timeout", async () => {
+    const { runtime } = await startHarness();
+    const originalMinerTimeout = global.config.pool.minerTimeout;
+    const socket = {};
+
+    try {
+        global.config.pool.minerTimeout = 1;
+
+        invokePoolMethod({
+            socket,
+            id: 194,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "timeout-removal"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        miner.lastContact = Date.now() - 5000;
+
+        poolModule.checkAliveMiners();
+
+        assert.equal(runtime.getState().activeMiners.has(socket.miner_id), false);
+    } finally {
+        global.config.pool.minerTimeout = originalMinerTimeout;
+        await runtime.stop();
+    }
+});
+
+test("payment split logins reject percentages above the maximum", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}%99.95%${ALT_WALLET}`,
+                pass: "worker-split-too-large"
+            }
+        });
+
+        assert.deepEqual(reply.finals, [{
+            error: "Your payment divide split 99.95 is above 99.9% and can't be processed",
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("payment split logins reject total percentages that exceed the maximum", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}%60%${ALT_WALLET}%40%${THIRD_WALLET}`,
+                pass: "worker-split-over-total"
+            }
+        });
+
+        assert.deepEqual(reply.finals, [{
+            error: "Your summary payment divide split exceeds 99.9% and can't be processed",
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("payment split logins reject invalid destination addresses", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}%1%not-a-wallet`,
+                pass: "worker-split-invalid-address"
+            }
+        });
+
+        assert.deepEqual(reply.finals, [{
+            error: "Invalid payment address provided: not-a-wallet. Please use 95_char_long_monero_wallet_address format",
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("primary payout logins reject permanently banned addresses", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        runtime.getState().bannedAddresses[MAIN_WALLET] = "manual blocklist";
+
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-primary-banned"
+            }
+        });
+
+        assert.deepEqual(reply.finals, [{
+            error: `Permanently banned payment address ${MAIN_WALLET} provided: manual blocklist`,
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("primary payout logins reject one-hour worker-limit bans", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        runtime.getState().bannedBigTmpWallets[MAIN_WALLET] = 1;
+
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-primary-long-ban"
+            }
+        });
+
+        assert.deepEqual(reply.finals, [{
+            error: "Temporary (one hour max) ban since you connected too many workers. Please use proxy (https://github.com/MoneroOcean/xmrig-proxy)",
+            timeout: 600
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
 });
