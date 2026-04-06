@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "description": "Improved version of Snipa22 nodejs-pool",
   "main": "init.js",
+  "scripts": {
+    "test": "node --test test/pool.js"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/MoneroOcean/nodejs-pool.git"
