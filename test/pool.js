@@ -560,6 +560,39 @@ class JsonLineClient {
     }
 }
 
+async function openRawSocket(port) {
+    return await new Promise((resolve, reject) => {
+        const socket = net.createConnection({ host: "127.0.0.1", port }, () => resolve(socket));
+        socket.setEncoding("utf8");
+        socket.once("error", reject);
+    });
+}
+
+function waitForSocketClose(socket, timeout = 1000) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Timed out waiting for socket close")), timeout);
+        socket.once("close", () => {
+            clearTimeout(timer);
+            resolve();
+        });
+    });
+}
+
+function assertNoSocketData(socket, timeout = 150) {
+    return new Promise((resolve, reject) => {
+        const onData = (chunk) => {
+            clearTimeout(timer);
+            socket.off("data", onData);
+            reject(new Error(`Expected no socket data but received: ${chunk}`));
+        };
+        const timer = setTimeout(() => {
+            socket.off("data", onData);
+            resolve();
+        }, timeout);
+        socket.on("data", onData);
+    });
+}
+
 async function startHarness(extra = {}) {
     // Each test gets fresh in-memory service state.  The pool module itself is
     // reused, but its internal runtime state is reset by `startTestRuntime`.
@@ -1061,6 +1094,754 @@ test("closing an eth stratum socket releases its extranonce for reuse", async ()
     } finally {
         await firstClient.close();
         await secondClient.close();
+        await runtime.stop();
+    }
+});
+
+test("login without a login field is rejected", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "login",
+            params: { pass: "worker-no-login" },
+            ip: "10.0.0.66"
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "No login specified", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("getjob without params is rejected", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({ method: "getjob", params: null });
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "No params specified", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("authenticated getjob returns null when no fresh job is available", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 60,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-getjob"
+            }
+        });
+
+        const minerId = loginReply.replies[0].result.id;
+        const getjobReply = invokePoolMethod({
+            socket,
+            id: 61,
+            method: "getjob",
+            params: { id: minerId }
+        });
+
+        assert.equal(getjobReply.finals.length, 0);
+        assert.equal(getjobReply.replies.length, 1);
+        assert.equal(getjobReply.replies[0].error, null);
+        assert.equal(getjobReply.replies[0].result, null);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("authenticated getjobtemplate returns a job for grin-style callers", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            socket,
+            id: "Stratum",
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-template"
+            }
+        });
+
+        const reply = invokePoolMethod({
+            socket,
+            id: 62,
+            method: "getjobtemplate",
+            params: {}
+        });
+
+        assert.equal(reply.finals.length, 0);
+        assert.equal(reply.replies.length, 1);
+        assert.equal(reply.replies[0].error, null);
+        assert.ok(reply.replies[0].result.job_id);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("mining.authorize rejects non-array params", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "mining.authorize",
+            params: { login: ETH_WALLET },
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "No array params specified", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("mining.extranonce.subscribe acknowledges successfully", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "mining.extranonce.subscribe",
+            params: [],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: null, result: true }]);
+        assert.equal(reply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("mining.submit rejects missing array params", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "mining.submit",
+            params: null,
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: "No array params specified", result: undefined }]);
+        assert.equal(reply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("mining.submit rejects non-string array params", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "mining.submit",
+            params: [ETH_WALLET, "job-1", 7],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: "Not correct params specified", result: undefined }]);
+        assert.equal(reply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("mining.submit rejects arrays that are too short", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "mining.submit",
+            params: [ETH_WALLET, "job-1"],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: "Not correct params specified", result: undefined }]);
+        assert.equal(reply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("mining.submit rejects incompatible job formats for non-eth jobs", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 70,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-main-submit"
+            }
+        });
+
+        const reply = invokePoolMethod({
+            socket,
+            id: 71,
+            method: "mining.submit",
+            params: [
+                MAIN_WALLET,
+                loginReply.replies[0].result.job.job_id,
+                "0x0000000000000001"
+            ],
+            portData: global.config.ports[0]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: "Invalid job params", result: undefined }]);
+        assert.equal(reply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("low difficulty shares are rejected and stored as invalid", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 80,
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}+100`,
+                pass: "worker-low-diff"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 81,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000006",
+                result: "ff".repeat(32)
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(database.invalidShares.length, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("exceeding workerMax for one wallet triggers the connection ban path", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        global.config.pool.workerMax = 1;
+
+        const first = invokePoolMethod({
+            socket: {},
+            id: 90,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-one"
+            }
+        });
+        assert.equal(first.replies[0].error, null);
+
+        const second = invokePoolMethod({
+            socket: {},
+            id: 91,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-two"
+            }
+        });
+
+        assert.equal(second.replies.length, 0);
+        assert.deepEqual(second.finals, [{
+            error: "Temporary (one hour max) ban on new miner connections since you connected too many workers. Please use proxy (https://github.com/MoneroOcean/xmrig-proxy)",
+            timeout: 600
+        }]);
+    } finally {
+        global.config.pool.workerMax = 20;
+        await runtime.stop();
+    }
+});
+
+test("default protocol miners receive a pushed job when the active template changes", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 100,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-push-default"
+            }
+        });
+
+        const initialJobId = loginReply.replies[0].result.job.job_id;
+        runtime.setTemplate(createBaseTemplate({
+            coin: "",
+            port: MAIN_PORT,
+            idHash: "main-template-push-default-2",
+            height: 150
+        }));
+
+        assert.equal(loginReply.pushes.length, 1);
+        assert.equal(loginReply.pushes[0].method, "job");
+        assert.ok(loginReply.pushes[0].params.job_id);
+        assert.notEqual(loginReply.pushes[0].params.job_id, initialJobId);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("grin protocol miners receive pushed getjobtemplate updates", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: "Stratum",
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-push-grin"
+            }
+        });
+
+        assert.deepEqual(loginReply.replies, [{ error: null, result: "ok" }]);
+
+        runtime.setTemplate(createBaseTemplate({
+            coin: "",
+            port: MAIN_PORT,
+            idHash: "main-template-push-grin-2",
+            height: 151
+        }));
+
+        assert.equal(loginReply.pushes.length, 1);
+        assert.equal(loginReply.pushes[0].method, "getjobtemplate");
+        assert.ok(loginReply.pushes[0].result.job_id);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("eth-style direct miners receive mining.set_difficulty and mining.notify pushes", async () => {
+    const { runtime } = await startHarness();
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    const socket = {};
+
+    try {
+        global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+            if (port === ETH_PORT) return 102;
+            return originalPortBlobType.call(this, port);
+        };
+
+        const subscribeReply = invokePoolMethod({
+            socket,
+            id: 110,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(subscribeReply.replies[0].error, null);
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 111,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-style-worker"],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(authorizeReply.replies, [{ error: null, result: true }]);
+        assert.equal(authorizeReply.pushes.length, 2);
+        assert.equal(authorizeReply.pushes[0].method, "mining.set_difficulty");
+        assert.equal(typeof authorizeReply.pushes[0].params[0], "number");
+        assert.equal(authorizeReply.pushes[1].method, "mining.notify");
+        assert.equal(Array.isArray(authorizeReply.pushes[1].params), true);
+    } finally {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+        await runtime.stop();
+    }
+});
+
+test("eth-style template refresh sends mining.notify without repeating mining.set_difficulty when diff is unchanged", async () => {
+    const { runtime } = await startHarness();
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    const socket = {};
+
+    try {
+        global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+            if (port === ETH_PORT) return 102;
+            return originalPortBlobType.call(this, port);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 112,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 113,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-style-refresh"],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(authorizeReply.pushes.length, 2);
+
+        runtime.setTemplate(createBaseTemplate({
+            coin: "ETH",
+            port: ETH_PORT,
+            idHash: "eth-template-push-2",
+            height: 250
+        }));
+
+        assert.equal(authorizeReply.pushes.length, 3);
+        assert.equal(authorizeReply.pushes[2].method, "mining.notify");
+    } finally {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+        await runtime.stop();
+    }
+});
+
+test("login fails cleanly when there is no active block template", async () => {
+    const { runtime } = await startHarness({ templates: [] });
+
+    try {
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-no-template"
+            }
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "No active block template", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("getjob returns miner.setAlgos status errors when algo updates are rejected", async () => {
+    const { runtime } = await startHarness();
+    const originalAlgoCheck = global.coinFuncs.algoCheck;
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 120,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-bad-algo"
+            }
+        });
+
+        global.coinFuncs.algoCheck = function patchedAlgoCheck(algos) {
+            if ("bad/algo" in algos) return "Algo not supported";
+            return originalAlgoCheck.call(this, algos);
+        };
+
+        const getjobReply = invokePoolMethod({
+            socket,
+            id: 121,
+            method: "getjob",
+            params: {
+                id: loginReply.replies[0].result.id,
+                algo: ["bad/algo"],
+                "algo-perf": { "bad/algo": 1 }
+            }
+        });
+
+        assert.deepEqual(getjobReply.replies, [{ error: "Algo not supported", result: undefined }]);
+        assert.equal(getjobReply.finals.length, 0);
+    } finally {
+        global.coinFuncs.algoCheck = originalAlgoCheck;
+        await runtime.stop();
+    }
+});
+
+test("throttled shares return the explicit increase-difficulty message", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 0;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 130,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-throttle"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 131,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000008",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{
+            error: "Throttled down share submission (please increase difficulty)",
+            result: undefined
+        }]);
+        assert.equal(runtime.getState().shareStats.throttledShares, 1);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = 1000;
+        await runtime.stop();
+    }
+});
+
+test("wallet bans propagated through messageHandler reject later logins", async () => {
+    const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+
+    try {
+        cluster.isMaster = false;
+        poolModule.messageHandler({
+            type: "banIP",
+            data: "127.0.0.1",
+            wallet: MAIN_WALLET
+        });
+
+        const reply = invokePoolMethod({
+            socket: {},
+            id: 140,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-banned-wallet"
+            }
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{
+            error: `Temporary (10 minutes max) banned payment address ${MAIN_WALLET}`,
+            timeout: undefined
+        }]);
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        await runtime.stop();
+    }
+});
+
+test("submitting on a long-disabled coin returns the daemon-issues final error", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 150,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-disabled-coin"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const state = runtime.getState();
+        const activeTemplate = state.activeBlockTemplates[""];
+
+        runtime.setTemplate({
+            ...createBaseTemplate({
+                coin: "",
+                port: MAIN_PORT,
+                idHash: activeTemplate.idHash,
+                height: activeTemplate.height
+            }),
+            idHash: activeTemplate.idHash,
+            coinHashFactor: 0
+        });
+        state.activeBlockTemplates[""].timeCreated = Date.now() - (60 * 60 * 1000 + 1000);
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 151,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000009",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.equal(submitReply.replies.length, 0);
+        assert.deepEqual(submitReply.finals, [{
+            error: "This algo was temporary disabled due to coin daemon issues. Consider using https://github.com/MoneroOcean/meta-miner to allow your miner auto algo switch in this case.",
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("proxy submits without worker and pool nonces are rejected as invalid shares", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 160,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "proxy-missing-nonces",
+                agent: "xmr-node-proxy/0.0.1"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 161,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000a",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(database.invalidShares.length, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("xmrig-proxy connections are not banned by the proxy worker limit path", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        global.config.pool.workerMax = 1;
+
+        const first = invokePoolMethod({
+            socket: {},
+            id: 170,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "xmrig-proxy-one",
+                agent: "xmrig-proxy/6.0.0"
+            }
+        });
+        const second = invokePoolMethod({
+            socket: {},
+            id: 171,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "xmrig-proxy-two",
+                agent: "xmrig-proxy/6.0.0"
+            }
+        });
+
+        assert.equal(first.finals.length, 0);
+        assert.equal(second.finals.length, 0);
+        assert.equal(first.replies[0].error, null);
+        assert.equal(second.replies[0].error, null);
+    } finally {
+        global.config.pool.workerMax = 20;
+        await runtime.stop();
+    }
+});
+
+test("socket parser closes connections on malformed JSON input", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        socket.write('{"id":1,"method":"login","params":{"login":"oops"}\n');
+        await waitForSocketClose(socket);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("socket parser ignores requests missing an RPC id", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        socket.write(`${JSON.stringify({ method: "login", params: { login: MAIN_WALLET, pass: "missing-id" } })}\n`);
+        await assertNoSocketData(socket);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("socket parser ignores requests missing an RPC method", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        socket.write(`${JSON.stringify({ id: 180, params: { login: MAIN_WALLET, pass: "missing-method" } })}\n`);
+        await assertNoSocketData(socket);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("socket parser destroys connections that exceed the maximum packet size", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        socket.write("a".repeat(102401));
+        await waitForSocketClose(socket);
+    } finally {
+        socket.destroy();
         await runtime.stop();
     }
 });
