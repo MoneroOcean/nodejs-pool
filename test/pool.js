@@ -589,6 +589,39 @@ function flushTimers() {
     return new Promise((resolve) => setImmediate(resolve));
 }
 
+function invokePoolMethod({
+    socket = {},
+    id = 1,
+    method,
+    params,
+    ip = "127.0.0.2",
+    portData = global.config.ports[0]
+}) {
+    const replies = [];
+    const finals = [];
+    const pushes = [];
+
+    poolModule.handleMinerData(
+        socket,
+        id,
+        method,
+        params,
+        ip,
+        portData,
+        (error, result) => {
+            replies.push({ error, result });
+        },
+        (error, timeout) => {
+            finals.push({ error, timeout });
+        },
+        (body) => {
+            pushes.push(body);
+        }
+    );
+
+    return { replies, finals, pushes, socket };
+}
+
 test("default stratum miner can login, keepalive, and submit a valid share", async () => {
     const { runtime, database } = await startHarness();
     const client = new JsonLineClient(MAIN_PORT);
@@ -811,6 +844,223 @@ test("kawpow-style subscribe/authorize/submit flow works over the stratum wire f
         assert.equal(submitReply.result, true);
     } finally {
         await client.close();
+        await runtime.stop();
+    }
+});
+
+test("malformed login requests without params are rejected", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const first = invokePoolMethod({
+            method: "login",
+            params: null,
+            ip: "10.0.0.55"
+        });
+
+        assert.equal(first.replies.length, 0);
+        assert.deepEqual(first.finals, [{ error: "No params specified", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("unauthenticated getjob, submit, and keepalive requests are rejected", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        for (const method of ["getjob", "submit", "keepalive"]) {
+            const params = method === "submit" ? { id: "missing", job_id: "1", nonce: "00000001", result: VALID_RESULT } : { id: "missing" };
+            const reply = invokePoolMethod({ method, params });
+            assert.equal(reply.replies.length, 0, `${method} should not produce a non-final reply`);
+            assert.deepEqual(reply.finals, [{ error: "Unauthenticated", timeout: undefined }]);
+        }
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("the same socket cannot login twice", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const first = invokePoolMethod({
+            socket,
+            id: 1,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-first"
+            }
+        });
+
+        assert.equal(first.finals.length, 0);
+        assert.equal(first.replies.length, 1);
+        assert.equal(first.replies[0].error, null);
+        assert.equal(first.replies[0].result.status, "OK");
+        assert.ok(socket.miner_id);
+
+        const second = invokePoolMethod({
+            socket,
+            id: 2,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-second"
+            }
+        });
+
+        assert.equal(second.replies.length, 0);
+        assert.deepEqual(second.finals, [{ error: "No double login is allowed", timeout: undefined }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("malformed submit nonces are rejected and recorded as invalid shares", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 10,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-malformed"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 11,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "not-a-nonce",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(submitReply.finals.length, 0);
+        assert.equal(database.invalidShares.length, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("shares for jobs that have fallen out of the template history are rejected as expired", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 20,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-expired"
+            }
+        });
+        const originalJobId = loginReply.replies[0].result.job.job_id;
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const originalJob = miner.validJobs.toarray().find((job) => job.id === originalJobId);
+
+        for (let height = 102; height <= 113; height += 1) {
+            runtime.setTemplate(createBaseTemplate({
+                coin: "",
+                port: MAIN_PORT,
+                idHash: `main-template-${height}`,
+                height
+            }));
+        }
+
+        miner.validJobs.enq(originalJob);
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 21,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: originalJobId,
+                nonce: "00000005",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.equal(database.invalidShares.length, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("eth subscribe and authorize fail cleanly when no extranonces are available", async () => {
+    const { runtime } = await startHarness({ freeEthExtranonces: [] });
+
+    try {
+        const subscribeReply = invokePoolMethod({
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+        assert.equal(subscribeReply.replies.length, 0);
+        assert.deepEqual(subscribeReply.finals, [{
+            error: "Not enough extranoces. Switch to other pool node.",
+            timeout: undefined
+        }]);
+
+        const authorizeReply = invokePoolMethod({
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-worker"],
+            portData: global.config.ports[1]
+        });
+        assert.equal(authorizeReply.replies.length, 0);
+        assert.deepEqual(authorizeReply.finals, [{
+            error: "Not enough extranoces. Switch to other pool node.",
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("closing an eth stratum socket releases its extranonce for reuse", async () => {
+    const { runtime } = await startHarness({ freeEthExtranonces: [7] });
+    const firstClient = new JsonLineClient(ETH_PORT);
+    const secondClient = new JsonLineClient(ETH_PORT);
+
+    try {
+        await firstClient.connect();
+        const firstSubscribe = await firstClient.request({
+            id: 50,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+        assert.equal(firstSubscribe.error, null);
+        const extranonce = firstSubscribe.result[1];
+
+        await firstClient.close();
+        await flushTimers();
+
+        await secondClient.connect();
+        const secondSubscribe = await secondClient.request({
+            id: 51,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+        assert.equal(secondSubscribe.error, null);
+        assert.equal(secondSubscribe.result[1], extranonce);
+    } finally {
+        await firstClient.close();
+        await secondClient.close();
         await runtime.stop();
     }
 });
