@@ -15,6 +15,8 @@ const MAIN_PORT = 39001;
 const ETH_PORT = 39002;
 const MAIN_WALLET = "4".repeat(95);
 const ETH_WALLET = "5".repeat(95);
+const ALT_WALLET = "6".repeat(95);
+const THIRD_WALLET = "7".repeat(95);
 const VALID_RESULT = "f".repeat(64);
 const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
@@ -150,8 +152,13 @@ function createCircularBuffer() {
 
 function createSupportStub() {
     return {
+        emails: [],
+        rpcPortDaemonCalls: [],
+        rpcPortDaemon2Calls: [],
         circularBuffer: createCircularBuffer,
-        sendEmail() {},
+        sendEmail(to, subject, body) {
+            this.emails.push({ to, subject, body });
+        },
         formatDate() {
             return "2026-04-06 00:00:00";
         },
@@ -159,9 +166,11 @@ function createSupportStub() {
             callback(1);
         },
         rpcPortDaemon(_port, _method, _params, callback) {
+            this.rpcPortDaemonCalls.push({ port: _port, method: _method, params: _params });
             callback({ result: { status: "OK", block_hash: "11".repeat(32) } }, 200);
         },
         rpcPortDaemon2(_port, _method, _params, callback) {
+            this.rpcPortDaemon2Calls.push({ port: _port, method: _method, params: _params });
             callback({ result: true }, 200);
         }
     };
@@ -287,6 +296,9 @@ function createCoinFuncsStub() {
         },
         getAuxChainXTM() {
             return null;
+        },
+        getPortLastBlockHeader(_port, callback) {
+            callback(null, { height: 0 });
         },
         BlockTemplate: MockBlockTemplate,
         validatePlainAddress(address) {
@@ -596,6 +608,7 @@ function assertNoSocketData(socket, timeout = 150) {
 async function startHarness(extra = {}) {
     // Each test gets fresh in-memory service state.  The pool module itself is
     // reused, but its internal runtime state is reset by `startTestRuntime`.
+    global.support = createSupportStub();
     global.mysql = createMysqlStub();
     global.database = createDatabaseStub();
 
@@ -1955,6 +1968,536 @@ test("xmrig-proxy connections are not banned by the proxy worker limit path", as
         assert.equal(second.replies[0].error, null);
     } finally {
         global.config.pool.workerMax = 20;
+        await runtime.stop();
+    }
+});
+
+test("payment split logins reject percentages below the minimum", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}%0.05%${ALT_WALLET}`,
+                pass: "worker-split-too-small"
+            }
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{
+            error: "Your payment divide split 0.05 is below 0.1% and can't be processed",
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("payment split logins reject duplicate split addresses", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}%1%${ALT_WALLET}%2%${ALT_WALLET}`,
+                pass: "worker-split-duplicate"
+            }
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{
+            error: `You can't repeat payment split address ${ALT_WALLET}`,
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("payment split logins reject temporarily banned payout targets", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        runtime.getState().bannedTmpWallets[ALT_WALLET] = 1;
+
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
+                pass: "worker-split-banned"
+            }
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{
+            error: `Temporary (10 minutes max) banned payment address ${ALT_WALLET}`,
+            timeout: undefined
+        }]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("exchange addresses require a payment id", async () => {
+    const { runtime } = await startHarness();
+    const originalExchangeAddresses = global.coinFuncs.exchangeAddresses.slice();
+
+    try {
+        global.coinFuncs.exchangeAddresses = [MAIN_WALLET];
+
+        const reply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-exchange"
+            }
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{
+            error: "Exchange addresses need 64 hex character long payment IDs. Please specify it after your wallet address as follows after dot: Wallet.PaymentID",
+            timeout: undefined
+        }]);
+    } finally {
+        global.coinFuncs.exchangeAddresses = originalExchangeAddresses;
+        await runtime.stop();
+    }
+});
+
+test("perf login suffixes set fixed and dynamic difficulty modes correctly", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const fixedSocket = {};
+        invokePoolMethod({
+            socket: fixedSocket,
+            id: 190,
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}+perf`,
+                pass: "worker-perf-fixed",
+                algo: ["rx/0"],
+                "algo-perf": { "rx/0": 3 }
+            }
+        });
+        const fixedMiner = runtime.getState().activeMiners.get(fixedSocket.miner_id);
+        assert.equal(fixedMiner.fixed_diff, true);
+        assert.equal(fixedMiner.difficulty, 90);
+
+        const autoSocket = {};
+        invokePoolMethod({
+            socket: autoSocket,
+            id: 191,
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}+perfauto`,
+                pass: "worker-perf-auto",
+                algo: ["rx/0"],
+                "algo-perf": { "rx/0": 3 }
+            }
+        });
+        const autoMiner = runtime.getState().activeMiners.get(autoSocket.miner_id);
+        assert.equal(autoMiner.fixed_diff, false);
+        assert.equal(autoMiner.difficulty, 90);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("nicehash miners are clamped to the NiceHash minimum difficulty", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            socket,
+            id: 192,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-nicehash",
+                agent: "NiceHash/1.0.0"
+            }
+        });
+
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        assert.equal(miner.fixed_diff, true);
+        assert.equal(miner.difficulty, global.coinFuncs.niceHashDiff);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("a malformed login bans the IP for later connections in worker mode", async () => {
+    const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+
+    try {
+        cluster.isMaster = false;
+
+        const first = invokePoolMethod({
+            method: "login",
+            params: null,
+            ip: "10.0.0.77"
+        });
+        assert.deepEqual(first.finals, [{ error: "No params specified", timeout: undefined }]);
+
+        const second = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-after-ban"
+            },
+            ip: "10.0.0.77"
+        });
+        assert.deepEqual(second.finals, [{
+            error: "New connections from this IP address are temporarily suspended from mining (10 minutes max)",
+            timeout: undefined
+        }]);
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        await runtime.stop();
+    }
+});
+
+test("keepalived alias returns the same response as keepalive", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 193,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-keepalived"
+            }
+        });
+
+        const reply = invokePoolMethod({
+            socket,
+            id: 194,
+            method: "keepalived",
+            params: {
+                id: loginReply.replies[0].result.id
+            }
+        });
+
+        assert.deepEqual(reply.replies, [{ error: null, result: { status: "KEEPALIVED" } }]);
+        assert.equal(reply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("wallet notifications reject login and are rate limited", async () => {
+    const { runtime } = await startHarness();
+    const notification = "Upgrade required";
+
+    try {
+        runtime.getState().notifyAddresses[MAIN_WALLET] = notification;
+
+        const first = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-notify-first"
+            }
+        });
+        assert.deepEqual(first.finals, [{
+            error: `${notification} (miner will connect after several attempts)`,
+            timeout: undefined
+        }]);
+
+        const second = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-notify-second"
+            }
+        });
+        assert.equal(second.replies[0].error, null);
+        assert.equal(second.replies[0].result.status, "OK");
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("trusted miners can take the trusted-share fast path", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const socket = {};
+
+    try {
+        global.config.pool.trustedMiners = true;
+        crypto.randomBytes = () => Buffer.from([255]);
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 195,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-trusted"
+            }
+        });
+
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        state.walletTrust[MAIN_WALLET] = 1000;
+        miner.trust.trust = 1000;
+        miner.trust.check_height = 0;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 196,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000b",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(runtime.getState().shareStats.trustedShares, 1);
+        assert.equal(runtime.getState().shareStats.normalShares, 0);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        await runtime.stop();
+    }
+});
+
+test("trust check_height forces verification instead of trusting the same-height share", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const socket = {};
+
+    try {
+        global.config.pool.trustedMiners = true;
+        crypto.randomBytes = () => Buffer.from([255]);
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 197,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-trust-check-height"
+            }
+        });
+
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        state.walletTrust[MAIN_WALLET] = 1000;
+        miner.trust.trust = 1000;
+        miner.trust.check_height = job.height;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 198,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000c",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(runtime.getState().shareStats.trustedShares, 0);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        await runtime.stop();
+    }
+});
+
+test("successful main-chain block candidates are stored as blocks", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            {
+                ...createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-block-store", height: 101 }),
+                difficulty: 1,
+                xmr_difficulty: 1,
+                xtm_difficulty: Number.MAX_SAFE_INTEGER
+            },
+            createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
+        ]
+    });
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 199,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-block-main"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 200,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: loginReply.replies[0].result.job.job_id,
+                nonce: "0000000d",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(database.blocks.length, 1);
+        assert.equal(database.blocks[0].height, 101);
+        assert.equal(global.support.rpcPortDaemonCalls.length >= 1, true);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("successful alt-chain block candidates are stored as alt blocks", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
+            {
+                ...createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-alt-block-store", height: 201 }),
+                difficulty: 5
+            }
+        ]
+    });
+    const client = new JsonLineClient(ETH_PORT);
+
+    try {
+        await client.connect();
+
+        await client.request({
+            id: 201,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+
+        const authorizeReply = await client.request({
+            id: 202,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-block-alt"]
+        });
+        assert.equal(authorizeReply.error, null);
+
+        const targetPush = await client.waitFor((message) => message.method === "mining.set_target");
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+
+        const submitReply = await client.request({
+            id: 203,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000002",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ab".repeat(32)}`
+            ]
+        });
+
+        assert.equal(typeof targetPush.params[0], "string");
+        assert.equal(submitReply.error, null);
+        assert.equal(submitReply.result, true);
+        assert.equal(database.altBlocks.length, 1);
+        assert.equal(database.altBlocks[0].payload.port, ETH_PORT);
+        assert.equal(global.support.rpcPortDaemon2Calls.length >= 1, true);
+    } finally {
+        await client.close();
+        await runtime.stop();
+    }
+});
+
+test("block submission failures reset wallet trust even when the share stays accepted", async () => {
+    const { runtime } = await startHarness({
+        templates: [
+            createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
+            {
+                ...createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-trust-reset", height: 201 }),
+                difficulty: 5
+            }
+        ]
+    });
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
+    const socket = {};
+
+    try {
+        global.config.pool.trustedMiners = true;
+        crypto.randomBytes = () => Buffer.from([255]);
+        global.support.rpcPortDaemon2 = function rpcPortDaemon2Failure(port, method, params, callback) {
+            this.rpcPortDaemon2Calls.push({ port, method, params });
+            callback({ result: "high-hash" }, 200);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 204,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 205,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-trust-reset"],
+            portData: global.config.ports[1]
+        });
+
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
+        state.walletTrust[ETH_WALLET] = 1000;
+        miner.trust.trust = 1000;
+        miner.trust.check_height = 0;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 206,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000003",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ab".repeat(32)}`
+            ],
+            portData: global.config.ports[1]
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
+        assert.equal(miner.trust.trust, 1);
+        assert.equal(state.walletTrust[ETH_WALLET], 0);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
         await runtime.stop();
     }
 });
