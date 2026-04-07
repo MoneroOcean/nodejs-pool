@@ -6,7 +6,6 @@
 // here with in-memory fakes so the suite can run fully offline.
 
 const net = require("node:net");
-const Module = require("node:module");
 
 const MAIN_PORT = 39001;
 const ETH_PORT = 39002;
@@ -17,14 +16,6 @@ const THIRD_WALLET = "7".repeat(95);
 const VALID_RESULT = "f".repeat(64);
 const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
-
-function installRequireStubs() {
-    const originalLoad = Module._load;
-    Module._load = function patchedLoad(request, parent, isMain) {
-        if (request === "wallet-address-validator") return { validate: () => true };
-        return originalLoad(request, parent, isMain);
-    };
-}
 
 function createCircularBuffer() {
     const values = [];
@@ -384,7 +375,6 @@ function installTestGlobals() {
 }
 
 installTestGlobals();
-installRequireStubs();
 const poolModule = require("../lib/pool.js");
 
 class JsonLineClient {
