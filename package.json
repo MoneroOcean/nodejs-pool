@@ -31,6 +31,7 @@
     "node-lmdb": "0.10.1",
     "promise-mysql": "3.0.0",
     "protocol-buffers": "5.0.0",
+    "request": "^2.88.2",
     "sprintf-js": "1.1.3"
   }
 }
