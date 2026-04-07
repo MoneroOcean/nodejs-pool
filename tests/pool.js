@@ -21,106 +21,10 @@ const VALID_RESULT = "f".repeat(64);
 const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
 
-function createBignumShim() {
-    // The real project depends on the native `bignum` package.  The harness
-    // only needs a very small subset of its API, so this BigInt-backed shim is
-    // enough to let `lib/pool.js` execute in environments without native addons.
-    class BigNumShim {
-        constructor(value, base = 10) {
-            if (value instanceof BigNumShim) {
-                this.value = value.value;
-            } else if (typeof value === "bigint") {
-                this.value = value;
-            } else if (Buffer.isBuffer(value)) {
-                this.value = BigNumShim.fromBuffer(value).value;
-            } else if (typeof value === "number") {
-                this.value = BigInt(Math.trunc(value));
-            } else if (typeof value === "string") {
-                this.value = base === 16 ? BigInt(`0x${value}`) : BigInt(value);
-            } else {
-                this.value = BigInt(value || 0);
-            }
-        }
-
-        div(other) {
-            return new BigNumShim(this.value / toBigInt(other));
-        }
-
-        ge(other) {
-            return this.value >= toBigInt(other);
-        }
-
-        lt(other) {
-            return this.value < toBigInt(other);
-        }
-
-        toNumber() {
-            return Number(this.value);
-        }
-
-        toString(base = 10) {
-            return this.value.toString(base);
-        }
-
-        toBuffer(options = {}) {
-            const endian = options.endian || "big";
-            const size = options.size || Math.max(1, Math.ceil(this.value.toString(16).length / 2));
-            let hex = this.value.toString(16);
-            if (hex.length % 2) hex = `0${hex}`;
-            let buffer = Buffer.from(hex, "hex");
-            if (buffer.length < size) {
-                buffer = Buffer.concat([Buffer.alloc(size - buffer.length), buffer]);
-            } else if (buffer.length > size) {
-                buffer = buffer.slice(buffer.length - size);
-            }
-            if (endian === "little") buffer = Buffer.from(buffer).reverse();
-            return buffer;
-        }
-
-        static fromBuffer(buffer, options = {}) {
-            const endian = options.endian || "big";
-            const normalized = endian === "little" ? Buffer.from(buffer).reverse() : Buffer.from(buffer);
-            const hex = normalized.toString("hex") || "00";
-            return new BigNumShim(BigInt(`0x${hex}`));
-        }
-    }
-
-    function toBigInt(value) {
-        return value instanceof BigNumShim ? value.value : BigInt(value);
-    }
-
-    function bignum(value, base) {
-        return new BigNumShim(value, base);
-    }
-
-    bignum.fromBuffer = BigNumShim.fromBuffer;
-    return bignum;
-}
-
-const bignum = createBignumShim();
-
 function installRequireStubs() {
     const originalLoad = Module._load;
     Module._load = function patchedLoad(request, parent, isMain) {
-        if (request === "bignum") return bignum;
-        if (request === "debug") return () => () => {};
         if (request === "wallet-address-validator") return { validate: () => true };
-        if (request === "async") {
-            return {
-                each(list, iteratee, done) {
-                    Promise.all((list || []).map((item) => Promise.resolve(iteratee(item)))).then(() => done && done());
-                },
-                eachSeries(list, iteratee, done) {
-                    (async () => {
-                        for (const item of list || []) {
-                            const result = await new Promise((resolve) => iteratee(item, resolve));
-                            if (result) return done && done(result);
-                        }
-                        return done && done();
-                    })();
-                }
-            };
-        }
         return originalLoad(request, parent, isMain);
     };
 }
@@ -274,7 +178,7 @@ function createCoinFuncsStub() {
         exchangeAddresses: [],
         niceHashDiff: 1000,
         baseDiff() {
-            return bignum("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16);
+            return BigInt("0x" + "f".repeat(64));
         },
         baseRavenDiff() {
             return 100;
