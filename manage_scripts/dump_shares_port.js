@@ -1,5 +1,6 @@
 "use strict";
 
+let range = require('range');
 const argv = require('minimist')(process.argv.slice(2));
 
 if (!argv.port) {
@@ -24,7 +25,7 @@ require("../init_mini.js").init(function() {
                 let txn = global.database.env.beginTxn({readOnly: true});
 
                 let cursor = new global.database.lmdb.Cursor(txn, global.database.shareDB);
-                for (let blockID = lastBlock; blockID > lastBlock - depth; --blockID) {
+                range.range(lastBlock, lastBlock - depth, -1).forEach(function (blockID) {
                         for (let found = (cursor.goToRange(parseInt(blockID)) === blockID); found; found = cursor.goToNextDup()) {
                                 cursor.getCurrentBinary(function(key, data){  // jshint ignore:line
                                         let shareData = global.protos.Share.decode(data);
@@ -34,7 +35,7 @@ require("../init_mini.js").init(function() {
                                         }
                                 });
                         }
-                }
+                });
                 cursor.close();
                 txn.commit();
                 process.exit(0);
