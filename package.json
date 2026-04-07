@@ -12,6 +12,7 @@
   "dependencies": {
     "apicache": "1.2.1",
     "async": "3.2.2",
+    "bignum": "^0.13.1",
     "body-parser": "^1.16.0",
     "circular-buffer": "1.0.2",
     "cluster": "0.7.7",
