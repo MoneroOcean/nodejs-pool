@@ -5,7 +5,12 @@
 // still loads its normal dependencies, but all external services are replaced
 // here with in-memory fakes so the suite can run fully offline.
 
+const fs = require("node:fs");
 const net = require("node:net");
+const path = require("node:path");
+const protobuf = require("protocol-buffers");
+
+const supportFactory = require("../lib/support.js");
 
 const MAIN_PORT = 39001;
 const ETH_PORT = 39002;
@@ -16,6 +21,7 @@ const THIRD_WALLET = "7".repeat(95);
 const VALID_RESULT = "f".repeat(64);
 const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
+const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "data.proto")));
 
 function createCircularBuffer() {
     const values = [];
@@ -39,30 +45,25 @@ function createCircularBuffer() {
     };
 }
 
-function createSupportStub() {
-    return {
-        emails: [],
-        rpcPortDaemonCalls: [],
-        rpcPortDaemon2Calls: [],
-        circularBuffer: createCircularBuffer,
-        sendEmail(to, subject, body) {
-            this.emails.push({ to, subject, body });
-        },
-        formatDate() {
-            return "2026-04-06 00:00:00";
-        },
-        getCoinHashFactor(_coin, callback) {
-            callback(1);
-        },
-        rpcPortDaemon(_port, _method, _params, callback) {
-            this.rpcPortDaemonCalls.push({ port: _port, method: _method, params: _params });
-            callback({ result: { status: "OK", block_hash: "11".repeat(32) } }, 200);
-        },
-        rpcPortDaemon2(_port, _method, _params, callback) {
-            this.rpcPortDaemon2Calls.push({ port: _port, method: _method, params: _params });
-            callback({ result: true }, 200);
-        }
+function createSupportHarness() {
+    const support = supportFactory();
+    support.emails = [];
+    support.rpcPortDaemonCalls = [];
+    support.rpcPortDaemon2Calls = [];
+
+    support.sendEmail = function sendEmail(to, subject, body) {
+        this.emails.push({ to, subject, body });
     };
+    support.rpcPortDaemon = function rpcPortDaemon(port, method, params, callback) {
+        this.rpcPortDaemonCalls.push({ port, method, params });
+        callback({ result: { status: "OK", block_hash: "11".repeat(32) } }, 200);
+    };
+    support.rpcPortDaemon2 = function rpcPortDaemon2(port, method, params, callback) {
+        this.rpcPortDaemon2Calls.push({ port, method, params });
+        callback({ result: true }, 200);
+    };
+
+    return support;
 }
 
 function createMysqlStub() {
@@ -76,10 +77,20 @@ function createMysqlStub() {
             if (sql.includes("FROM users")) return Promise.resolve([]);
             if (sql.includes("FROM pool_workers")) return Promise.resolve([{ id: 1 }]);
             if (sql.includes("MAX(id) as maxId")) return Promise.resolve([{ maxId: 1 }]);
+            if (sql.includes("coinHashFactor")) return Promise.resolve([{ item_value: "1" }]);
 
             return Promise.resolve([]);
         }
     };
+}
+
+function decodePayload(type, payload) {
+    if (!Buffer.isBuffer(payload)) return payload;
+    try {
+        return global.protos[type].decode(payload);
+    } catch (_error) {
+        return payload;
+    }
 }
 
 function createDatabaseStub() {
@@ -92,28 +103,17 @@ function createDatabaseStub() {
         sendQueue: [],
         initEnv() {},
         storeShare(height, payload) {
-            this.shares.push({ height, payload });
+            this.shares.push({ height, payload: decodePayload("Share", payload) });
         },
         storeInvalidShare(payload) {
-            this.invalidShares.push(payload);
+            this.invalidShares.push(decodePayload("InvalidShare", payload));
         },
         storeBlock(height, payload) {
-            this.blocks.push({ height, payload });
+            this.blocks.push({ height, payload: decodePayload("Block", payload) });
         },
         storeAltBlock(height, payload) {
-            this.altBlocks.push({ height, payload });
+            this.altBlocks.push({ height, payload: decodePayload("AltBlock", payload) });
         }
-    };
-}
-
-function createProtoStub() {
-    const passthrough = { encode(value) { return value; } };
-    return {
-        POOLTYPE: { PPLNS: 0, PPS: 1, SOLO: 2, PROP: 3 },
-        InvalidShare: passthrough,
-        Share: passthrough,
-        Block: passthrough,
-        AltBlock: passthrough
     };
 }
 
@@ -365,10 +365,10 @@ function installTestGlobals() {
         ]
     };
 
-    global.support = createSupportStub();
+    global.support = createSupportHarness();
     global.mysql = createMysqlStub();
     global.database = createDatabaseStub();
-    global.protos = createProtoStub();
+    global.protos = REAL_PROTOS;
     global.coinFuncs = createCoinFuncsStub();
     global.argv = {};
     global.__poolTestMode = true;
@@ -522,7 +522,7 @@ function waitForSocketJson(socket, timeout = 1000) {
 }
 
 async function startHarness(extra = {}) {
-    global.support = createSupportStub();
+    global.support = createSupportHarness();
     global.mysql = createMysqlStub();
     global.database = createDatabaseStub();
 
