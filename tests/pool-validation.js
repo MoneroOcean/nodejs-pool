@@ -118,6 +118,55 @@ test("throttled shares return the explicit increase-difficulty message", async (
     }
 });
 
+test("submit accepts shares when the verifier returns the hash in reverse byte order", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+
+    try {
+        const reversedResult = Buffer.from(VALID_RESULT, "hex").reverse();
+
+        global.coinFuncs.slowHashBuff = function reversedSlowHashBuff() {
+            return Buffer.from(reversedResult);
+        };
+        global.coinFuncs.slowHashAsync = function reversedSlowHashAsync(_buffer, _blockTemplate, _wallet, callback) {
+            callback(reversedResult.toString("hex"));
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 132,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-reversed-hash"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 133,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000b",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
 test("wallet bans propagated through messageHandler reject later logins", async () => {
     const { runtime } = await startHarness();
     const cluster = require("cluster");
