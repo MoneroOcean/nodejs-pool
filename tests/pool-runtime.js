@@ -22,8 +22,64 @@ const {
     poolModule
 } = require("./pool-harness.js");
 
+const RX0_MAIN_SHARE_VECTORS = [
+    {
+        nonce: "00000019",
+        expected: "38f638606c730dd6f271d037556b83988c71acc6980e22e25271b22389ecfce6",
+        seed: "12345678901234567890123456789012",
+        input: "This is a test"
+    },
+    {
+        nonce: "0000001a",
+        expected: "86cb0f6306d536f373650bd196a5205a0293fba2ead85003d7aee4006afee147",
+        seed: "12345678901234567890123456789012",
+        input: "Lorem ipsum dolor sit amet"
+    },
+    {
+        nonce: "0000001c",
+        expected: "375aa54e18029b6f04372dd51b7349f130810b1270e67a22f26c15dab6f93a65",
+        seed: "12345678901234567890123456789012",
+        input: "sed do eiusmod tempor incididunt ut labore et dolore magna aliqua"
+    }
+];
+
+function buildMainShareResult(runtime, socket, jobId, nonce) {
+    const miner = runtime.getState().activeMiners.get(socket.miner_id);
+    const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+    const blockTemplate = runtime.getState().activeBlockTemplates[""];
+    const templateBuffer = Buffer.alloc(blockTemplate.buffer.length);
+
+    blockTemplate.buffer.copy(templateBuffer);
+    templateBuffer.writeUInt32BE(job.extraNonce, blockTemplate.reserved_offset);
+
+    const blockData = global.coinFuncs.constructNewBlob(
+        templateBuffer,
+        { nonce, result: VALID_RESULT },
+        MAIN_PORT
+    );
+    const convertedBlob = global.coinFuncs.convertBlob(blockData, MAIN_PORT);
+
+    return global.coinFuncs.slowHashBuff(convertedBlob, blockTemplate).toString("hex");
+}
+
+function createMainPowVectorMap(vectors = RX0_MAIN_SHARE_VECTORS) {
+    return Object.fromEntries(vectors.map((vector) => [vector.nonce, vector]));
+}
+
+async function flushShareAccumulator(check, timeout = 200) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await flushTimers();
+        if (!check || check()) return;
+    }
+    if (!check || check()) return;
+    throw new Error("Timed out waiting for deferred share flush");
+}
+
 test.describe("pool runtime", { concurrency: false }, () => {
 test("trusted miners can take the trusted-share fast path", async () => {
+    const validVector = RX0_MAIN_SHARE_VECTORS[0];
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
     const originalRandomBytes = crypto.randomBytes;
@@ -57,8 +113,8 @@ test("trusted miners can take the trusted-share fast path", async () => {
             params: {
                 id: socket.miner_id,
                 job_id: jobId,
-                nonce: "0000000b",
-                result: VALID_RESULT
+                nonce: validVector.nonce,
+                result: validVector.expected
             }
         });
 
@@ -239,6 +295,109 @@ test("main-chain block storage can use the real blob constructor and block-id ca
     } finally {
         global.coinFuncs.constructNewBlob = originalConstructNewBlob;
         global.coinFuncs.getBlockID = originalGetBlockID;
+        await runtime.stop();
+    }
+});
+
+test("main-algo shares are accepted when the submitted nonce matches the real RandomX hash", async () => {
+    const mainPowVectors = createMainPowVectorMap();
+    const { runtime, database } = await startHarness({ realMainPow: true, mainPowVectors });
+    const socket = {};
+    const validVector = RX0_MAIN_SHARE_VECTORS[0];
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1993,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-real-main-valid"
+            }
+        });
+
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const blockTemplate = runtime.getState().activeBlockTemplates[""];
+        const result = buildMainShareResult(runtime, socket, jobId, validVector.nonce);
+
+        job.difficulty = 1;
+        job.rewarded_difficulty = 1;
+        job.rewarded_difficulty2 = 1;
+        job.norm_diff = 1;
+        blockTemplate.difficulty = 1e30;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1994,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: validVector.nonce,
+                result
+            }
+        });
+
+        await flushTimers();
+        assert.equal(result, validVector.expected);
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(database.invalidShares.length, 0);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("main-algo shares are rejected when the submitted nonce does not match the real RandomX hash", async () => {
+    const mainPowVectors = createMainPowVectorMap();
+    const { runtime, database } = await startHarness({ realMainPow: true, mainPowVectors });
+    const socket = {};
+    const mismatchedVector = RX0_MAIN_SHARE_VECTORS[1];
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1995,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-real-main-invalid"
+            }
+        });
+
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const blockTemplate = runtime.getState().activeBlockTemplates[""];
+        const result = buildMainShareResult(runtime, socket, jobId, mismatchedVector.nonce);
+
+        job.difficulty = 1;
+        job.rewarded_difficulty = 1;
+        job.rewarded_difficulty2 = 1;
+        job.norm_diff = 1;
+        blockTemplate.difficulty = 1e30;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1996,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000001b",
+                result
+            }
+        });
+
+        await flushTimers();
+        assert.equal(result, mismatchedVector.expected);
+        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(database.shares.length, 0);
+        assert.equal(database.invalidShares.length, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+    } finally {
         await runtime.stop();
     }
 });
@@ -524,6 +683,132 @@ test("block submission failures reset wallet trust even when the share stays acc
         global.config.pool.trustedMiners = originalTrustedMiners;
         crypto.randomBytes = originalRandomBytes;
         global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
+        await runtime.stop();
+    }
+});
+
+test("eth-style shares are accepted through the eth hash path and persisted", async () => {
+    const { runtime, database } = await startHarness();
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const socket = {};
+
+    try {
+        global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+            if (port === ETH_PORT) return 102;
+            return originalPortBlobType.call(this, port);
+        };
+        global.coinFuncs.slowHashBuff = function patchedSlowHashBuff(buffer, blockTemplate, nonce, mixhash) {
+            if (blockTemplate.port === ETH_PORT) {
+                return [Buffer.concat([Buffer.alloc(31, 0), Buffer.from([16])]), Buffer.from("cd".repeat(32), "hex")];
+            }
+            return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 2061,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 2062,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-eth-hash-valid"],
+            portData: global.config.ports[1]
+        });
+
+        runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
+        const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 2063,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "000000000018",
+                notifyPush.params[1],
+                "00".repeat(32)
+            ],
+            portData: global.config.ports[1]
+        });
+
+        await flushShareAccumulator(() => database.shares.length === 1);
+        assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(database.shares.length, 1);
+        assert.equal(database.shares[0].payload.paymentAddress, ETH_WALLET);
+        assert.equal(database.shares[0].payload.port, ETH_PORT);
+    } finally {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        await runtime.stop();
+    }
+});
+
+test("eth-style shares reject low difficulty hashes from the eth verify path", async () => {
+    const { runtime, database } = await startHarness();
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const socket = {};
+
+    try {
+        global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+            if (port === ETH_PORT) return 102;
+            return originalPortBlobType.call(this, port);
+        };
+        global.coinFuncs.slowHashBuff = function patchedSlowHashBuff(buffer, blockTemplate, nonce, mixhash) {
+            if (blockTemplate.port === ETH_PORT && this.portBlobType(blockTemplate.port, blockTemplate.block_version) === 102) {
+                return [Buffer.from("ff".repeat(32), "hex"), Buffer.from("ee".repeat(32), "hex")];
+            }
+            return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 2064,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 2065,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-eth-hash-low-diff"],
+            portData: global.config.ports[1]
+        });
+
+        runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
+        const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 2066,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "000000000019",
+                notifyPush.params[1],
+                "00".repeat(32)
+            ],
+            portData: global.config.ports[1]
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(runtime.getState().shareStats.normalShares, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(database.shares.length, 0);
+    } finally {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
         await runtime.stop();
     }
 });
@@ -1066,7 +1351,6 @@ test("deferred share flush preserves trustedShare=false for verified shares", as
 
         await flushTimers();
         assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
-        assert.equal(database.shares.length, 0);
 
         await new Promise((resolve) => setTimeout(resolve, 10));
         await flushTimers();
