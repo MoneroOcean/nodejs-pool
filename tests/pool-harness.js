@@ -23,28 +23,6 @@ const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
 const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "data.proto")));
 
-function createCircularBuffer() {
-    const values = [];
-    return {
-        enq(value) {
-            values.push(value);
-            if (values.length > 10) values.shift();
-        },
-        deq() {
-            return values.shift();
-        },
-        get(index) {
-            return values[index];
-        },
-        size() {
-            return values.length;
-        },
-        toarray() {
-            return values.slice();
-        }
-    };
-}
-
 function createSupportHarness() {
     const support = supportFactory();
     support.emails = [];
@@ -118,6 +96,8 @@ function createDatabaseStub() {
 }
 
 function createCoinFuncsStub() {
+    const Coin = require("../lib/coins/xmr.js");
+    const realCoinFuncs = new Coin({});
     const portToCoin = {
         [MAIN_PORT]: "",
         [ETH_PORT]: "ETH"
@@ -155,6 +135,7 @@ function createCoinFuncsStub() {
     }
 
     return {
+        ...realCoinFuncs,
         uniqueWorkerId: 0,
         uniqueWorkerIdBits: 0,
         blockedAddresses: [],
@@ -197,78 +178,36 @@ function createCoinFuncsStub() {
         algoShortTypeStr(port) {
             return portToAlgo[port];
         },
-        algoCheck() {
-            return true;
-        },
-        algoMainCheck(algos) {
-            return "rx/0" in algos;
-        },
-        algoPrevMainCheck() {
-            return false;
-        },
-        getDefaultAlgos() {
-            return ["rx/0"];
-        },
-        getDefaultAlgosPerf() {
-            return { "rx/0": 1 };
-        },
-        getPrevAlgosPerf() {
-            return { "rx/0": 1 };
-        },
+        algoCheck: realCoinFuncs.algoCheck,
+        algoMainCheck: realCoinFuncs.algoMainCheck,
+        algoPrevMainCheck: realCoinFuncs.algoPrevMainCheck,
+        getDefaultAlgos: realCoinFuncs.getDefaultAlgos,
+        getDefaultAlgosPerf: realCoinFuncs.getDefaultAlgosPerf,
+        getPrevAlgosPerf: realCoinFuncs.getPrevAlgosPerf,
         convertAlgosToCoinPerf(algosPerf) {
             const coinPerf = {};
             if ("rx/0" in algosPerf) coinPerf[""] = algosPerf["rx/0"];
             if ("kawpow" in algosPerf) coinPerf.ETH = algosPerf.kawpow;
             return coinPerf;
         },
-        get_miner_agent_not_supported_algo() {
-            return false;
-        },
-        get_miner_agent_warning_notification() {
-            return false;
-        },
-        is_miner_agent_no_haven_support() {
-            return false;
-        },
-        isMinerSupportAlgo(algo, algos) {
-            return algo in algos;
-        },
+        get_miner_agent_not_supported_algo: realCoinFuncs.get_miner_agent_not_supported_algo,
+        get_miner_agent_warning_notification: realCoinFuncs.get_miner_agent_warning_notification,
+        is_miner_agent_no_haven_support: realCoinFuncs.is_miner_agent_no_haven_support,
+        isMinerSupportAlgo: realCoinFuncs.isMinerSupportAlgo,
         portBlobType(port) {
             return portToBlob[port];
         },
-        blobTypeGrin(blobType) {
-            return blobType === 8 || blobType === 9 || blobType === 10 || blobType === 12 || blobType === 107;
-        },
-        blobTypeRvn() {
-            return arguments[0] === 101;
-        },
-        blobTypeEth(blobType) {
-            return blobType === 102;
-        },
-        blobTypeErg() {
-            return false;
-        },
-        blobTypeDero() {
-            return false;
-        },
-        blobTypeRtm() {
-            return false;
-        },
-        blobTypeKcn() {
-            return false;
-        },
-        blobTypeXTM_T() {
-            return false;
-        },
-        blobTypeXTM_C() {
-            return false;
-        },
-        nonceSize(blobType) {
-            return blobType === 101 || blobType === 102 ? 8 : 4;
-        },
-        c29ProofSize() {
-            return 32;
-        },
+        blobTypeGrin: realCoinFuncs.blobTypeGrin,
+        blobTypeRvn: realCoinFuncs.blobTypeRvn,
+        blobTypeEth: realCoinFuncs.blobTypeEth,
+        blobTypeErg: realCoinFuncs.blobTypeErg,
+        blobTypeDero: realCoinFuncs.blobTypeDero,
+        blobTypeRtm: realCoinFuncs.blobTypeRtm,
+        blobTypeKcn: realCoinFuncs.blobTypeKcn,
+        blobTypeXTM_T: realCoinFuncs.blobTypeXTM_T,
+        blobTypeXTM_C: realCoinFuncs.blobTypeXTM_C,
+        nonceSize: realCoinFuncs.nonceSize,
+        c29ProofSize: realCoinFuncs.c29ProofSize,
         blobTypeStr(port) {
             return this.portBlobType(port).toString();
         },
@@ -328,6 +267,9 @@ function installTestGlobals() {
         pool_id: 1,
         worker_num: 1,
         eth_pool_support: false,
+        payout: {
+            bestExchange: "test"
+        },
         general: {
             adminEmail: "admin@example.com",
             allowStuckPoolKill: false
