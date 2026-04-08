@@ -171,6 +171,161 @@ test("successful main-chain block candidates are stored as blocks", async () => 
     }
 });
 
+test("main-chain candidates that only satisfy the XMR threshold submit only to the XMR daemon", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            {
+                ...createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-xmr-only", height: 101 }),
+                difficulty: 1
+            },
+            createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
+        ]
+    });
+    const socket = {};
+
+    try {
+        const activeTemplate = runtime.getState().activeBlockTemplates[""];
+        activeTemplate.difficulty = 1;
+        activeTemplate.xmr_difficulty = 1;
+        activeTemplate.xtm_difficulty = Number.MAX_SAFE_INTEGER;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 200,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-block-xmr-only"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 201,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: loginReply.replies[0].result.job.job_id,
+                nonce: "00000012",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_PORT + 2]);
+        assert.equal(database.blocks.length, 1);
+        assert.equal(database.altBlocks.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("main-chain candidates that satisfy both thresholds submit to both XMR and XTM daemons", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            {
+                ...createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-dual-submit", height: 101 }),
+                difficulty: 1
+            },
+            createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
+        ]
+    });
+    const socket = {};
+
+    try {
+        const activeTemplate = runtime.getState().activeBlockTemplates[""];
+        activeTemplate.difficulty = 1;
+        activeTemplate.xmr_difficulty = 1;
+        activeTemplate.xtm_difficulty = 1;
+        activeTemplate.xtm_height = 701;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 202,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-block-dual-submit"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 203,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: loginReply.replies[0].result.job.job_id,
+                nonce: "00000013",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_PORT + 2, MAIN_PORT]);
+        assert.equal(database.blocks.length, 1);
+        assert.equal(database.altBlocks.length, 1);
+        assert.equal(database.altBlocks[0].payload.port, 18144);
+        assert.equal(database.altBlocks[0].payload.height, 701);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("low-diff main-port block candidates still submit to both daemons and notify admin", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            {
+                ...createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-low-diff-submit", height: 101 }),
+                difficulty: 1
+            },
+            createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
+        ]
+    });
+    const socket = {};
+
+    try {
+        const activeTemplate = runtime.getState().activeBlockTemplates[""];
+        activeTemplate.difficulty = 1;
+        activeTemplate.xmr_difficulty = 2;
+        activeTemplate.xtm_difficulty = 2;
+        activeTemplate.xtm_height = 702;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 204,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-block-low-diff-fallback"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 205,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: loginReply.replies[0].result.job.job_id,
+                nonce: "00000014",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_PORT + 2, MAIN_PORT]);
+        assert.equal(global.support.emails.some((entry) => entry.subject.includes("low diff block")), true);
+        assert.equal(database.blocks.length, 1);
+        assert.equal(database.altBlocks.length, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("successful alt-chain block candidates are stored as alt blocks", async () => {
     const { runtime, database } = await startHarness({
         templates: [
@@ -220,6 +375,9 @@ test("successful alt-chain block candidates are stored as alt blocks", async () 
         assert.equal(database.altBlocks.length, 1);
         assert.equal(database.altBlocks[0].payload.port, ETH_PORT);
         assert.equal(global.support.rpcPortDaemon2Calls.length >= 1, true);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 0);
+        assert.equal(global.support.rpcPortDaemon2Calls[0].method, "");
+        assert.equal(global.support.rpcPortDaemon2Calls[0].params.method, "submitblock");
     } finally {
         await client.close();
         await runtime.stop();

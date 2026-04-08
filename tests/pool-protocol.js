@@ -13,7 +13,8 @@ const {
     startHarness,
     flushTimers,
     invokePoolMethod,
-    createBaseTemplate
+    createBaseTemplate,
+    poolModule
 } = require("./pool-harness.js");
 
 test.describe("pool protocol", { concurrency: false }, () => {
@@ -318,6 +319,151 @@ test("kawpow submit accepts hex nonce and mixhash values containing alphabetic d
         assert.equal(submitReply.result, true);
     } finally {
         await client.close();
+        await runtime.stop();
+    }
+});
+
+test("getjob can switch a miner from default jobs to kawpow-style jobs when algo perf changes", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 46,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-switch-coin"
+            }
+        });
+
+        assert.equal(loginReply.replies[0].error, null);
+        assert.equal(typeof loginReply.replies[0].result.job, "object");
+        assert.equal(Array.isArray(loginReply.replies[0].result.job), false);
+        assert.equal(loginReply.replies[0].result.job.job_id !== undefined, true);
+
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        miner.curr_coin = undefined;
+        miner.curr_coin_time = 0;
+        poolModule.setTestCoinHashFactor("ETH", 5);
+
+        const getjobReply = invokePoolMethod({
+            socket,
+            id: 47,
+            method: "getjob",
+            params: {
+                id: socket.miner_id,
+                algo: ["rx/0", "kawpow"],
+                "algo-perf": {
+                    "rx/0": 1,
+                    kawpow: 2
+                },
+                "algo-min-time": 0
+            }
+        });
+
+        assert.equal(getjobReply.replies[0].error, null);
+        assert.equal(Array.isArray(getjobReply.replies[0].result), true);
+        assert.equal(getjobReply.replies[0].result.length, 7);
+        assert.equal(runtime.getState().activeMiners.get(socket.miner_id).curr_coin, "ETH");
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("main-coin jobs stay valid when only the kawpow template rotates", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 48,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-main-template-isolation"
+            }
+        });
+
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        runtime.setTemplate(createBaseTemplate({
+            coin: "ETH",
+            port: ETH_PORT,
+            idHash: "eth-template-rotated",
+            height: 202
+        }));
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 49,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000010",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("kawpow jobs stay valid when only the main template rotates", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            socket,
+            id: 50,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 51,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-eth-template-isolation"],
+            portData: global.config.ports[1]
+        });
+
+        const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
+
+        runtime.setTemplate(createBaseTemplate({
+            coin: "",
+            port: MAIN_PORT,
+            idHash: "main-template-rotated",
+            height: 102
+        }));
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 52,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000011",
+                `0x${notifyPush.params[1]}`,
+                `0x${"cd".repeat(32)}`
+            ],
+            portData: global.config.ports[1]
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+    } finally {
         await runtime.stop();
     }
 });
