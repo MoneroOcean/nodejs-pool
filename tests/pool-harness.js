@@ -171,6 +171,7 @@ function createCoinFuncsStub() {
 
     return {
         ...realCoinFuncs,
+        __realCoinFuncs: realCoinFuncs,
         uniqueWorkerId: 0,
         uniqueWorkerIdBits: 0,
         blockedAddresses: [],

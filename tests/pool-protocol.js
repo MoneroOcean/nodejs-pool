@@ -7,6 +7,7 @@ const {
     MAIN_PORT,
     ETH_PORT,
     MAIN_WALLET,
+    ALT_WALLET,
     ETH_WALLET,
     VALID_RESULT,
     JsonLineClient,
@@ -16,6 +17,11 @@ const {
     createBaseTemplate,
     poolModule
 } = require("./pool-harness.js");
+
+async function flushShareAccumulator() {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await flushTimers();
+}
 
 test.describe("pool protocol", { concurrency: false }, () => {
 test("default stratum miner can login, keepalive, and submit a valid share", async () => {
@@ -58,11 +64,15 @@ test("default stratum miner can login, keepalive, and submit a valid share", asy
             }
         });
 
-        await flushTimers();
+        await flushShareAccumulator();
         assert.equal(shareReply.error, null);
         assert.deepEqual(shareReply.result, { status: "OK" });
         assert.equal(runtime.getState().shareStats.normalShares, 1);
         assert.equal(database.invalidShares.length, 0);
+        assert.equal(database.shares.length, 1);
+        assert.equal(database.shares[0].payload.paymentAddress, MAIN_WALLET);
+        assert.equal(database.shares[0].payload.identifier, "worker-a");
+        assert.equal(database.shares[0].payload.share_num, 1);
     } finally {
         await client.close();
         await runtime.stop();
@@ -1248,6 +1258,93 @@ test("default protocol miners receive a pushed job when the active template chan
         assert.ok(loginReply.pushes[0].params.job_id);
         assert.notEqual(loginReply.pushes[0].params.job_id, initialJobId);
     } finally {
+        await runtime.stop();
+    }
+});
+
+test("payment split shares are persisted to each payout target with proportional rewards", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        const reply = invokePoolMethod({
+            socket,
+            id: 101,
+            method: "login",
+            params: {
+                login: `${MAIN_WALLET}%25%${ALT_WALLET}`,
+                pass: "worker-split-accounting"
+            }
+        });
+
+        const jobId = reply.replies[0].result.job.job_id;
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 102,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000016",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushShareAccumulator();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(database.shares.length, 2);
+
+        const sharesByAddress = new Map(database.shares.map((entry) => [entry.payload.paymentAddress, entry.payload]));
+        assert.equal(sharesByAddress.get(MAIN_WALLET).raw_shares, 0.75);
+        assert.equal(sharesByAddress.get(ALT_WALLET).raw_shares, 0.25);
+        assert.equal(sharesByAddress.get(MAIN_WALLET).share_num, 1);
+        assert.equal(sharesByAddress.get(ALT_WALLET).share_num, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("alt-port shares are stored against the current anchor height", async () => {
+    const { runtime, database } = await startHarness();
+    const client = new JsonLineClient(ETH_PORT);
+
+    try {
+        await client.connect();
+
+        await client.request({
+            id: 120,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+
+        const authorizeReply = await client.request({
+            id: 121,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-alt-anchor"]
+        });
+        assert.equal(authorizeReply.error, null);
+
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+        const submitReply = await client.request({
+            id: 122,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000017",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ef".repeat(32)}`
+            ]
+        });
+
+        assert.equal(submitReply.error, null);
+        await flushShareAccumulator();
+        assert.equal(database.shares.length, 1);
+        assert.equal(database.shares[0].payload.paymentAddress, ETH_WALLET);
+        assert.equal(database.shares[0].payload.port, ETH_PORT);
+        assert.equal(database.shares[0].payload.blockHeight, 101);
+    } finally {
+        await client.close();
         await runtime.stop();
     }
 });
