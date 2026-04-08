@@ -700,7 +700,7 @@ test("eth-style shares are accepted through the eth hash path and persisted", as
         };
         global.coinFuncs.slowHashBuff = function patchedSlowHashBuff(buffer, blockTemplate, nonce, mixhash) {
             if (blockTemplate.port === ETH_PORT) {
-                return [Buffer.concat([Buffer.alloc(31, 0), Buffer.from([16])]), Buffer.from("cd".repeat(32), "hex")];
+                return [Buffer.from("ff".repeat(32), "hex"), Buffer.from("cd".repeat(32), "hex")];
             }
             return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
         };
@@ -721,9 +721,17 @@ test("eth-style shares are accepted through the eth hash path and persisted", as
             portData: global.config.ports[1]
         });
 
-        runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
-        runtime.getState().activeBlockTemplates.ETH.difficulty = 1000;
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
         const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
+        const job = miner.validJobs.toarray().find((entry) => entry.id === notifyPush.params[0]);
+        job.difficulty = 1;
+        job.rewarded_difficulty = 1;
+        job.rewarded_difficulty2 = 1;
+        job.norm_diff = 1;
+        state.activeBlockTemplates.ETH.hash = "34".repeat(32);
+        state.activeBlockTemplates.ETH.difficulty = 1000;
+
         const submitReply = invokePoolMethod({
             socket,
             id: 2063,
@@ -786,9 +794,17 @@ test("eth-style shares reject low difficulty hashes from the eth verify path", a
             portData: global.config.ports[1]
         });
 
-        runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
-        runtime.getState().activeBlockTemplates.ETH.difficulty = 1000;
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
         const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
+        const job = miner.validJobs.toarray().find((entry) => entry.id === notifyPush.params[0]);
+        job.difficulty = 2;
+        job.rewarded_difficulty = 2;
+        job.rewarded_difficulty2 = 2;
+        job.norm_diff = 2;
+        state.activeBlockTemplates.ETH.hash = "34".repeat(32);
+        state.activeBlockTemplates.ETH.difficulty = 1000;
+
         const submitReply = invokePoolMethod({
             socket,
             id: 2066,
