@@ -339,6 +339,51 @@ test("kawpow submit accepts hex nonce and mixhash values containing alphabetic d
     }
 });
 
+test("kawpow submit rejects shares whose header hash does not match the converted blob", async () => {
+    const { runtime, database } = await startHarness();
+    const client = new JsonLineClient(ETH_PORT);
+
+    try {
+        await client.connect();
+
+        const subscribeReply = await client.request({
+            id: 451,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+        assert.equal(subscribeReply.error, null);
+
+        const authorizeReply = await client.request({
+            id: 452,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-wrong-header-hash"]
+        });
+        assert.equal(authorizeReply.error, null);
+        assert.equal(authorizeReply.result, true);
+
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+        const submitReply = await client.request({
+            id: 453,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000011",
+                `0x${"00".repeat(32)}`,
+                `0x${"ab".repeat(32)}`
+            ]
+        });
+
+        assert.equal(submitReply.error.message, "Low difficulty share");
+        assert.equal(submitReply.result, undefined);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(database.shares.length, 0);
+    } finally {
+        await client.close();
+        await runtime.stop();
+    }
+});
+
 test("getjob can switch a miner from default jobs to kawpow-style jobs when algo perf changes", async () => {
     const { runtime } = await startHarness();
     const socket = {};

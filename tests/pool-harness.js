@@ -10,6 +10,7 @@ const net = require("node:net");
 const path = require("node:path");
 const protobuf = require("protocol-buffers");
 const cnUtil = require("cryptoforknote-util");
+const multiHashing = require("cryptonight-hashing");
 
 const supportFactory = require("../lib/support.js");
 
@@ -22,6 +23,8 @@ const THIRD_WALLET = "7".repeat(95);
 const VALID_RESULT = "f".repeat(64);
 const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
+const ETH_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([16])]);
+const ETH_MIXHASH_BUFFER = Buffer.from("cd".repeat(32), "hex");
 const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "data.proto")));
 const TEST_RAVEN_ADDRESS = "16Jswqk47s9PUcyCc88MMVwzgvHPvtEpf";
 
@@ -172,6 +175,8 @@ function createCoinFuncsStub() {
     return {
         ...realCoinFuncs,
         __realCoinFuncs: realCoinFuncs,
+        __testUseRealMainPow: false,
+        __testMainPowVectors: null,
         uniqueWorkerId: 0,
         uniqueWorkerIdBits: 0,
         blockedAddresses: [],
@@ -264,12 +269,6 @@ function createCoinFuncsStub() {
             return Buffer.from(blobBuffer);
         },
         constructNewBlob(blockTemplateBuffer, params, port) {
-            try {
-                const constructed = realCoinFuncs.constructNewBlob.call(this, blockTemplateBuffer, params, port);
-                if (constructed) return constructed;
-            } catch (_error) {
-            }
-
             const next = Buffer.from(blockTemplateBuffer);
             if (port === ETH_PORT) return next;
             if (typeof params.nonce === "string") {
@@ -278,13 +277,33 @@ function createCoinFuncsStub() {
             }
             return next;
         },
-        slowHashBuff(_buffer, blockTemplate) {
+        slowHashBuff(buffer, blockTemplate, nonce, mixhash) {
+            if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
+                const powVectorMap = this.__testMainPowVectors || {};
+                const vectorNonce = Buffer.from(buffer.subarray(4, 8)).toString("hex");
+                if (vectorNonce in powVectorMap) {
+                    const vector = powVectorMap[vectorNonce];
+                    return multiHashing.randomx(
+                        Buffer.from(vector.input, vector.inputEncoding || "utf8"),
+                        Buffer.from(vector.seed, vector.seedEncoding || "utf8"),
+                        0
+                    );
+                }
+                return realCoinFuncs.slowHashBuff.call(this, buffer, { ...blockTemplate, port: 18081 }, nonce, mixhash);
+            }
             if (blockTemplate.port === ETH_PORT) {
+                if (this.portBlobType(blockTemplate.port, blockTemplate.block_version) === 102) {
+                    return [ETH_RESULT_BUFFER, ETH_MIXHASH_BUFFER];
+                }
                 return RAVEN_RESULT_BUFFER;
             }
             return Buffer.from(VALID_RESULT_BUFFER);
         },
-        slowHashAsync(_buffer, _blockTemplate, _wallet, callback) {
+        slowHashAsync(buffer, blockTemplate, _wallet, callback) {
+            if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
+                callback(this.slowHashBuff(buffer, blockTemplate).toString("hex"));
+                return;
+            }
             callback(VALID_RESULT);
         },
         getBlockID() {
@@ -552,6 +571,8 @@ async function startHarness(extra = {}) {
     global.support = createSupportHarness();
     global.mysql = createMysqlStub();
     global.database = createDatabaseStub();
+    global.coinFuncs.__testUseRealMainPow = !!extra.realMainPow;
+    global.coinFuncs.__testMainPowVectors = extra.mainPowVectors || null;
 
     const templates = [
         createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
