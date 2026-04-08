@@ -9,6 +9,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const protobuf = require("protocol-buffers");
+const cnUtil = require("cryptoforknote-util");
 
 const supportFactory = require("../lib/support.js");
 
@@ -22,6 +23,59 @@ const VALID_RESULT = "f".repeat(64);
 const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
 const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "data.proto")));
+const TEST_RAVEN_ADDRESS = "16Jswqk47s9PUcyCc88MMVwzgvHPvtEpf";
+
+function encodeVarint(value) {
+    let current = BigInt(value);
+    const bytes = [];
+    do {
+        let byte = Number(current & 0x7fn);
+        current >>= 7n;
+        if (current > 0n) byte |= 0x80;
+        bytes.push(byte);
+    } while (current > 0n);
+    return Buffer.from(bytes);
+}
+
+function createCryptonoteFixture(height) {
+    const extra = Buffer.concat([
+        Buffer.from([0x01]),
+        Buffer.alloc(32, 0x33),
+        Buffer.from([0x02, 17]),
+        Buffer.alloc(17, 0)
+    ]);
+
+    const blob = Buffer.concat([
+        encodeVarint(1),
+        encodeVarint(1),
+        encodeVarint(0),
+        Buffer.alloc(32, 0x11),
+        Buffer.alloc(4, 0),
+        encodeVarint(1),
+        encodeVarint(0),
+        encodeVarint(1),
+        Buffer.from([0xff]),
+        encodeVarint(height),
+        encodeVarint(1),
+        encodeVarint(0),
+        Buffer.from([0x02]),
+        Buffer.alloc(32, 0x22),
+        encodeVarint(extra.length),
+        extra,
+        encodeVarint(0)
+    ]);
+
+    const reserveTag = Buffer.concat([Buffer.from([0x02, 17]), Buffer.alloc(17, 0)]);
+    const reserveTagOffset = blob.indexOf(reserveTag);
+    const reservedOffset = reserveTagOffset + 2;
+
+    return {
+        blocktemplate_blob: blob.toString("hex"),
+        reserved_offset: reservedOffset,
+        clientPoolLocation: reservedOffset + 8,
+        clientNonceLocation: reservedOffset + 12
+    };
+}
 
 function createSupportHarness() {
     const support = supportFactory();
@@ -115,25 +169,6 @@ function createCoinFuncsStub() {
         [ETH_PORT]: 101
     };
 
-    class MockBlockTemplate {
-        constructor(template) {
-            Object.assign(this, template);
-            this.buffer = Buffer.isBuffer(template.buffer) ? Buffer.from(template.buffer) : Buffer.from(template.buffer, "hex");
-            this.extraNonce = template.extraNonce || 0;
-            this.reserved_offset = template.reserved_offset ?? 16;
-            this.clientPoolLocation = template.clientPoolLocation ?? 24;
-            this.clientNonceLocation = template.clientNonceLocation ?? 28;
-        }
-
-        nextBlobHex() {
-            return Buffer.from(this.buffer).toString("hex");
-        }
-
-        nextBlobWithChildNonceHex() {
-            return this.nextBlobHex();
-        }
-    }
-
     return {
         ...realCoinFuncs,
         uniqueWorkerId: 0,
@@ -168,7 +203,13 @@ function createCoinFuncsStub() {
         getPortLastBlockHeader(_port, callback) {
             callback(null, { height: 0 });
         },
-        BlockTemplate: MockBlockTemplate,
+        BlockTemplate: function TestBlockTemplate(template) {
+            const blockTemplate = new realCoinFuncs.BlockTemplate(template);
+            if (template.idHash) blockTemplate.idHash = template.idHash;
+            if (template.clientPoolLocation !== undefined) blockTemplate.clientPoolLocation = template.clientPoolLocation;
+            if (template.clientNonceLocation !== undefined) blockTemplate.clientNonceLocation = template.clientNonceLocation;
+            return blockTemplate;
+        },
         validatePlainAddress(address) {
             return typeof address === "string" && address.length === 95;
         },
@@ -211,10 +252,23 @@ function createCoinFuncsStub() {
         blobTypeStr(port) {
             return this.portBlobType(port).toString();
         },
-        convertBlob(blobBuffer) {
+        convertBlob(blobBuffer, port) {
+            const blobType = this.portBlobType(port, blobBuffer[0]);
+            if (!(port === ETH_PORT && blobType === 102)) {
+                try {
+                    return realCoinFuncs.convertBlob.call(this, blobBuffer, port);
+                } catch (_error) {
+                }
+            }
             return Buffer.from(blobBuffer);
         },
         constructNewBlob(blockTemplateBuffer, params, port) {
+            try {
+                const constructed = realCoinFuncs.constructNewBlob.call(this, blockTemplateBuffer, params, port);
+                if (constructed) return constructed;
+            } catch (_error) {
+            }
+
             const next = Buffer.from(blockTemplateBuffer);
             if (port === ETH_PORT) return next;
             if (typeof params.nonce === "string") {
@@ -239,8 +293,38 @@ function createCoinFuncsStub() {
 }
 
 function createBaseTemplate({ coin, port, idHash, height }) {
-    const buffer = Buffer.alloc(port === ETH_PORT ? 32 : 48, 0);
-    buffer.writeUInt32BE(height, 0);
+    if (port === ETH_PORT) {
+        const template = cnUtil.RavenBlockTemplate({
+            height,
+            bits: "1d00ffff",
+            curtime: 1234567890,
+            previousblockhash: "11".repeat(32),
+            version: 1,
+            transactions: [],
+            coinbasevalue: 5000000000,
+            target: "00000000ff000000000000000000000000000000000000000000000000000000"
+        }, TEST_RAVEN_ADDRESS);
+
+        return {
+            coin,
+            idHash,
+            height: template.height,
+            difficulty: 100,
+            block_version: 1,
+            port,
+            coinHashFactor: 1,
+            isHashFactorChange: false,
+            seed_hash: template.seed_hash,
+            hash: "34".repeat(32),
+            bits: template.bits,
+            blocktemplate_blob: template.blocktemplate_blob,
+            reserved_offset: template.reserved_offset,
+            clientPoolLocation: template.reserved_offset + 8,
+            clientNonceLocation: template.reserved_offset + 12
+        };
+    }
+
+    const fixture = createCryptonoteFixture(height);
     return {
         coin,
         idHash,
@@ -253,10 +337,10 @@ function createBaseTemplate({ coin, port, idHash, height }) {
         seed_hash: "12".repeat(32),
         hash: "34".repeat(32),
         bits: "1d00ffff",
-        buffer,
-        reserved_offset: 16,
-        clientPoolLocation: 24,
-        clientNonceLocation: 28
+        blocktemplate_blob: fixture.blocktemplate_blob,
+        reserved_offset: fixture.reserved_offset,
+        clientPoolLocation: fixture.clientPoolLocation,
+        clientNonceLocation: fixture.clientNonceLocation
     };
 }
 
