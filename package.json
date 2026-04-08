@@ -8,7 +8,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=1 tests/pool.js"
+    "test": "node --require ./tests/test-output-buffer.js --test --test-concurrency=1 tests/pool.js"
   },
   "repository": {
     "type": "git",
