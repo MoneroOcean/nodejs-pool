@@ -18,9 +18,15 @@ const {
     poolModule
 } = require("./pool-harness.js");
 
-async function flushShareAccumulator() {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await flushTimers();
+async function flushShareAccumulator(check, timeout = 200) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await flushTimers();
+        if (!check || check()) return;
+    }
+    if (!check || check()) return;
+    throw new Error("Timed out waiting for deferred share flush");
 }
 
 test.describe("pool protocol", { concurrency: false }, () => {
@@ -64,7 +70,7 @@ test("default stratum miner can login, keepalive, and submit a valid share", asy
             }
         });
 
-        await flushShareAccumulator();
+        await flushShareAccumulator(() => database.shares.length === 1);
         assert.equal(shareReply.error, null);
         assert.deepEqual(shareReply.result, { status: "OK" });
         assert.equal(runtime.getState().shareStats.normalShares, 1);
@@ -1290,7 +1296,7 @@ test("payment split shares are persisted to each payout target with proportional
             }
         });
 
-        await flushShareAccumulator();
+        await flushShareAccumulator(() => database.shares.length === 2);
         assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
         assert.equal(database.shares.length, 2);
 
@@ -1338,7 +1344,7 @@ test("alt-port shares are stored against the current anchor height", async () =>
         });
 
         assert.equal(submitReply.error, null);
-        await flushShareAccumulator();
+        await flushShareAccumulator(() => database.shares.length === 1);
         assert.equal(database.shares.length, 1);
         assert.equal(database.shares[0].payload.paymentAddress, ETH_WALLET);
         assert.equal(database.shares[0].payload.port, ETH_PORT);
