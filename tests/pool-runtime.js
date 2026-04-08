@@ -326,7 +326,7 @@ test("main-algo shares are accepted when the submitted nonce matches the real Ra
         job.rewarded_difficulty = 1;
         job.rewarded_difficulty2 = 1;
         job.norm_diff = 1;
-        blockTemplate.difficulty = 1e30;
+        blockTemplate.difficulty = 1000;
 
         const submitReply = invokePoolMethod({
             socket,
@@ -377,7 +377,7 @@ test("main-algo shares are rejected when the submitted nonce does not match the 
         job.rewarded_difficulty = 1;
         job.rewarded_difficulty2 = 1;
         job.norm_diff = 1;
-        blockTemplate.difficulty = 1e30;
+        blockTemplate.difficulty = 1000;
 
         const submitReply = invokePoolMethod({
             socket,
@@ -722,6 +722,7 @@ test("eth-style shares are accepted through the eth hash path and persisted", as
         });
 
         runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
+        runtime.getState().activeBlockTemplates.ETH.difficulty = 1000;
         const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
         const submitReply = invokePoolMethod({
             socket,
@@ -786,6 +787,7 @@ test("eth-style shares reject low difficulty hashes from the eth verify path", a
         });
 
         runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
+        runtime.getState().activeBlockTemplates.ETH.difficulty = 1000;
         const notifyPush = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
         const submitReply = invokePoolMethod({
             socket,
