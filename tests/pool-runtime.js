@@ -646,6 +646,57 @@ test("messageHandler newBlockTemplate updates the active template", async () => 
     }
 });
 
+test("templateUpdate2 rejects blobless CCX templates before they reach BlockTemplate", async () => {
+    const { runtime } = await startHarness();
+    const originalGetPortBlockTemplate = global.coinFuncs.getPortBlockTemplate;
+    const originalSetTimeout = global.setTimeout;
+    const ccxPort = 16000;
+    let requestCount = 0;
+
+    try {
+        poolModule.setTestCoinHashFactor("CCX", 1);
+
+        global.coinFuncs.getPortBlockTemplate = function getPortBlockTemplate(_port, callback) {
+            requestCount += 1;
+            callback({
+                block_header: {
+                    height: 2046248,
+                    major_version: 8,
+                    minor_version: 0,
+                    nonce: 3221306306,
+                    hash: "80397cb2f994510668ae5489ab17f2e6a21c838f35eb02db40dec799b008c0ab",
+                    prev_hash: "2dda11c301cf640a502e0d9722df6ee35e9b246e654d6cb32b212ef9c8b5a3d6",
+                    timestamp: 1775567137,
+                    difficulty: 43600000,
+                    reward: 6000000
+                },
+                status: "OK"
+            });
+        };
+        global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
+            fn(...args);
+            return 0;
+        };
+
+        poolModule.templateUpdate2(
+            "CCX",
+            ccxPort,
+            true,
+            false,
+            1,
+            false,
+            { height: 2046248, hash: "80397cb2f994510668ae5489ab17f2e6a21c838f35eb02db40dec799b008c0ab" }
+        );
+
+        assert.equal(requestCount, 3);
+        assert.equal(runtime.getState().activeBlockTemplates.CCX, undefined);
+    } finally {
+        global.coinFuncs.getPortBlockTemplate = originalGetPortBlockTemplate;
+        global.setTimeout = originalSetTimeout;
+        await runtime.stop();
+    }
+});
+
 test("setNewCoinHashFactor marks matching miners for extra verification on hash-factor changes", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
