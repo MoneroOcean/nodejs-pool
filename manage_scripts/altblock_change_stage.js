@@ -1,6 +1,6 @@
 "use strict";
 
-const argv = require('minimist')(process.argv.slice(2), { '--': true });
+const argv = require('../parse_args')(process.argv.slice(2), { '--': true });
 
 if (!argv.stage) {
         console.error("Please specify new stage value");

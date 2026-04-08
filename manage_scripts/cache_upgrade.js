@@ -1,6 +1,6 @@
 "use strict";
 
-const argv = require('minimist')(process.argv.slice(2));
+const argv = require('../parse_args')(process.argv.slice(2));
 const user = argv.user ? argv.user : null;
 
 require("../init_mini.js").init(function() {

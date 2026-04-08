@@ -1,6 +1,6 @@
 "use strict";
 
-const argv = require('minimist')(process.argv.slice(2));
+const argv = require('../parse_args')(process.argv.slice(2));
 
 require("../init_mini.js").init(function() {
 	const xmr_balance = global.database.getCache("xmr_balance");

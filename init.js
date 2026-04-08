@@ -1,7 +1,7 @@
 "use strict";
 let mysql = require("promise-mysql");
 let fs = require("fs");
-let argv = require('minimist')(process.argv.slice(2));
+let argv = require('./parse_args')(process.argv.slice(2));
 let config = fs.readFileSync("./config.json");
 let coinConfig = fs.readFileSync("./coinConfig.json");
 let protobuf = require('protocol-buffers');

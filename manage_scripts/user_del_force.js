@@ -1,7 +1,7 @@
 "use strict";
 const mysql = require("promise-mysql");
 const async = require("async");
-const argv = require('minimist')(process.argv.slice(2));
+const argv = require('../parse_args')(process.argv.slice(2));
 
 if (!argv.user) {
 	console.error("Please specify user address to delete");
