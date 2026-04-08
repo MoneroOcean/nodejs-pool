@@ -1,7 +1,7 @@
 "use strict";
 const mysql = require("promise-mysql");
 const async = require("async");
-const argv = require('minimist')(process.argv.slice(2));
+const argv = require('../parse_args')(process.argv.slice(2));
 
 if (!argv.old_user) {
 	console.error("Please specify old_user address to move balance from");

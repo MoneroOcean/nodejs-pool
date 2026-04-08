@@ -3,7 +3,7 @@
 const lmdb = require('node-lmdb');
 const fs   = require('fs');
 
-const argv = require('minimist')(process.argv.slice(2));
+const argv = require('../parse_args')(process.argv.slice(2));
 
 if (!argv.dir) {
 	console.error("Please specify output lmdb dir");
