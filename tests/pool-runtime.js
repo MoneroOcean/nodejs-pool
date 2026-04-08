@@ -171,6 +171,78 @@ test("successful main-chain block candidates are stored as blocks", async () => 
     }
 });
 
+test("main-chain block storage can use the real blob constructor and block-id calculation", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            {
+                ...createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-block-real-id", height: 101 }),
+                difficulty: 1,
+                xmr_difficulty: 1,
+                xtm_difficulty: Number.MAX_SAFE_INTEGER
+            },
+            createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
+        ]
+    });
+    const socket = {};
+    const originalConstructNewBlob = global.coinFuncs.constructNewBlob;
+    const originalGetBlockID = global.coinFuncs.getBlockID;
+
+    try {
+        global.coinFuncs.constructNewBlob = global.coinFuncs.__realCoinFuncs.constructNewBlob.bind(global.coinFuncs);
+        global.coinFuncs.getBlockID = global.coinFuncs.__realCoinFuncs.getBlockID.bind(global.coinFuncs);
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1991,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-block-real-id"
+            }
+        });
+
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const activeTemplate = runtime.getState().activeBlockTemplates[""];
+
+        const expectedTemplateBuffer = Buffer.alloc(activeTemplate.buffer.length);
+        activeTemplate.buffer.copy(expectedTemplateBuffer);
+        expectedTemplateBuffer.writeUInt32BE(job.extraNonce, activeTemplate.reserved_offset);
+
+        const expectedBlockData = global.coinFuncs.__realCoinFuncs.constructNewBlob.call(
+            global.coinFuncs,
+            expectedTemplateBuffer,
+            { nonce: "00000017", result: VALID_RESULT },
+            MAIN_PORT
+        );
+        const expectedBlockHash = global.coinFuncs.__realCoinFuncs
+            .getBlockID.call(global.coinFuncs, expectedBlockData, MAIN_PORT)
+            .toString("hex");
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1992,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000017",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(database.blocks.length, 1);
+        assert.equal(database.blocks[0].payload.hash, expectedBlockHash);
+    } finally {
+        global.coinFuncs.constructNewBlob = originalConstructNewBlob;
+        global.coinFuncs.getBlockID = originalGetBlockID;
+        await runtime.stop();
+    }
+});
+
 test("main-chain candidates that only satisfy the XMR threshold submit only to the XMR daemon", async () => {
     const { runtime, database } = await startHarness({
         templates: [
@@ -958,6 +1030,51 @@ test("checkAliveMiners removes miners that exceed the timeout", async () => {
         assert.equal(runtime.getState().activeMiners.has(socket.miner_id), false);
     } finally {
         global.config.pool.minerTimeout = originalMinerTimeout;
+        await runtime.stop();
+    }
+});
+
+test("deferred share flush preserves trustedShare=false for verified shares", async () => {
+    const { runtime, database } = await startHarness();
+    const originalShareAccTime = global.config.pool.shareAccTime;
+    const socket = {};
+
+    try {
+        global.config.pool.shareAccTime = 0.001;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1950,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-deferred-share-flush"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1951,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: loginReply.replies[0].result.job.job_id,
+                nonce: "00000018",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(database.shares.length, 0);
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await flushTimers();
+
+        assert.equal(database.shares.length, 1);
+        assert.equal(database.shares[0].payload.trustedShare, false);
+    } finally {
+        global.config.pool.shareAccTime = originalShareAccTime;
         await runtime.stop();
     }
 });
