@@ -153,7 +153,7 @@ function createDatabaseStub() {
 }
 
 function createCoinFuncsStub() {
-    const Coin = require("../lib/coins/xmr.js");
+    const Coin = require("../lib/coins/index.js");
     const realCoinFuncs = new Coin({});
     const portToCoin = {
         [MAIN_PORT]: "",
@@ -568,9 +568,7 @@ function waitForSocketJson(socket, timeout = 1000) {
 }
 
 async function startHarness(extra = {}) {
-    global.support = createSupportHarness();
-    global.mysql = createMysqlStub();
-    global.database = createDatabaseStub();
+    installTestGlobals();
     global.coinFuncs.__testUseRealMainPow = !!extra.realMainPow;
     global.coinFuncs.__testMainPowVectors = extra.mainPowVectors || null;
 
@@ -647,5 +645,6 @@ module.exports = {
     flushTimers,
     invokePoolMethod,
     createBaseTemplate,
+    installTestGlobals,
     poolModule
 };
