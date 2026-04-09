@@ -940,6 +940,327 @@ test("closing a miner socket removes it from the active miner map", async () => 
     }
 });
 
+test("invalid logins do not retain arbitrary payout or agent keys", async () => {
+    const { runtime } = await startHarness();
+    const originalWorkerId = process.env.WORKER_ID;
+    const ip = "10.0.0.91";
+
+    try {
+        process.env.WORKER_ID = "1";
+
+        invokePoolMethod({
+            method: "login",
+            params: {
+                login: "bad-wallet-one",
+                pass: "x",
+                agent: "BadAgent/1"
+            },
+            ip
+        });
+        invokePoolMethod({
+            method: "login",
+            params: {
+                login: "bad-wallet-two",
+                pass: "x",
+                agent: "BadAgent/2"
+            },
+            ip
+        });
+
+        const state = runtime.getState();
+        assert.deepEqual(Object.keys(state.minerAgents), []);
+        assert.deepEqual(Object.keys(state.lastMinerLogTime), ["invalid-login:" + ip]);
+        assert.equal("bad-wallet-one" in state.lastMinerLogTime, false);
+        assert.equal("bad-wallet-two" in state.lastMinerLogTime, false);
+    } finally {
+        if (typeof originalWorkerId === "undefined") delete process.env.WORKER_ID;
+        else process.env.WORKER_ID = originalWorkerId;
+        await runtime.stop();
+    }
+});
+
+test("trust state is created only after an accepted share", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const socket = {};
+
+    try {
+        global.config.pool.trustedMiners = true;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 191,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-trust-lazy-init"
+            }
+        });
+
+        const stateAfterLogin = runtime.getState();
+        const jobId = loginReply.replies[0].result.job.job_id;
+        assert.equal(MAIN_WALLET in stateAfterLogin.walletTrust, false);
+        assert.equal(MAIN_WALLET in stateAfterLogin.walletLastSeeTime, false);
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 192,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000001d",
+                result: VALID_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(MAIN_WALLET in runtime.getState().walletTrust, true);
+        assert.equal(MAIN_WALLET in runtime.getState().walletLastSeeTime, true);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        await runtime.stop();
+    }
+});
+
+test("login bookkeeping prunes stale wallet and notification timestamps", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        const staleTime = Date.now() - 48 * 60 * 60 * 1000;
+        const state = runtime.getState();
+        state.walletLastCheckTime["stale-wallet"] = staleTime;
+        state.lastMinerNotifyTime["stale-wallet"] = staleTime;
+        state.notifyAddresses[MAIN_WALLET] = "Update required";
+
+        const loginReply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker:miner@example.com"
+            }
+        });
+
+        assert.deepEqual(loginReply.finals, [{
+            error: "Update required (miner will connect after several attempts)",
+            timeout: undefined
+        }]);
+        assert.equal("stale-wallet" in runtime.getState().walletLastCheckTime, false);
+        assert.equal("stale-wallet" in runtime.getState().lastMinerNotifyTime, false);
+        assert.equal(MAIN_WALLET in runtime.getState().walletLastCheckTime, true);
+        assert.equal(MAIN_WALLET in runtime.getState().lastMinerNotifyTime, true);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("throttled shares do not retain duplicate nonce entries", async () => {
+    const { runtime } = await startHarness();
+    const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const socket = {};
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 0;
+        global.config.pool.trustedMiners = false;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 193,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-throttle-nonce-cache"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+
+        const firstReply = invokePoolMethod({
+            socket,
+            id: 194,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000020",
+                result: VALID_RESULT
+            }
+        });
+
+        const secondReply = invokePoolMethod({
+            socket,
+            id: 195,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000020",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(firstReply.replies, [{
+            error: "Throttled down share submission (please increase difficulty)",
+            result: undefined
+        }]);
+        assert.deepEqual(secondReply.replies, [{
+            error: "Throttled down share submission (please increase difficulty)",
+            result: undefined
+        }]);
+        assert.equal(job.submissions.size, 0);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        await runtime.stop();
+    }
+});
+
+test("expired shares do not retain unique nonce entries", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 196,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-expired-nonce-cache"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const originalJob = miner.validJobs.toarray().find((job) => job.id === jobId);
+
+        for (let height = 102; height <= 113; height += 1) {
+            runtime.setTemplate(createBaseTemplate({
+                coin: "",
+                port: MAIN_PORT,
+                idHash: `main-expired-nonce-${height}`,
+                height
+            }));
+        }
+
+        miner.validJobs.enq(originalJob);
+
+        const firstReply = invokePoolMethod({
+            socket,
+            id: 197,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000021",
+                result: VALID_RESULT
+            }
+        });
+
+        const secondReply = invokePoolMethod({
+            socket,
+            id: 198,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000022",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(firstReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.deepEqual(secondReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.equal(originalJob.submissions.size, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("jobs reject new nonces after reaching the tracked submission cap without evicting old ones", async () => {
+    const { runtime } = await startHarness();
+    const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
+    const originalThrottleWindow = global.config.pool.minerThrottleShareWindow;
+    const socket = {};
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 2;
+        global.config.pool.minerThrottleShareWindow = 5;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 199,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-submission-cap"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const trackedSubmissionLimit = global.config.pool.minerThrottleShareWindow * global.config.pool.minerThrottleSharePerSec * 100;
+        job.submissions = new Map();
+        for (let index = 0; index < trackedSubmissionLimit; ++index) {
+            job.submissions.set(index.toString(16).padStart(8, "0"), 1);
+        }
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 200,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "fffffff0",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{
+            error: "Too many share submissions for the current job. Wait for a new job.",
+            result: undefined
+        }]);
+        assert.equal(job.submissions.size, trackedSubmissionLimit);
+        assert.equal(job.submissions.has("00000000"), true);
+        assert.equal(job.submissions.has("fffffff0"), false);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
+        global.config.pool.minerThrottleShareWindow = originalThrottleWindow;
+        await runtime.stop();
+    }
+});
+
+test("successful logins prune stale tracked agents and cap stored agent length", async () => {
+    const { runtime } = await startHarness();
+    const originalWorkerId = process.env.WORKER_ID;
+
+    try {
+        process.env.WORKER_ID = "1";
+        runtime.getState().minerAgents["stale-agent"] = Date.now() - 48 * 60 * 60 * 1000;
+
+        const longAgent = "Agent/" + "x".repeat(400);
+        const loginReply = invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "agent-track",
+                agent: longAgent
+            }
+        });
+
+        assert.equal(loginReply.replies[0].error, null);
+        assert.equal(runtime.getState().activeMiners.size, 1);
+        assert.deepEqual(Object.keys(runtime.getState().minerAgents), [longAgent.substring(0, 255)]);
+    } finally {
+        if (typeof originalWorkerId === "undefined") delete process.env.WORKER_ID;
+        else process.env.WORKER_ID = originalWorkerId;
+        await runtime.stop();
+    }
+});
+
 test("ban threshold removes miners that cross the invalid share percentage", async () => {
     const { runtime } = await startHarness();
     const cluster = require("cluster");
