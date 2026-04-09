@@ -1,0 +1,76 @@
+{
+  "poolNonceSize": 17,
+  "fixDaemonScript": "./fix_daemon.sh",
+  "mmPortSet": {},
+  "ports": {
+    "12211": { "coin": "RYO", "blobType": 4, "algo": "cn/gpu" },
+    "17750": { "coin": "XHV", "blobType": 11, "algo": "cn-heavy/xhv" },
+    "18081": { "coin": "", "blobType": 0, "algo": "rx/0" },
+    "17767": { "coin": "ZEPH", "blobType": 13, "algo": "rx/0" },
+    "11812": { "coin": "XLA", "blobType": 14, "algo": "panthera" },
+    "25182": { "coin": "TUBE", "blobType": 10, "algo": "c29" },
+    "38081": { "coin": "MSR", "blobType": 6, "algo": "cn/half" },
+    "48782": { "coin": "LTHN", "blobType": 0, "algo": "argon2/chukwav2" },
+    "19734": { "coin": "SUMO", "blobType": 0, "algo": "cn/r" },
+    "13007": { "coin": "IRD", "blobType": 2, "algo": "cn-pico/trtl" },
+    "19994": { "coin": "ARQ", "blobType": 16, "algo": "rx/arq" },
+    "19281": { "coin": "XMV", "blobType": 8, "algo": "c29" },
+    "19950": { "coin": "XWP", "blobType": 8, "algo": "c29" },
+    "9231": { "coin": "XEQ", "blobType": 5, "algo": "rx/xeq" },
+    "16000": { "coin": "CCX", "blobType": 0, "algo": "cn/gpu" },
+    "20206": { "blobType": 100, "algo": "astrobwt/v2" },
+    "8766": { "coin": "RVN", "blobType": 101, "algo": "kawpow" },
+    "8545": { "blobType": 102, "algo": "ethash" },
+    "8645": { "coin": "ETC", "blobType": 102, "algo": "etchash" },
+    "2086": { "coin": "BLOC", "blobType": 1, "algo": "cn-heavy/xhv" },
+    "9053": { "coin": "ERG", "blobType": 103, "algo": "autolykos2" },
+    "9998": { "coin": "RTM", "blobType": 104, "algo": "ghostrider" },
+    "5110": { "coin": "KCN", "blobType": 105, "algo": "flex" },
+    "10225": { "coin": "BTRM", "blobType": 104, "algo": "ghostrider" },
+    "19001": { "coin": "XNA", "blobType": 101, "algo": "kawpow" },
+    "9766": { "coin": "CLORE", "blobType": 101, "algo": "kawpow" },
+    "19081": { "coin": "SAL", "blobType": 15, "algo": "rx/0" },
+    "18144": { "coin": "XTM", "blobType": 0, "algo": "rx/0" },
+    "18146": { "coin": "XTM-T", "blobType": 106, "algo": "rx/0" },
+    "18148": { "coin": "XTM-C", "blobType": 107, "algo": "c29" }
+  },
+  "addresses": {
+    "coinDev": "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A",
+    "poolDev": "499fS1Phq64hGeqV8p2AfXbf6Ax7gP6FybcMJq6Wbvg8Hw6xms8tCmdYpPsTLSaTNuLEtW4kF2DDiWCFcw4u7wSvFD8wFWE",
+    "blocked": [
+      "43SLUTpyTgXCNXsL43uD8FWZ5wLAdX7Ak67BgGp7dxnGhLmrffDTXoeGm2GBRm8JjigN9PTg2gnShQn5gkgE1JGWJr4gsEU",
+      "42QWoLF7pdwMcTXDviJvNkWEHJ4TXnMBh2Cx6HNkVAW57E48Zfw6wLwDUYFDYJAqY7PLJUTz9cHWB5C4wUA7UJPu5wPf4sZ",
+      "46gq64YYgCk88LxAadXbKLeQtCJtsLSD63NiEc3XHLz8NyPAyobACP161JbgyH2SgTau3aPUsFAYyK2RX4dHQoaN1ats6iT",
+      "47mr7jYTroxQMwdKoPQuJoc9Vs9S9qCUAL6Ek4qyNFWJdqgBZRn4RYY2QjQfqEMJZVWPscupSgaqmUn1dpdUTC4fQsu3yjN"
+    ],
+    "exchange": [
+      "46yzCCD3Mza9tRj7aqPSaxVbbePtuAeKzf8Ky2eRtcXGcEgCg1iTBio6N4sPmznfgGEUGDoBz5CLxZ2XPTyZu1yoCAG7zt6",
+      "463tWEBn5XZJSxLU6uLQnQ2iY9xuNcDbjLSjkn3XAXHCbLrTTErJrBWYgHJQyrCwkNgYvyV3z8zctJLPCZy24jvb3NiTcTJ",
+      "44TVPcCSHebEQp4LnapPkhb2pondb2Ed7GJJLc6TkKwtSyumUnQ6QzkCCkojZycH2MRfLcujCM7QR1gdnRULRraV4UpB5n4",
+      "47sghzufGhJJDQEbScMCwVBimTuq6L5JiRixD8VeGbpjCTA12noXmi4ZyBZLc99e66NtnKff34fHsGRoyZk3ES1s1V4QVcB",
+      "44tLjmXrQNrWJ5NBsEj2R77ZBEgDa3fEe9GLpSf2FRmhexPvfYDUAB7EXX1Hdb3aMQ9FLqdJ56yaAhiXoRsceGJCRS3Jxkn",
+      "43c2ykU9i2KZHjV8dWff9HKurYYRkckLueYK96Qh4p1EDoEvdo8mpgNJJpPuods53PM6wNzmj4K2D1V11wvXsy9LMiaYc86",
+      "45rTtwU6mHqSEMduDm5EvUEmFNx2Z6gQhGBJGqXAPHGyFm9qRfZFDNgDm3drL6wLTVHfVhbfHpCtwKVvDLbQDMH88jx2N6w",
+      "4ALcw9nTAStZSshoWVUJakZ6tLwTDhixhQUQNJkCn4t3fG3MMK19WZM44HnQRvjqmz4LkkA8t565v7iBwQXx2r34HNroSAZ",
+      "4BCeEPhodgPMbPWFN1dPwhWXdRX8q4mhhdZdA1dtSMLTLCEYvAj9QXjXAfF7CugEbmfBhgkqHbdgK9b2wKA6nqRZQCgvCDm",
+      "41xeYWWKwtSiHju5AdyF8y5xeptuRY3j5X1XYHuB1g6ke4eRexA1iygjXqrT3anyZ22j7DEE74GkbVcQFyH2nNiC3gJqjM9",
+      "43Kg3mcpvaDhHpv8C4UWf7Kw2DAexn2NoRMqqM5cpAtuRgkedDZWjBQjXqrT3anyZ22j7DEE74GkbVcQFyH2nNiC3dx22mZ",
+      "44rouyxW44oMc1yTGXBUsL6qo9AWWeHETFiimWC3TMQEizSqqZZPnw1UXCaJrCtUC9QT25L5MZvkoGKRxZttvbkmFXA3TMG",
+      "45SLfxvu355SpjjzibLKaChA4NGoTrQAwZmSopAXQa9UXBT63BvreEoYyczTcfXow6eL8VaEG2X6NcTG67XZFTNPLgdR9iM"
+    ]
+  },
+  "network": {
+    "mainnet": {
+      "prefix": 18,
+      "subPrefix": 42,
+      "intPrefix": 19
+    },
+    "testnet": {
+      "prefix": 53,
+      "subPrefix": 63,
+      "intPrefix": 54
+    }
+  },
+  "supportsAutoExchange": true,
+  "niceHashDiff": 400000
+}
