@@ -1203,6 +1203,57 @@ test("banned payout logins are throttled by payout across IPs", async () => {
     }
 });
 
+test("share-path log updates do not clear existing invalid login throttle keys", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            method: "login",
+            params: {
+                login: "999",
+                pass: "999orr"
+            },
+            ip: "10.0.0.91"
+        });
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1190,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-low-diff-log"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        job.difficulty = 2;
+        job.rewarded_difficulty = 2;
+        job.rewarded_difficulty2 = 2;
+        job.norm_diff = 2;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1191,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000a",
+                result: "ff".repeat(32)
+            }
+        });
+
+        assert.equal(submitReply.replies[0].error, "Low difficulty share");
+        assert.equal("invalid-address-login:999" in runtime.getState().lastMinerLogTime, true);
+        assert.equal(MAIN_WALLET in runtime.getState().lastMinerLogTime, true);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("trust state is created only after an accepted share", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
