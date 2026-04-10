@@ -638,6 +638,159 @@ test("keepalived alias returns the same response as keepalive", async () => {
     }
 });
 
+test("login requests are rejected when the per-IP login rate limit is exceeded", async () => {
+    const { runtime } = await startHarness();
+    const originalLoginRateLimitPerSecond = global.config.pool.loginRateLimitPerSecond;
+    const originalLoginRateLimitBurst = global.config.pool.loginRateLimitBurst;
+    const ip = "10.0.0.77";
+
+    try {
+        global.config.pool.loginRateLimitPerSecond = 1;
+        global.config.pool.loginRateLimitBurst = 1;
+
+        const first = invokePoolMethod({
+            socket: {},
+            id: 1941,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "rate-login-first"
+            },
+            ip
+        });
+        const second = invokePoolMethod({
+            socket: {},
+            id: 1942,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "rate-login-second"
+            },
+            ip
+        });
+
+        assert.equal(first.replies[0].error, null);
+        assert.deepEqual(second.finals, [{
+            error: "Rate limit exceeded for login requests",
+            timeout: undefined
+        }]);
+    } finally {
+        global.config.pool.loginRateLimitPerSecond = originalLoginRateLimitPerSecond;
+        global.config.pool.loginRateLimitBurst = originalLoginRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
+test("submit requests are rejected when the per-IP submit rate limit is exceeded", async () => {
+    const { runtime } = await startHarness();
+    const originalSubmitRateLimitPerSecond = global.config.pool.submitRateLimitPerSecond;
+    const originalSubmitRateLimitBurst = global.config.pool.submitRateLimitBurst;
+    const socket = {};
+    const ip = "10.0.0.78";
+
+    try {
+        global.config.pool.submitRateLimitPerSecond = 1;
+        global.config.pool.submitRateLimitBurst = 1;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1943,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "rate-submit"
+            },
+            ip
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const firstSubmit = invokePoolMethod({
+            socket,
+            id: 1944,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000011",
+                result: VALID_RESULT
+            },
+            ip
+        });
+        const secondSubmit = invokePoolMethod({
+            socket,
+            id: 1945,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000012",
+                result: VALID_RESULT
+            },
+            ip
+        });
+
+        assert.deepEqual(firstSubmit.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.deepEqual(secondSubmit.finals, [{
+            error: "Rate limit exceeded for submit requests",
+            timeout: undefined
+        }]);
+    } finally {
+        global.config.pool.submitRateLimitPerSecond = originalSubmitRateLimitPerSecond;
+        global.config.pool.submitRateLimitBurst = originalSubmitRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
+test("keepalive requests are rejected when the per-IP keepalive rate limit is exceeded", async () => {
+    const { runtime } = await startHarness();
+    const originalKeepaliveRateLimitPerSecond = global.config.pool.keepaliveRateLimitPerSecond;
+    const originalKeepaliveRateLimitBurst = global.config.pool.keepaliveRateLimitBurst;
+    const socket = {};
+    const ip = "10.0.0.79";
+
+    try {
+        global.config.pool.keepaliveRateLimitPerSecond = 1;
+        global.config.pool.keepaliveRateLimitBurst = 1;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1946,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "rate-keepalive"
+            },
+            ip
+        });
+        const minerId = loginReply.replies[0].result.id;
+
+        const firstKeepalive = invokePoolMethod({
+            socket,
+            id: 1947,
+            method: "keepalive",
+            params: { id: minerId },
+            ip
+        });
+        const secondKeepalive = invokePoolMethod({
+            socket,
+            id: 1948,
+            method: "keepalive",
+            params: { id: minerId },
+            ip
+        });
+
+        assert.deepEqual(firstKeepalive.replies, [{ error: null, result: { status: "KEEPALIVED" } }]);
+        assert.deepEqual(secondKeepalive.finals, [{
+            error: "Rate limit exceeded for keepalive requests",
+            timeout: undefined
+        }]);
+    } finally {
+        global.config.pool.keepaliveRateLimitPerSecond = originalKeepaliveRateLimitPerSecond;
+        global.config.pool.keepaliveRateLimitBurst = originalKeepaliveRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
 test("wallet notifications reject login and are rate limited", async () => {
     const { runtime } = await startHarness();
     const notification = "Upgrade required";
