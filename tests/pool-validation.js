@@ -791,6 +791,167 @@ test("keepalive requests are rejected when the per-IP keepalive rate limit is ex
     }
 });
 
+test("getjob requests are rejected when the pre-share job request limit is exceeded", async () => {
+    const { runtime } = await startHarness();
+    const originalJobRequestRateLimitPerSecond = global.config.pool.jobRequestRateLimitPerSecond;
+    const originalJobRequestRateLimitBurst = global.config.pool.jobRequestRateLimitBurst;
+    const socket = {};
+    const ip = "10.0.0.80";
+
+    try {
+        global.config.pool.jobRequestRateLimitPerSecond = 1;
+        global.config.pool.jobRequestRateLimitBurst = 1;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1949,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "rate-getjob"
+            },
+            ip
+        });
+        const minerId = loginReply.replies[0].result.id;
+
+        const firstGetJob = invokePoolMethod({
+            socket,
+            id: 1950,
+            method: "getjob",
+            params: { id: minerId },
+            ip
+        });
+        const secondGetJob = invokePoolMethod({
+            socket,
+            id: 1951,
+            method: "getjob",
+            params: { id: minerId },
+            ip
+        });
+
+        assert.equal(firstGetJob.replies[0].error, null);
+        assert.deepEqual(secondGetJob.finals, [{
+            error: "Rate limit exceeded for job requests before first valid share",
+            timeout: undefined
+        }]);
+    } finally {
+        global.config.pool.jobRequestRateLimitPerSecond = originalJobRequestRateLimitPerSecond;
+        global.config.pool.jobRequestRateLimitBurst = originalJobRequestRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
+test("getjobtemplate and getjob share the same pre-share job request bucket", async () => {
+    const { runtime } = await startHarness();
+    const originalJobRequestRateLimitPerSecond = global.config.pool.jobRequestRateLimitPerSecond;
+    const originalJobRequestRateLimitBurst = global.config.pool.jobRequestRateLimitBurst;
+    const socket = {};
+    const ip = "10.0.0.81";
+
+    try {
+        global.config.pool.jobRequestRateLimitPerSecond = 1;
+        global.config.pool.jobRequestRateLimitBurst = 1;
+
+        invokePoolMethod({
+            socket,
+            id: 1952,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "rate-getjobtemplate"
+            },
+            ip
+        });
+
+        const firstTemplate = invokePoolMethod({
+            socket,
+            id: 1953,
+            method: "getjobtemplate",
+            params: {},
+            ip
+        });
+        const secondGetJob = invokePoolMethod({
+            socket,
+            id: 1954,
+            method: "getjob",
+            params: { id: socket.miner_id },
+            ip
+        });
+
+        assert.equal(firstTemplate.replies[0].error, null);
+        assert.deepEqual(secondGetJob.finals, [{
+            error: "Rate limit exceeded for job requests before first valid share",
+            timeout: undefined
+        }]);
+    } finally {
+        global.config.pool.jobRequestRateLimitPerSecond = originalJobRequestRateLimitPerSecond;
+        global.config.pool.jobRequestRateLimitBurst = originalJobRequestRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
+test("pre-share job request limits stop applying after the first accepted share", async () => {
+    const { runtime } = await startHarness();
+    const originalJobRequestRateLimitPerSecond = global.config.pool.jobRequestRateLimitPerSecond;
+    const originalJobRequestRateLimitBurst = global.config.pool.jobRequestRateLimitBurst;
+    const socket = {};
+    const ip = "10.0.0.82";
+
+    try {
+        global.config.pool.jobRequestRateLimitPerSecond = 1;
+        global.config.pool.jobRequestRateLimitBurst = 1;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1955,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "rate-getjob-after-share"
+            },
+            ip
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1956,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000013",
+                result: VALID_RESULT
+            },
+            ip
+        });
+        const getTemplateReply = invokePoolMethod({
+            socket,
+            id: 1957,
+            method: "getjobtemplate",
+            params: {},
+            ip
+        });
+        const getJobReply = invokePoolMethod({
+            socket,
+            id: 1958,
+            method: "getjob",
+            params: { id: socket.miner_id },
+            ip
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(getTemplateReply.replies[0].error, null);
+        assert.equal(getTemplateReply.finals.length, 0);
+        assert.equal(getJobReply.replies[0].error, null);
+        assert.equal(getJobReply.finals.length, 0);
+    } finally {
+        global.config.pool.jobRequestRateLimitPerSecond = originalJobRequestRateLimitPerSecond;
+        global.config.pool.jobRequestRateLimitBurst = originalJobRequestRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
 test("wallet notifications reject login and are rate limited", async () => {
     const { runtime } = await startHarness();
     const notification = "Upgrade required";

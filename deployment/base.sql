@@ -217,6 +217,8 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'submitRateLimitBurst', '5000', 'int', 'Burst size for the per-IP submit token bucket.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'keepaliveRateLimitPerSecond', '2', 'int', 'Refill rate for the per-IP keepalive token bucket.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'keepaliveRateLimitBurst', '20', 'int', 'Burst size for the per-IP keepalive token bucket.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'jobRequestRateLimitPerSecond', '5', 'int', 'Refill rate for the per-IP getjob/getjobtemplate bucket before the miner submits a valid share.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'jobRequestRateLimitBurst', '20', 'int', 'Burst size for the per-IP getjob/getjobtemplate bucket before the miner submits a valid share.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'rpcRateLimitBucketIdle', '600', 'int', 'Seconds an idle RPC rate-limit bucket is retained in memory.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'rpcRateLimitBucketMaxEntries', '20000', 'int', 'Maximum number of RPC rate-limit buckets stored in memory.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'protocolErrorLimit', '4', 'int', 'Number of parser/protocol errors allowed on one socket before it is closed.');
