@@ -407,6 +407,8 @@ function installTestGlobals() {
             submitRateLimitBurst: 5000,
             keepaliveRateLimitPerSecond: 2,
             keepaliveRateLimitBurst: 20,
+            jobRequestRateLimitPerSecond: 5,
+            jobRequestRateLimitBurst: 20,
             rpcRateLimitBucketIdle: 600,
             rpcRateLimitBucketMaxEntries: 20000,
             protocolErrorLimit: 4,
