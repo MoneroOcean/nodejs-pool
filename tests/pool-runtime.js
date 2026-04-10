@@ -1208,13 +1208,12 @@ test("trust state is created only after an accepted share", async () => {
     }
 });
 
-test("login bookkeeping prunes stale wallet and notification timestamps", async () => {
+test("login bookkeeping prunes stale notification timestamps", async () => {
     const { runtime } = await startHarness();
 
     try {
         const staleTime = Date.now() - 48 * 60 * 60 * 1000;
         const state = runtime.getState();
-        state.walletLastCheckTime["stale-wallet"] = staleTime;
         state.lastMinerNotifyTime["stale-wallet"] = staleTime;
         state.notifyAddresses[MAIN_WALLET] = "Update required";
 
@@ -1230,10 +1229,65 @@ test("login bookkeeping prunes stale wallet and notification timestamps", async 
             error: "Update required (miner will connect after several attempts)",
             timeout: undefined
         }]);
-        assert.equal("stale-wallet" in runtime.getState().walletLastCheckTime, false);
         assert.equal("stale-wallet" in runtime.getState().lastMinerNotifyTime, false);
-        assert.equal(MAIN_WALLET in runtime.getState().walletLastCheckTime, true);
         assert.equal(MAIN_WALLET in runtime.getState().lastMinerNotifyTime, true);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("email user records are created only after the first accepted share", async () => {
+    const mainPowVectors = createMainPowVectorMap();
+    const { runtime, mysql } = await startHarness({ realMainPow: true, mainPowVectors });
+    const socket = {};
+    const validVector = RX0_MAIN_SHARE_VECTORS[0];
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1988,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker:miner@example.com"
+            }
+        });
+
+        const loginUserQueries = mysql.queries.filter((entry) => entry.sql.includes("FROM users") || entry.sql.includes("INSERT INTO users"));
+        assert.equal(loginUserQueries.length, 0);
+
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const blockTemplate = runtime.getState().activeBlockTemplates[""];
+        const result = buildMainShareResult(runtime, socket, jobId, validVector.nonce);
+
+        job.difficulty = 1;
+        job.rewarded_difficulty = 1;
+        job.rewarded_difficulty2 = 1;
+        job.norm_diff = 1;
+        blockTemplate.difficulty = 1000;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1989,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: validVector.nonce,
+                result
+            }
+        });
+
+        await flushTimers();
+        await flushTimers();
+
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        const userQueries = mysql.queries.filter((entry) => entry.sql.includes("FROM users") || entry.sql.includes("INSERT INTO users"));
+        assert.equal(userQueries.filter((entry) => entry.sql.includes("FROM users")).length, 1);
+        assert.equal(userQueries.filter((entry) => entry.sql.includes("INSERT INTO users")).length, 1);
+        assert.equal(MAIN_WALLET in runtime.getState().walletLastCheckTime, true);
     } finally {
         await runtime.stop();
     }
