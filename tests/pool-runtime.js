@@ -1124,10 +1124,9 @@ test("closing a miner socket removes it from the active miner map", async () => 
     }
 });
 
-test("invalid logins do not retain arbitrary payout or agent keys", async () => {
+test("invalid logins are throttled by login value instead of ip or agent", async () => {
     const { runtime } = await startHarness();
     const originalWorkerId = process.env.WORKER_ID;
-    const ip = "10.0.0.91";
 
     try {
         process.env.WORKER_ID = "1";
@@ -1139,23 +1138,24 @@ test("invalid logins do not retain arbitrary payout or agent keys", async () => 
                 pass: "x",
                 agent: "BadAgent/1"
             },
-            ip
+            ip: "10.0.0.91"
         });
         invokePoolMethod({
             method: "login",
             params: {
-                login: "bad-wallet-two",
+                login: "bad-wallet-one",
                 pass: "x",
                 agent: "BadAgent/2"
             },
-            ip
+            ip: "10.0.0.92"
         });
 
         const state = runtime.getState();
         assert.deepEqual(Object.keys(state.minerAgents), []);
-        assert.deepEqual(Object.keys(state.lastMinerLogTime), ["invalid-login:" + ip]);
+        assert.deepEqual(Object.keys(state.lastMinerLogTime), ["invalid-address-login:bad-wallet-one"]);
         assert.equal("bad-wallet-one" in state.lastMinerLogTime, false);
-        assert.equal("bad-wallet-two" in state.lastMinerLogTime, false);
+        assert.equal("invalid-login:10.0.0.91" in state.lastMinerLogTime, false);
+        assert.equal("invalid-login:10.0.0.92" in state.lastMinerLogTime, false);
     } finally {
         if (typeof originalWorkerId === "undefined") delete process.env.WORKER_ID;
         else process.env.WORKER_ID = originalWorkerId;
