@@ -412,6 +412,7 @@ function installTestGlobals() {
             rpcRateLimitBucketIdle: 600,
             rpcRateLimitBucketMaxEntries: 20000,
             protocolErrorLimit: 4,
+            invalidJobIdLimitBeforeShare: 4,
             banEnabled: true,
             banThreshold: 5,
             banPercent: 50

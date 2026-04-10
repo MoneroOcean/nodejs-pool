@@ -1917,6 +1917,60 @@ test("invalid job id spam does not keep an authenticated miner alive", async () 
     }
 });
 
+test("repeated invalid job ids close the socket before the first valid share", async () => {
+    const { runtime } = await startHarness();
+    const originalInvalidJobIdLimitBeforeShare = global.config.pool.invalidJobIdLimitBeforeShare;
+    const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        global.config.pool.invalidJobIdLimitBeforeShare = 2;
+        global.config.pool.minerFirstShareTimeout = 60;
+
+        const loginReply = await requestRawJson(socket, {
+            id: 1949,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "bad-job-id-limit"
+            }
+        });
+        const minerId = loginReply.result.id;
+
+        const firstSubmit = await requestRawJson(socket, {
+            id: 1950,
+            method: "submit",
+            params: {
+                id: minerId,
+                job_id: "missing-job-1",
+                nonce: "00000001",
+                result: VALID_RESULT
+            }
+        });
+        assert.equal(firstSubmit.error.message, "Invalid job id");
+
+        const secondSubmit = await requestRawJson(socket, {
+            id: 1951,
+            method: "submit",
+            params: {
+                id: minerId,
+                job_id: "missing-job-2",
+                nonce: "00000002",
+                result: VALID_RESULT
+            }
+        });
+        assert.equal(secondSubmit.error.message, "Invalid job id");
+
+        await waitForSocketClose(socket, 1000);
+        assert.equal(runtime.getState().activeMiners.has(minerId), false);
+    } finally {
+        global.config.pool.invalidJobIdLimitBeforeShare = originalInvalidJobIdLimitBeforeShare;
+        global.config.pool.minerFirstShareTimeout = originalFirstShareTimeout;
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
 test("deferred share flush preserves trustedShare=false for verified shares", async () => {
     const { runtime, database } = await startHarness();
     const originalShareAccTime = global.config.pool.shareAccTime;
