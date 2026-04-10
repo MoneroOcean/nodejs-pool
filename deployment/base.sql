@@ -222,6 +222,7 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'rpcRateLimitBucketIdle', '600', 'int', 'Seconds an idle RPC rate-limit bucket is retained in memory.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'rpcRateLimitBucketMaxEntries', '20000', 'int', 'Maximum number of RPC rate-limit buckets stored in memory.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'protocolErrorLimit', '4', 'int', 'Number of parser/protocol errors allowed on one socket before it is closed.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'invalidJobIdLimitBeforeShare', '4', 'int', 'Number of invalid job_id submits allowed before the miner submits a valid share.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'shareAccTime', '60', 'int', 'Length of time shares are accumulated in seconds');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'trustChange', '1', 'int', 'Change in the miner trust in percent');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'trustMin', '20', 'int', 'Minimum level of miner trust');
