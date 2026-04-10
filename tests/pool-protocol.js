@@ -775,6 +775,63 @@ test("eth subscribe and authorize fail cleanly when no extranonces are available
     }
 });
 
+test("extranonce exhaustion notifications are rate-limited", async () => {
+    const { runtime } = await startHarness({ freeEthExtranonces: [] });
+    const originalNow = Date.now;
+    const originalCooldown = global.config.pool.ethExtranonceOverflowNotifyCooldown;
+    let fakeNow = 1000;
+
+    try {
+        Date.now = () => fakeNow;
+        global.config.pool.ethExtranonceOverflowNotifyCooldown = 60;
+
+        const firstAuthorize = invokePoolMethod({
+            socket: {},
+            id: 760,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-overflow-one"],
+            portData: global.config.ports[1]
+        });
+        assert.deepEqual(firstAuthorize.finals, [{
+            error: "Not enough extranoces. Switch to other pool node.",
+            timeout: undefined
+        }]);
+        assert.equal(global.support.emails.length, 1);
+
+        fakeNow += 1000;
+        const secondAuthorize = invokePoolMethod({
+            socket: {},
+            id: 761,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-overflow-two"],
+            portData: global.config.ports[1]
+        });
+        assert.deepEqual(secondAuthorize.finals, [{
+            error: "Not enough extranoces. Switch to other pool node.",
+            timeout: undefined
+        }]);
+        assert.equal(global.support.emails.length, 1);
+
+        fakeNow += 60000;
+        const thirdAuthorize = invokePoolMethod({
+            socket: {},
+            id: 762,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-overflow-three"],
+            portData: global.config.ports[1]
+        });
+        assert.deepEqual(thirdAuthorize.finals, [{
+            error: "Not enough extranoces. Switch to other pool node.",
+            timeout: undefined
+        }]);
+        assert.equal(global.support.emails.length, 2);
+    } finally {
+        Date.now = originalNow;
+        global.config.pool.ethExtranonceOverflowNotifyCooldown = originalCooldown;
+        await runtime.stop();
+    }
+});
+
 test("eth submit sent before authorize is rejected as unauthenticated", async () => {
     const { runtime } = await startHarness();
     const socket = {};
@@ -882,7 +939,7 @@ test("closing an eth stratum socket releases its extranonce for reuse", async ()
     }
 });
 
-test("closing a subscribed eth socket before authorize releases its extranonce for reuse", async () => {
+test("subscribe previews do not consume extranonces before authorize", async () => {
     const { runtime } = await startHarness({ freeEthExtranonces: [7] });
     const firstClient = new JsonLineClient(ETH_PORT);
     const secondClient = new JsonLineClient(ETH_PORT);
@@ -895,10 +952,7 @@ test("closing a subscribed eth socket before authorize releases its extranonce f
             params: ["HarnessEthMiner/1.0"]
         });
         assert.equal(firstSubscribe.error, null);
-        const extranonce = firstSubscribe.result[1];
-
-        await firstClient.close();
-        await flushTimers();
+        const previewExtranonce = firstSubscribe.result[1];
 
         await secondClient.connect();
         const secondSubscribe = await secondClient.request({
@@ -907,7 +961,15 @@ test("closing a subscribed eth socket before authorize releases its extranonce f
             params: ["HarnessEthMiner/1.0"]
         });
         assert.equal(secondSubscribe.error, null);
-        assert.equal(secondSubscribe.result[1], extranonce);
+        assert.equal(secondSubscribe.result[1], previewExtranonce);
+
+        const authorizeReply = await secondClient.request({
+            id: 59,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-worker-preview"]
+        });
+        assert.equal(authorizeReply.error, null);
+        assert.equal(authorizeReply.result, true);
     } finally {
         await firstClient.close();
         await secondClient.close();

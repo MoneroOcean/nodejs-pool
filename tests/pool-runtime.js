@@ -1954,6 +1954,33 @@ test("first-share timeout closes authenticated miners that never submit a valid 
     }
 });
 
+test("claimed extranonce sessions use the shorter first-share timeout", async () => {
+    const { runtime } = await startHarness({ freeEthExtranonces: [7] });
+    const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
+    const originalClaimedExtranonceFirstShareTimeout = global.config.pool.claimedExtranonceFirstShareTimeout;
+    const socket = await openRawSocket(ETH_PORT);
+
+    try {
+        global.config.pool.minerFirstShareTimeout = 60;
+        global.config.pool.claimedExtranonceFirstShareTimeout = 1;
+        const authorizeReply = await requestRawJson(socket, {
+            id: 19425,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "claimed-extranonce-timeout"]
+        });
+
+        assert.equal(authorizeReply.error, null);
+        assert.equal(authorizeReply.result, true);
+        await waitForSocketClose(socket, 2000);
+        assert.equal(runtime.getState().activeMiners.size, 0);
+    } finally {
+        global.config.pool.minerFirstShareTimeout = originalFirstShareTimeout;
+        global.config.pool.claimedExtranonceFirstShareTimeout = originalClaimedExtranonceFirstShareTimeout;
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
 test("keepalive traffic does not bypass the first-share timeout", async () => {
     const { runtime } = await startHarness();
     const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
