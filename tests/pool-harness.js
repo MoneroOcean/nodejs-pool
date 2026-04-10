@@ -393,10 +393,23 @@ function installTestGlobals() {
             minerThrottleShareWindow: 10,
             minerThrottleSharePerSec: 1000,
             minerTimeout: 60,
+            socketAuthTimeout: 15,
+            minerFirstShareTimeout: 180,
             trustThreshold: 1,
             trustMin: 0,
             trustedMiners: false,
             workerMax: 20,
+            maxConnectionsPerIP: 256,
+            maxConnectionsPerSubnet: 1024,
+            loginRateLimitPerSecond: 5,
+            loginRateLimitBurst: 100,
+            submitRateLimitPerSecond: 250,
+            submitRateLimitBurst: 5000,
+            keepaliveRateLimitPerSecond: 2,
+            keepaliveRateLimitBurst: 20,
+            rpcRateLimitBucketIdle: 600,
+            rpcRateLimitBucketMaxEntries: 20000,
+            protocolErrorLimit: 4,
             banEnabled: true,
             banThreshold: 5,
             banPercent: 50
@@ -516,6 +529,10 @@ async function openRawSocket(port) {
 
 function waitForSocketClose(socket, timeout = 1000) {
     return new Promise((resolve, reject) => {
+        if (socket.destroyed) {
+            resolve();
+            return;
+        }
         const timer = setTimeout(() => reject(new Error("Timed out waiting for socket close")), timeout);
         socket.once("close", () => {
             clearTimeout(timer);

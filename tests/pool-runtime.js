@@ -77,6 +77,11 @@ async function flushShareAccumulator(check, timeout = 200) {
     throw new Error("Timed out waiting for deferred share flush");
 }
 
+async function requestRawJson(socket, body) {
+    socket.write(`${JSON.stringify(body)}\n`);
+    return await waitForSocketJson(socket);
+}
+
 test.describe("pool runtime", { concurrency: false }, () => {
 test("trusted miners can take the trusted-share fast path", async () => {
     const validVector = RX0_MAIN_SHARE_VECTORS[0];
@@ -911,6 +916,105 @@ test("socket parser handles JSON requests split across multiple TCP chunks", asy
     }
 });
 
+test("unauthenticated sockets are closed after socketAuthTimeout", async () => {
+    const { runtime } = await startHarness();
+    const originalSocketAuthTimeout = global.config.pool.socketAuthTimeout;
+    let socket;
+
+    try {
+        global.config.pool.socketAuthTimeout = 1;
+        socket = await openRawSocket(MAIN_PORT);
+        await waitForSocketClose(socket, 2000);
+    } finally {
+        global.config.pool.socketAuthTimeout = originalSocketAuthTimeout;
+        if (socket) socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("fatal protocol replies close the socket immediately", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        const reply = await requestRawJson(socket, {
+            id: 1811,
+            method: "keepalive",
+            params: { id: "missing-miner" }
+        });
+
+        assert.equal(reply.error.message, "Unauthenticated");
+        await waitForSocketClose(socket, 500);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("repeated protocol-shape errors close the socket after the configured threshold", async () => {
+    const { runtime } = await startHarness();
+    const originalProtocolErrorLimit = global.config.pool.protocolErrorLimit;
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        global.config.pool.protocolErrorLimit = 3;
+
+        socket.write(`${JSON.stringify({ method: "login", params: { login: MAIN_WALLET } })}\n`);
+        await assertNoSocketData(socket);
+
+        socket.write(`${JSON.stringify({ id: 1812, params: { login: MAIN_WALLET } })}\n`);
+        await assertNoSocketData(socket);
+
+        socket.write(`${JSON.stringify({ params: { login: MAIN_WALLET } })}\n`);
+        await waitForSocketClose(socket, 1000);
+    } finally {
+        global.config.pool.protocolErrorLimit = originalProtocolErrorLimit;
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("per-IP connection limits close excess sockets without touching the existing connection", async () => {
+    const { runtime } = await startHarness();
+    const originalMaxConnectionsPerIP = global.config.pool.maxConnectionsPerIP;
+    const first = await openRawSocket(MAIN_PORT);
+    let second;
+
+    try {
+        global.config.pool.maxConnectionsPerIP = 1;
+        second = await openRawSocket(MAIN_PORT);
+        await waitForSocketClose(second, 1000);
+        await assertNoSocketData(first);
+    } finally {
+        global.config.pool.maxConnectionsPerIP = originalMaxConnectionsPerIP;
+        first.destroy();
+        if (second) second.destroy();
+        await runtime.stop();
+    }
+});
+
+test("per-subnet connection limits close excess sockets independently from the per-IP limit", async () => {
+    const { runtime } = await startHarness();
+    const originalMaxConnectionsPerIP = global.config.pool.maxConnectionsPerIP;
+    const originalMaxConnectionsPerSubnet = global.config.pool.maxConnectionsPerSubnet;
+    const first = await openRawSocket(MAIN_PORT);
+    let second;
+
+    try {
+        global.config.pool.maxConnectionsPerIP = 10;
+        global.config.pool.maxConnectionsPerSubnet = 1;
+        second = await openRawSocket(MAIN_PORT);
+        await waitForSocketClose(second, 1000);
+        await assertNoSocketData(first);
+    } finally {
+        global.config.pool.maxConnectionsPerIP = originalMaxConnectionsPerIP;
+        global.config.pool.maxConnectionsPerSubnet = originalMaxConnectionsPerSubnet;
+        first.destroy();
+        if (second) second.destroy();
+        await runtime.stop();
+    }
+});
+
 test("closing a miner socket removes it from the active miner map", async () => {
     const { runtime } = await startHarness();
     const client = new JsonLineClient(MAIN_PORT);
@@ -1647,6 +1751,9 @@ test("checkAliveMiners removes miners that exceed the timeout", async () => {
             }
         });
         const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        miner.hasSubmittedValidShare = true;
+        miner.lastProtocolActivity = Date.now() - 5000;
+        miner.lastValidShareTimeMs = Date.now() - 5000;
         miner.lastContact = Date.now() - 5000;
 
         poolModule.checkAliveMiners();
@@ -1654,6 +1761,158 @@ test("checkAliveMiners removes miners that exceed the timeout", async () => {
         assert.equal(runtime.getState().activeMiners.has(socket.miner_id), false);
     } finally {
         global.config.pool.minerTimeout = originalMinerTimeout;
+        await runtime.stop();
+    }
+});
+
+test("checkAliveMiners closes the underlying socket for timed-out miners", async () => {
+    const { runtime } = await startHarness();
+    const originalMinerTimeout = global.config.pool.minerTimeout;
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        global.config.pool.minerTimeout = 1;
+        const loginReply = await requestRawJson(socket, {
+            id: 1941,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "timeout-socket-close"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(loginReply.result.id);
+        miner.hasSubmittedValidShare = true;
+        miner.lastProtocolActivity = Date.now() - 5000;
+        miner.lastValidShareTimeMs = Date.now() - 5000;
+        miner.lastContact = Date.now() - 5000;
+
+        poolModule.checkAliveMiners();
+
+        await waitForSocketClose(socket, 1000);
+        assert.equal(runtime.getState().activeMiners.has(loginReply.result.id), false);
+    } finally {
+        global.config.pool.minerTimeout = originalMinerTimeout;
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("first-share timeout closes authenticated miners that never submit a valid share", async () => {
+    const { runtime } = await startHarness();
+    const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        global.config.pool.minerFirstShareTimeout = 1;
+        const loginReply = await requestRawJson(socket, {
+            id: 1942,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "no-share-timeout"
+            }
+        });
+
+        assert.equal(loginReply.error, null);
+        await waitForSocketClose(socket, 2000);
+        assert.equal(runtime.getState().activeMiners.has(loginReply.result.id), false);
+    } finally {
+        global.config.pool.minerFirstShareTimeout = originalFirstShareTimeout;
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("keepalive traffic does not bypass the first-share timeout", async () => {
+    const { runtime } = await startHarness();
+    const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        global.config.pool.minerFirstShareTimeout = 1;
+        const loginReply = await requestRawJson(socket, {
+            id: 1943,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "keepalive-only"
+            }
+        });
+        const minerId = loginReply.result.id;
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const firstKeepalive = await requestRawJson(socket, {
+            id: 1944,
+            method: "keepalive",
+            params: { id: minerId }
+        });
+        assert.equal(firstKeepalive.result.status, "KEEPALIVED");
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const secondKeepalive = await requestRawJson(socket, {
+            id: 1945,
+            method: "keepalive",
+            params: { id: minerId }
+        });
+        assert.equal(secondKeepalive.result.status, "KEEPALIVED");
+
+        await waitForSocketClose(socket, 2000);
+        assert.equal(runtime.getState().activeMiners.has(minerId), false);
+    } finally {
+        global.config.pool.minerFirstShareTimeout = originalFirstShareTimeout;
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("invalid job id spam does not keep an authenticated miner alive", async () => {
+    const { runtime } = await startHarness();
+    const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        global.config.pool.minerFirstShareTimeout = 1;
+        const loginReply = await requestRawJson(socket, {
+            id: 1946,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "bad-job-id-spam"
+            }
+        });
+        const minerId = loginReply.result.id;
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const firstSubmit = await requestRawJson(socket, {
+            id: 1947,
+            method: "submit",
+            params: {
+                id: minerId,
+                job_id: "missing-job-1",
+                nonce: "00000001",
+                result: VALID_RESULT
+            }
+        });
+        assert.equal(firstSubmit.error.message, "Invalid job id");
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const secondSubmit = await requestRawJson(socket, {
+            id: 1948,
+            method: "submit",
+            params: {
+                id: minerId,
+                job_id: "missing-job-2",
+                nonce: "00000002",
+                result: VALID_RESULT
+            }
+        });
+        assert.equal(secondSubmit.error.message, "Invalid job id");
+
+        await waitForSocketClose(socket, 2000);
+        assert.equal(runtime.getState().activeMiners.has(minerId), false);
+    } finally {
+        global.config.pool.minerFirstShareTimeout = originalFirstShareTimeout;
+        socket.destroy();
         await runtime.stop();
     }
 });
