@@ -1562,6 +1562,82 @@ test("jobs reject new nonces after reaching the tracked submission cap without e
     }
 });
 
+test("proxy-tracked jobs use the larger tracked submission cap", async () => {
+    const { runtime } = await startHarness();
+    const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
+    const originalThrottleWindow = global.config.pool.minerThrottleShareWindow;
+    const socket = {};
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 2;
+        global.config.pool.minerThrottleShareWindow = 5;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 201,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "proxy-submission-cap",
+                agent: "xmrig-proxy/6.0.0"
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const trackedSubmissionLimit = global.config.pool.minerThrottleShareWindow * global.config.pool.minerThrottleSharePerSec * 1000;
+
+        assert.equal(miner.proxyMinerName, MAIN_WALLET);
+        assert.equal(MAIN_WALLET in runtime.getState().proxyMiners, true);
+
+        job.submissions = new Map();
+        for (let index = 0; index < trackedSubmissionLimit - 1; ++index) {
+            job.submissions.set(index.toString(16).padStart(8, "0"), 1);
+        }
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 202,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "fffffff0",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{
+            error: null,
+            result: { status: "OK" }
+        }]);
+        assert.equal(job.submissions.size, trackedSubmissionLimit);
+        assert.equal(job.submissions.has("fffffff0"), true);
+
+        const cappedReply = invokePoolMethod({
+            socket,
+            id: 203,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "fffffff1",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(cappedReply.replies, [{
+            error: "Too many share submissions for the current job. Wait for a new job.",
+            result: undefined
+        }]);
+        assert.equal(job.submissions.has("fffffff1"), false);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
+        global.config.pool.minerThrottleShareWindow = originalThrottleWindow;
+        await runtime.stop();
+    }
+});
+
 test("successful logins prune stale tracked agents and cap stored agent length", async () => {
     const { runtime } = await startHarness();
     const originalWorkerId = process.env.WORKER_ID;
