@@ -1356,9 +1356,60 @@ test("expired shares do not retain unique nonce entries", async () => {
         });
 
         assert.deepEqual(firstReply.replies, [{ error: "Block expired", result: undefined }]);
-        assert.deepEqual(secondReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.deepEqual(secondReply.finals, [{ error: "Unauthenticated", timeout: undefined }]);
         assert.equal(originalJob.submissions.size, 0);
     } finally {
+        await runtime.stop();
+    }
+});
+
+test("expired shares close zero-trust miners before any valid share is submitted", async () => {
+    const { runtime } = await startHarness();
+    const client = new JsonLineClient(MAIN_PORT);
+
+    try {
+        await client.connect();
+
+        const loginReply = await client.request({
+            id: 1981,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-expired-close"
+            }
+        });
+        const minerId = loginReply.result.id;
+        const miner = runtime.getState().activeMiners.get(minerId);
+        const jobId = loginReply.result.job.job_id;
+        const originalJob = miner.validJobs.toarray().find((job) => job.id === jobId);
+
+        for (let height = 102; height <= 113; height += 1) {
+            runtime.setTemplate(createBaseTemplate({
+                coin: "",
+                port: MAIN_PORT,
+                idHash: `main-expired-close-${height}`,
+                height
+            }));
+        }
+
+        miner.validJobs.enq(originalJob);
+
+        const submitReply = await client.request({
+            id: 1982,
+            method: "submit",
+            params: {
+                id: minerId,
+                job_id: jobId,
+                nonce: "00000023",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.equal(submitReply.error.message, "Block expired");
+        await waitForSocketClose(client.socket, 1000);
+        assert.equal(runtime.getState().activeMiners.has(minerId), false);
+    } finally {
+        await client.close();
         await runtime.stop();
     }
 });
