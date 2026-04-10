@@ -1163,6 +1163,46 @@ test("invalid logins do not retain arbitrary payout or agent keys", async () => 
     }
 });
 
+test("banned payout logins are throttled by payout across IPs", async () => {
+    const { runtime } = await startHarness();
+    const originalConsoleLog = console.log;
+    const loggedMessages = [];
+
+    try {
+        runtime.getState().bannedAddresses[MAIN_WALLET] = "manual blocklist";
+        console.log = function patchedConsoleLog(message) {
+            loggedMessages.push(message);
+        };
+
+        invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-one"
+            },
+            ip: "10.0.0.92"
+        });
+        invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-two"
+            },
+            ip: "10.0.0.93"
+        });
+
+        const state = runtime.getState();
+        assert.deepEqual(Object.keys(state.lastMinerLogTime), ["banned-login:" + MAIN_WALLET]);
+        assert.equal("invalid-login:10.0.0.92" in state.lastMinerLogTime, false);
+        assert.equal("invalid-login:10.0.0.93" in state.lastMinerLogTime, false);
+        assert.equal(loggedMessages.length, 1);
+        assert.match(loggedMessages[0], /Permanently banned payment address/);
+    } finally {
+        console.log = originalConsoleLog;
+        await runtime.stop();
+    }
+});
+
 test("trust state is created only after an accepted share", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
