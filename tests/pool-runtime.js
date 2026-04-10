@@ -974,6 +974,86 @@ test("repeated protocol-shape errors close the socket after the configured thres
     }
 });
 
+test("unknown RPC methods close pre-share sockets immediately", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        const loginReply = await requestRawJson(socket, {
+            id: 1813,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "unknown-method-pre-share"
+            }
+        });
+        assert.equal(loginReply.error, null);
+
+        const reply = await requestRawJson(socket, {
+            id: 1814,
+            method: "mining.mystery",
+            params: { id: loginReply.result.id }
+        });
+
+        assert.equal(reply.error.message, "Unknown RPC method");
+        await waitForSocketClose(socket, 1000);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("unknown RPC methods count toward the protocol error limit after a valid share", async () => {
+    const { runtime } = await startHarness();
+    const originalProtocolErrorLimit = global.config.pool.protocolErrorLimit;
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        global.config.pool.protocolErrorLimit = 2;
+
+        const loginReply = await requestRawJson(socket, {
+            id: 1815,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "unknown-method-post-share"
+            }
+        });
+        const shareReply = await requestRawJson(socket, {
+            id: 1816,
+            method: "submit",
+            params: {
+                id: loginReply.result.id,
+                job_id: loginReply.result.job.job_id,
+                nonce: "00000014",
+                result: VALID_RESULT
+            }
+        });
+        assert.equal(shareReply.error, null);
+
+        const firstUnknownReply = await requestRawJson(socket, {
+            id: 1817,
+            method: "mining.mystery",
+            params: { id: loginReply.result.id }
+        });
+        assert.equal(firstUnknownReply.error.message, "Unknown RPC method");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        assert.equal(socket.destroyed, false);
+
+        const secondUnknownReply = await requestRawJson(socket, {
+            id: 1818,
+            method: "mining.mystery",
+            params: { id: loginReply.result.id }
+        });
+        assert.equal(secondUnknownReply.error.message, "Unknown RPC method");
+        await waitForSocketClose(socket, 1000);
+    } finally {
+        global.config.pool.protocolErrorLimit = originalProtocolErrorLimit;
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
 test("per-IP connection limits close excess sockets without touching the existing connection", async () => {
     const { runtime } = await startHarness();
     const originalMaxConnectionsPerIP = global.config.pool.maxConnectionsPerIP;
