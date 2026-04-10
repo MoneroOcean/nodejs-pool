@@ -681,6 +681,43 @@ test("login requests are rejected when the per-IP login rate limit is exceeded",
     }
 });
 
+test("subscribe-phase requests share the login rate limit bucket", async () => {
+    const { runtime } = await startHarness();
+    const originalLoginRateLimitPerSecond = global.config.pool.loginRateLimitPerSecond;
+    const originalLoginRateLimitBurst = global.config.pool.loginRateLimitBurst;
+    const ip = "10.0.0.83";
+
+    try {
+        global.config.pool.loginRateLimitPerSecond = 1;
+        global.config.pool.loginRateLimitBurst = 1;
+
+        const first = invokePoolMethod({
+            socket: {},
+            id: 19421,
+            method: "mining.subscribe",
+            params: ["rate-subscribe-agent"],
+            ip
+        });
+        const second = invokePoolMethod({
+            socket: {},
+            id: 19422,
+            method: "mining.extranonce.subscribe",
+            params: [],
+            ip
+        });
+
+        assert.equal(first.replies[0].error, null);
+        assert.deepEqual(second.finals, [{
+            error: "Rate limit exceeded for login requests",
+            timeout: undefined
+        }]);
+    } finally {
+        global.config.pool.loginRateLimitPerSecond = originalLoginRateLimitPerSecond;
+        global.config.pool.loginRateLimitBurst = originalLoginRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
 test("submit requests are rejected when the per-IP submit rate limit is exceeded", async () => {
     const { runtime } = await startHarness();
     const originalSubmitRateLimitPerSecond = global.config.pool.submitRateLimitPerSecond;
