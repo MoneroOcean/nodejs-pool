@@ -439,7 +439,6 @@ function installTestGlobals() {
             minerTimeout: 60,
             socketAuthTimeout: 15,
             minerFirstShareTimeout: 180,
-            claimedExtranonceFirstShareTimeout: 30,
             ethExtranonceOverflowNotifyCooldown: 600,
             trustThreshold: 1,
             trustMin: 0,
