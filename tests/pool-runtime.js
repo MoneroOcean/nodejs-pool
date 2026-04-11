@@ -2175,15 +2175,13 @@ test("first-share timeout closes authenticated miners that never submit a valid 
     }
 });
 
-test("claimed extranonce sessions use the shorter first-share timeout", async () => {
+test("claimed extranonce sessions use the regular first-share timeout", async () => {
     const { runtime } = await startHarness({ freeEthExtranonces: [7] });
     const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
-    const originalClaimedExtranonceFirstShareTimeout = global.config.pool.claimedExtranonceFirstShareTimeout;
     const socket = await openRawSocket(ETH_PORT);
 
     try {
-        global.config.pool.minerFirstShareTimeout = 60;
-        global.config.pool.claimedExtranonceFirstShareTimeout = 1;
+        global.config.pool.minerFirstShareTimeout = 1;
         const authorizeReply = await requestRawJson(socket, {
             id: 19425,
             method: "mining.authorize",
@@ -2196,24 +2194,23 @@ test("claimed extranonce sessions use the shorter first-share timeout", async ()
         assert.equal(runtime.getState().activeMiners.size, 0);
     } finally {
         global.config.pool.minerFirstShareTimeout = originalFirstShareTimeout;
-        global.config.pool.claimedExtranonceFirstShareTimeout = originalClaimedExtranonceFirstShareTimeout;
         socket.destroy();
         await runtime.stop();
     }
 });
 
-test("claimed extranonce sessions keep the regular first-share timeout for slow-start DAG algos", async () => {
-    const { runtime } = await startHarness({ freeEthExtranonces: [7, 8, 9] });
+test("claimed extranonce sessions keep the regular first-share timeout regardless of algo", async () => {
+    const { runtime } = await startHarness({ freeEthExtranonces: [7, 8, 9, 10] });
     const originalFirstShareTimeout = global.config.pool.minerFirstShareTimeout;
-    const originalClaimedExtranonceFirstShareTimeout = global.config.pool.claimedExtranonceFirstShareTimeout;
     const cases = [
+        "claimed-extranonce-timeout",
         "claimed-extranonce-timeout~autolykos2",
+        "claimed-extranonce-timeout~c29",
         "claimed-extranonce-timeout~etchash"
     ];
 
     try {
         global.config.pool.minerFirstShareTimeout = 60;
-        global.config.pool.claimedExtranonceFirstShareTimeout = 1;
 
         for (const pass of cases) {
             const socket = await openRawSocket(ETH_PORT);
@@ -2235,7 +2232,6 @@ test("claimed extranonce sessions keep the regular first-share timeout for slow-
         }
     } finally {
         global.config.pool.minerFirstShareTimeout = originalFirstShareTimeout;
-        global.config.pool.claimedExtranonceFirstShareTimeout = originalClaimedExtranonceFirstShareTimeout;
         await runtime.stop();
     }
 });
