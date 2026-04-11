@@ -1683,12 +1683,11 @@ test("eth-style direct miners still accept submits that provide only the nonce s
     }
 });
 
-test("eth-style direct miners reject full nonces that belong to a different miner extranonce", async () => {
-    const { runtime, database } = await startHarness({ freeEthExtranonces: [7, 8] });
+test("eth-style direct miners accept full nonces that do not start with the subscribe extranonce", async () => {
+    const { runtime, database } = await startHarness({ freeEthExtranonces: [0xff7e] });
     const originalPortBlobType = global.coinFuncs.portBlobType;
     const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
-    const socketA = {};
-    const socketB = {};
+    const socket = {};
     let observedNonce = null;
 
     try {
@@ -1704,60 +1703,57 @@ test("eth-style direct miners reject full nonces that belong to a different mine
             return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
         };
 
-        const subscribeReplyA = invokePoolMethod({
-            socket: socketA,
+        const subscribeReply = invokePoolMethod({
+            socket,
             id: 120,
             method: "mining.subscribe",
             params: ["HarnessEthMiner/1.0"],
             portData: global.config.ports[1]
         });
-        const extraNonceA = subscribeReplyA.replies[0].result[1];
+        const extraNonce = subscribeReply.replies[0].result[1];
+        assert.equal(extraNonce, "ff7e");
 
-        invokePoolMethod({
-            socket: socketA,
+        const authorizeReply = invokePoolMethod({
+            socket,
             id: 121,
             method: "mining.authorize",
-            params: [ETH_WALLET, "eth-style-full-nonce-a"],
+            params: [ETH_WALLET, "eth-style-live-full-nonce"],
             portData: global.config.ports[1]
         });
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const notifyPush = authorizeReply.pushes.find((message) => message.method === "mining.notify");
+        const job = miner.validJobs.toarray().find((entry) => entry.id === notifyPush.params[0]);
+        job.difficulty = 1;
+        job.rewarded_difficulty = 1;
+        job.rewarded_difficulty2 = 1;
+        job.norm_diff = 1;
+        state.activeBlockTemplates.ETH.hash = "34".repeat(32);
+        state.activeBlockTemplates.ETH.difficulty = 1000;
 
-        const subscribeReplyB = invokePoolMethod({
-            socket: socketB,
-            id: 122,
-            method: "mining.subscribe",
-            params: ["HarnessEthMiner/1.0"],
-            portData: global.config.ports[1]
-        });
-        const extraNonceB = subscribeReplyB.replies[0].result[1];
-        assert.notEqual(extraNonceA, extraNonceB);
-
-        const authorizeReplyB = invokePoolMethod({
-            socket: socketB,
-            id: 123,
-            method: "mining.authorize",
-            params: [ETH_WALLET, "eth-style-full-nonce-b"],
-            portData: global.config.ports[1]
-        });
-        const notifyPushB = authorizeReplyB.pushes.find((message) => message.method === "mining.notify");
+        // Captured from SRBMiner 3.2.5 against sg.moneroocean.stream:10001.
+        const liveCapturedNonce = "0f34211f05a0f09a";
+        assert.equal(liveCapturedNonce.startsWith(extraNonce), false);
 
         const submitReply = invokePoolMethod({
-            socket: socketB,
-            id: 124,
+            socket,
+            id: 122,
             method: "mining.submit",
             params: [
                 ETH_WALLET,
-                notifyPushB.params[0],
-                `0x${extraNonceA}000000000001`,
+                notifyPush.params[0],
+                `0x${liveCapturedNonce}`,
                 `0x${"11".repeat(32)}`,
                 `0x${"22".repeat(32)}`
             ],
             portData: global.config.ports[1]
         });
 
-        assert.deepEqual(submitReply.replies, [{ error: "Duplicate share", result: undefined }]);
-        assert.equal(database.invalidShares.length, 1);
-        assert.equal(database.shares.length, 0);
-        assert.equal(observedNonce, null);
+        await flushShareAccumulator(() => database.shares.length === 1);
+        assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
+        assert.equal(database.invalidShares.length, 0);
+        assert.equal(database.shares.length, 1);
+        assert.equal(observedNonce, liveCapturedNonce);
     } finally {
         global.coinFuncs.portBlobType = originalPortBlobType;
         global.coinFuncs.slowHashBuff = originalSlowHashBuff;
