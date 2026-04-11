@@ -58,6 +58,8 @@ build/Release
 # Dependency directories
 node_modules
 jspm_packages
+.cache/live-miners
+test-artifacts/live-pool
 
 # Optional npm cache directory
 .npm

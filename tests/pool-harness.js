@@ -8,14 +8,58 @@
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const protobuf = require("protocol-buffers");
 const cnUtil = require("cryptoforknote-util");
 const multiHashing = require("cryptonight-hashing");
 
 const supportFactory = require("../lib/support.js");
 
-const MAIN_PORT = 39001;
-const ETH_PORT = 39002;
+function allocateTestPorts() {
+    const script = `
+        const net = require("node:net");
+
+        async function open() {
+            return await new Promise((resolve, reject) => {
+                const server = net.createServer();
+                server.unref();
+                server.listen(0, "127.0.0.1", () => resolve(server));
+                server.once("error", reject);
+            });
+        }
+
+        (async () => {
+            const main = await open();
+            const eth = await open();
+            const ports = [main.address().port, eth.address().port];
+            process.stdout.write(JSON.stringify(ports));
+            await Promise.all([
+                new Promise((resolve) => main.close(resolve)),
+                new Promise((resolve) => eth.close(resolve))
+            ]);
+        })().catch((error) => {
+            console.error(error.stack || error.message);
+            process.exit(1);
+        });
+    `;
+
+    const result = spawnSync(process.execPath, ["-e", script], {
+        encoding: "utf8"
+    });
+
+    if (result.status !== 0) {
+        throw new Error(`Failed to allocate free test ports: ${result.stderr || result.stdout}`);
+    }
+
+    const ports = JSON.parse(result.stdout);
+    if (!Array.isArray(ports) || ports.length !== 2) {
+        throw new Error(`Unexpected free test port allocation result: ${result.stdout}`);
+    }
+
+    return ports;
+}
+
+const [MAIN_PORT, ETH_PORT] = allocateTestPorts();
 const MAIN_WALLET = "4".repeat(95);
 const ETH_WALLET = "5".repeat(95);
 const ALT_WALLET = "6".repeat(95);

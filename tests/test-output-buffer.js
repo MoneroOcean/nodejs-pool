@@ -9,6 +9,7 @@ const originalConsole = {
 
 const buffered = [];
 let flushed = false;
+const shouldFlushBufferedOutput = process.env.NODE_TEST_FLUSH_BUFFERED_OUTPUT === "1";
 
 function bufferConsole(method) {
     return (...args) => {
@@ -33,5 +34,5 @@ function flushBufferedOutput() {
 }
 
 process.on("exit", (code) => {
-    if (code !== 0) flushBufferedOutput();
+    if (shouldFlushBufferedOutput && code !== 0) flushBufferedOutput();
 });
