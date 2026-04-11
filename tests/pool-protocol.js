@@ -1536,6 +1536,48 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
     }
 });
 
+test("eth-style keepalived requests stay bound to the authenticated socket", async () => {
+    const { runtime } = await startHarness();
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    const socket = {};
+
+    try {
+        global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+            if (port === ETH_PORT) return 102;
+            return originalPortBlobType.call(this, port);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 112,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        invokePoolMethod({
+            socket,
+            id: 113,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-style-keepalived"],
+            portData: global.config.ports[1]
+        });
+
+        const keepaliveReply = invokePoolMethod({
+            socket,
+            id: 114,
+            method: "keepalived",
+            params: { id: "eth.nicehash.connection" },
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(keepaliveReply.replies, [{ error: null, result: { status: "KEEPALIVED" } }]);
+    } finally {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+        await runtime.stop();
+    }
+});
+
 test("eth-style direct miners accept submits with a full nonce that already includes the assigned extranonce", async () => {
     const { runtime, database } = await startHarness();
     const originalPortBlobType = global.coinFuncs.portBlobType;
