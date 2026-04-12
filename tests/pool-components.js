@@ -1,10 +1,12 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
 const createConstants = require("../lib/coins/constants.js");
 const helpers = require("../lib/coins/helpers.js");
+const createServerFactory = require("../lib/pool/servers.js");
 const createTemplateManager = require("../lib/pool/templates.js");
 const createShareProcessor = require("../lib/pool/shares.js");
 
@@ -215,6 +217,90 @@ test("template manager rotates templates and notifies miners through the right u
         }
     ]);
     assert.deepEqual(sendToWorkersCalls, []);
+});
+
+test("server final replies honor explicit delay windows with random jitter", () => {
+    const originalSetTimeout = global.setTimeout;
+    const originalClearTimeout = global.clearTimeout;
+    const originalMathRandom = Math.random;
+    const timers = [];
+
+    global.config = {
+        pool: {
+            socketAuthTimeout: 15,
+            maxConnectionsPerIP: 256,
+            maxConnectionsPerSubnet: 1024,
+            protocolErrorLimit: 4
+        }
+    };
+    global.setTimeout = function captureTimeout(callback, delay, ...args) {
+        const timer = { callback, delay, args, cleared: false };
+        timers.push(timer);
+        return timer;
+    };
+    global.clearTimeout = function markCleared(timer) {
+        if (timer) timer.cleared = true;
+    };
+    Math.random = function fixedRandom() {
+        return 0.5;
+    };
+
+    const state = {
+        threadName: "(Test) ",
+        activeConnectionsByIP: {},
+        activeConnectionsBySubnet: {},
+        activeMiners: new Map(),
+        activeMinerSockets: new Map(),
+        freeEthExtranonces: []
+    };
+    const serverFactory = createServerFactory({
+        debug() {},
+        fs: require("node:fs"),
+        net: require("node:net"),
+        tls: require("node:tls"),
+        state,
+        handleMinerData(_socket, _id, _method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
+            sendReplyFinal("Delayed ban reply", 10);
+        },
+        removeMiner() {}
+    });
+    const socket = new EventEmitter();
+    socket.remoteAddress = "127.0.0.2";
+    socket.writable = true;
+    socket.destroyed = false;
+    socket.finalizing = false;
+    socket.setKeepAlive = function setKeepAlive() {};
+    socket.setEncoding = function setEncoding() {};
+    socket.end = function end(payload) {
+        socket.writable = false;
+        socket.endedPayload = payload;
+    };
+    socket.destroy = function destroy() {
+        socket.writable = false;
+        socket.destroyed = true;
+    };
+
+    try {
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+        handleSocket(socket);
+        socket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
+
+        const delayedTimer = timers.find(function findReplyTimer(timer) {
+            return timer.delay === 5000 && timer.cleared === false;
+        });
+
+        assert.ok(delayedTimer);
+        assert.equal(socket.endedPayload, undefined);
+
+        delayedTimer.callback(...delayedTimer.args);
+
+        assert.equal(typeof socket.endedPayload, "string");
+        assert.equal(JSON.parse(socket.endedPayload).error.message, "Delayed ban reply");
+    } finally {
+        global.setTimeout = originalSetTimeout;
+        global.clearTimeout = originalClearTimeout;
+        Math.random = originalMathRandom;
+    }
 });
 
 test("share processor records accepted shares through the common verification path", async () => {
