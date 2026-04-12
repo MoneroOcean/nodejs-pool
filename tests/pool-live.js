@@ -8,9 +8,9 @@ const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 const tls = require("node:tls");
+const { spawn, spawnSync } = require("node:child_process");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
-const { spawn, spawnSync } = require("node:child_process");
 
 const parseArgv = require("../parse_args.js");
 
@@ -24,115 +24,95 @@ const DEFAULT_TIMEOUT_MS = 180000;
 const DEFAULT_THREADS = Math.max(1, os.availableParallelism());
 const DEFAULT_DIFFICULTY = 1;
 const DEFAULT_TARGET_ACCEPTED_SHARES = 1;
+const DEFAULT_SRBMINER_GPU_ID = "0";
+const DEFAULT_SRBMINER_API_PORT = 21550;
+const DEFAULT_MOMINER_C29_DEVICE = "gpu1*1";
+const DEFAULT_MOMINER_DOCKER_IMAGE = "mominer-deploy";
+
 const XMRIG_RELEASE_API = "https://api.github.com/repos/MoneroOcean/xmrig/releases/latest";
 const SRBMINER_RELEASE_API = "https://api.github.com/repos/doktor83/SRBMiner-Multi/releases/latest";
 const SRBMINER_DOWNLOAD_PREFIX = "https://github.com/doktor83/SRBMiner-Multi/releases/download/";
 const MOMINER_RELEASE_API = "https://api.github.com/repos/MoneroOcean/mominer/releases/latest";
 const MOMINER_DOWNLOAD_PREFIX = "https://github.com/MoneroOcean/mominer/releases/download/";
-const DEFAULT_SRBMINER_GPU_ID = "0";
-const DEFAULT_SRBMINER_API_PORT = 21550;
-const DEFAULT_MOMINER_C29_DEVICE = "gpu1*1";
-const DEFAULT_MOMINER_DOCKER_IMAGE = "mominer-deploy";
+
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
 const ARCHIVE_PATH_ESCAPE_PATTERN = /(^|\/)\.\.(\/|$)/;
+const USER_AGENT = "nodejs-pool-live-tests";
+const DIFF_SCALE = { "": 1, h: 1e2, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };
+const HASHRATE_SCALE = { "": 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };
+const words = (value) => value.trim().split(/\s+/).filter(Boolean);
+
 const EMBEDDED_ACTIVE_ALGOS = [
     { algorithm: "etchash", protocolProbe: "eth-bad-share" },
     { algorithm: "kawpow", protocolProbe: "eth-bad-share" },
     { algorithm: "autolykos2", protocolProbe: "eth-bad-share" },
     { algorithm: "ghostrider" },
     { algorithm: "panthera" },
-    { algorithm: "cn/gpu"/*, successCriterion: "job"*/ },
+    { algorithm: "cn/gpu" },
     { algorithm: "rx/0" },
     { algorithm: "c29", protocolProbe: "login-bad-share" },
     { algorithm: "rx/arq" }
 ];
+
 const SRBMINER_INTEL_ALGORITHM_MAP = {
     autolykos2: "autolykos2",
     "cn/gpu": "cryptonight_gpu",
     etchash: "etchash",
     kawpow: "kawpow"
 };
+
+const MOMINER_NO_BENCH_ALGOS = words(`
+    argon2/chukwa argon2/chukwav2 argon2/wrkz c29 cn-heavy/0 cn-heavy/tube cn-heavy/xhv
+    cn-lite/0 cn-lite/1 cn-pico/0 cn-pico/tlo cn/0 cn/1 cn/2 cn/ccx cn/double cn/fast
+    cn/half cn/gpu cn/r cn/rto cn/rwz cn/upx2 cn/xao cn/zls ghostrider panthera
+    rx/0 rx/arq rx/graft rx/sfx rx/wow rx/yada
+`);
+const XMRIG_CPU_ALGOS = new Set(words(`
+    argon2/chukwav2 cn-heavy/xhv cn/gpu cn-half cn/half cn/pico cn-pico/trtl cn/r
+    ghostrider panthera rx/0 rx/arq rx/graft rx/wow
+`));
+const XMRIG_ALGO_PERF_SEED = Object.fromEntries(words(`
+    argon2/chukwav2 cn-heavy/xhv cn/half cn-lite/1 cn/gpu cn-pico cn-pico/trtl cn/r
+    cn/ccx flex ghostrider kawpow panthera rx/0 rx/arq rx/graft rx/wow
+`).map((algorithm) => [algorithm, 1]));
+
 const SRBMINER_NICEHASH_STRATUM_ALGOS = new Set(["etchash"]);
 const MOMINER_INTEL_ALGOS = new Set(["c29"]);
 const GPU_PROTOCOL_PROBE_ALGOS = new Set(["autolykos2", "c29", "etchash", "kawpow"]);
-const MOMINER_NO_BENCH_ALGOS = [
-    "argon2/chukwa",
-    "argon2/chukwav2",
-    "argon2/wrkz",
-    "c29",
-    "cn-heavy/0",
-    "cn-heavy/tube",
-    "cn-heavy/xhv",
-    "cn-lite/0",
-    "cn-lite/1",
-    "cn-pico/0",
-    "cn-pico/tlo",
-    "cn/0",
-    "cn/1",
-    "cn/2",
-    "cn/ccx",
-    "cn/double",
-    "cn/fast",
-    "cn/half",
-    "cn/gpu",
-    "cn/r",
-    "cn/rto",
-    "cn/rwz",
-    "cn/upx2",
-    "cn/xao",
-    "cn/zls",
-    "ghostrider",
-    "panthera",
-    "rx/0",
-    "rx/arq",
-    "rx/graft",
-    "rx/sfx",
-    "rx/wow",
-    "rx/yada"
-];
-const XMRIG_CPU_ALGOS = new Set([
-    "argon2/chukwav2",
-    "cn-heavy/xhv",
-    "cn/gpu",
-    "cn-half",
-    "cn/half",
-    "cn/pico",
-    "cn-pico/trtl",
-    "cn/r",
-    "ghostrider",
-    "panthera",
-    "rx/0",
-    "rx/arq",
-    "rx/graft",
-    "rx/wow"
-]);
-const XMRIG_ALGO_PERF_SEED = {
-    "argon2/chukwav2": 1,
-    "cn-heavy/xhv": 1,
-    "cn/half": 1,
-    "cn-lite/1": 1,
-    "cn/gpu": 1,
-    "cn-pico": 1,
-    "cn-pico/trtl": 1,
-    "cn/r": 1,
-    "cn/ccx": 1,
-    "flex": 1,
-    ghostrider: 1,
-    kawpow: 1,
-    panthera: 1,
-    "rx/0": 1,
-    "rx/arq": 1,
-    "rx/graft": 1,
-    "rx/wow": 1
+
+const PROTOCOL_PROBES = {
+    "eth-bad-share": {
+        authorize({ user, password }, id) {
+            return { id, method: "mining.authorize", params: [user, password] };
+        },
+        submit({ user }, metrics, id) {
+            return { id, method: "mining.submit", params: buildBadEthSubmitParams(user, metrics.jobId) };
+        },
+        useSubscribe: true
+    },
+    "login-bad-share": {
+        authorize({ config, password, worker }, id) {
+            return {
+                id,
+                jsonrpc: "2.0",
+                method: "login",
+                params: {
+                    login: config.wallet,
+                    pass: password,
+                    agent: "nodejs-pool-live-probe/1.0",
+                    rigid: worker
+                }
+            };
+        },
+        submit(_context, metrics, id) {
+            return { id, method: "submit", params: buildBadLoginSubmitParams(metrics.loginId, metrics.jobId) };
+        },
+        useSubscribe: false
+    }
 };
 
-function stripAnsi(value) {
-    return typeof value === "string" ? value.replace(ANSI_ESCAPE_PATTERN, "") : "";
-}
-
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const stripAnsi = (value) => typeof value === "string" ? value.replace(ANSI_ESCAPE_PATTERN, "") : "";
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitWithTimeout(promise, timeoutMs) {
     let timeoutHandle;
@@ -155,16 +135,8 @@ function sanitizeName(value) {
         .toLowerCase();
 }
 
-function shortAlgoName(value) {
-    return sanitizeName(value).replace(/\//g, "-");
-}
-
-function buildRunId() {
-    return [
-        new Date().toISOString().replace(/[:.]/g, "-"),
-        crypto.randomBytes(4).toString("hex")
-    ].join("-");
-}
+const shortAlgoName = (value) => sanitizeName(value).replace(/\//g, "-");
+const buildRunId = () => `${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomBytes(4).toString("hex")}`;
 
 function fileExistsSync(filePath) {
     try {
@@ -176,10 +148,8 @@ function fileExistsSync(filePath) {
 }
 
 function commandExists(command) {
-    const check = process.platform === "win32"
-        ? spawnSync("where", [command], { stdio: "ignore" })
-        : spawnSync("which", [command], { stdio: "ignore" });
-    return check.status === 0;
+    const checker = process.platform === "win32" ? "where" : "which";
+    return spawnSync(checker, [command], { stdio: "ignore" }).status === 0;
 }
 
 function detectIntelGpu() {
@@ -189,24 +159,15 @@ function detectIntelGpu() {
     return result.status === 0 && /Device Type\s+GPU/i.test(output) && /\bIntel\b/i.test(output) && !/Device Available\s+No/i.test(output);
 }
 
-async function ensureDir(dirPath) {
-    await fsp.mkdir(dirPath, { recursive: true });
-}
-
-async function writeJson(filePath, value) {
-    await fsp.writeFile(filePath, JSON.stringify(value, null, 2) + "\n");
-}
-
-function emitProgress(message) {
-    process.stdout.write(`${message}\n`);
-}
+const ensureDir = async (dirPath) => await fsp.mkdir(dirPath, { recursive: true });
+const writeJson = async (filePath, value) => await fsp.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+const emitProgress = (message) => process.stdout.write(`${message}\n`);
 
 function formatReadableTime(date) {
     const value = date instanceof Date ? date : new Date(date);
-    const hours = String(value.getHours()).padStart(2, "0");
-    const minutes = String(value.getMinutes()).padStart(2, "0");
-    const seconds = String(value.getSeconds()).padStart(2, "0");
-    return `${hours}:${minutes}:${seconds}`;
+    return [value.getHours(), value.getMinutes(), value.getSeconds()]
+        .map((part) => String(part).padStart(2, "0"))
+        .join(":");
 }
 
 async function readTextFileIfExists(filePath) {
@@ -236,32 +197,20 @@ function createLogger(runDir) {
     const eventPath = path.join(runDir, "events.jsonl");
     const stream = fs.createWriteStream(eventPath, { flags: "a" });
 
-    function event(type, payload) {
-        stream.write(JSON.stringify({
-            ts: new Date().toISOString(),
-            type,
-            ...payload
-        }) + "\n");
-    }
-
-    async function close() {
-        await new Promise((resolve) => stream.end(resolve));
-    }
-
     return {
         eventPath,
-        event,
-        close
+        event(type, payload) {
+            stream.write(`${JSON.stringify({ ts: new Date().toISOString(), type, ...payload })}\n`);
+        },
+        async close() {
+            await new Promise((resolve) => stream.end(resolve));
+        }
     };
 }
 
-async function fetchJson(url, headers) {
+async function request(url, headers) {
     const response = await fetch(url, {
-        headers: {
-            Accept: "application/vnd.github+json, application/json",
-            "User-Agent": "nodejs-pool-live-tests",
-            ...headers
-        },
+        headers: { "User-Agent": USER_AGENT, ...headers },
         redirect: "follow"
     });
 
@@ -269,27 +218,22 @@ async function fetchJson(url, headers) {
         throw new Error(`Request failed for ${url}: ${response.status} ${response.statusText}`);
     }
 
-    return await response.json();
+    return response;
+}
+
+async function fetchJson(url, headers) {
+    return await (await request(url, {
+        Accept: "application/vnd.github+json, application/json",
+        ...headers
+    })).json();
 }
 
 async function downloadToFile(url, destination, headers) {
-    const response = await fetch(url, {
-        headers: {
-            "User-Agent": "nodejs-pool-live-tests",
-            ...headers
-        },
-        redirect: "follow"
-    });
-
-    if (!response.ok) {
-        throw new Error(`Download failed for ${url}: ${response.status} ${response.statusText}`);
-    }
-    if (!response.body) {
-        throw new Error(`Download body missing for ${url}`);
-    }
+    const response = await request(url, headers);
+    if (!response.body) throw new Error(`Download body missing for ${url}`);
 
     await ensureDir(path.dirname(destination));
-    const tmpPath = destination + ".part";
+    const tmpPath = `${destination}.part`;
     const output = fs.createWriteStream(tmpPath, { mode: 0o644 });
 
     try {
@@ -301,13 +245,11 @@ async function downloadToFile(url, destination, headers) {
     }
 }
 
-async function runCommand(command, args, options) {
-    const config = options || {};
-
+async function runCommand(command, args, options = {}) {
     return await new Promise((resolve, reject) => {
         const child = spawn(command, args, {
-            cwd: config.cwd,
-            env: config.env,
+            cwd: options.cwd,
+            env: options.env,
             stdio: ["ignore", "pipe", "pipe"]
         });
         let stdout = "";
@@ -330,35 +272,11 @@ async function runCommand(command, args, options) {
     });
 }
 
-function validateArchiveEntries(entries, archivePath) {
-    for (const entry of entries) {
-        const normalized = entry.replace(/\\/g, "/");
-        if (normalized === "" || normalized.endsWith("/")) continue;
-        if (normalized.startsWith("/")) {
-            throw new Error(`Unsafe absolute path in archive ${archivePath}: ${entry}`);
-        }
-        if (ARCHIVE_PATH_ESCAPE_PATTERN.test(normalized)) {
-            throw new Error(`Unsafe parent traversal path in archive ${archivePath}: ${entry}`);
-        }
+function ensureArchiveTools(includeUnzipOnWindows) {
+    if (!commandExists("tar")) throw new Error("Missing required archive tool: tar");
+    if (includeUnzipOnWindows && process.platform === "win32" && !commandExists("unzip")) {
+        throw new Error("Missing required archive tool: unzip");
     }
-}
-
-async function listArchiveEntries(archivePath) {
-    if (archivePath.endsWith(".zip")) {
-        const result = await runCommand("unzip", ["-Z1", archivePath]);
-        return result.stdout.split(/\r?\n/).filter(Boolean);
-    }
-    const result = await runCommand("tar", tarArchiveArgs("list", archivePath));
-    return result.stdout.split(/\r?\n/).filter(Boolean);
-}
-
-async function extractArchive(archivePath, destination) {
-    await ensureDir(destination);
-    if (archivePath.endsWith(".zip")) {
-        await runCommand("unzip", ["-oq", archivePath, "-d", destination]);
-        return;
-    }
-    await runCommand("tar", [...tarArchiveArgs("extract", archivePath), "-C", destination]);
 }
 
 function tarArchiveArgs(action, archivePath) {
@@ -370,9 +288,36 @@ function tarArchiveArgs(action, archivePath) {
     return [`${mode}f`, archivePath];
 }
 
+function validateArchiveEntries(entries, archivePath) {
+    for (const entry of entries) {
+        const normalized = entry.replace(/\\/g, "/");
+        if (!normalized || normalized.endsWith("/")) continue;
+        if (normalized.startsWith("/")) throw new Error(`Unsafe absolute path in archive ${archivePath}: ${entry}`);
+        if (ARCHIVE_PATH_ESCAPE_PATTERN.test(normalized)) {
+            throw new Error(`Unsafe parent traversal path in archive ${archivePath}: ${entry}`);
+        }
+    }
+}
+
+async function listArchiveEntries(archivePath) {
+    if (archivePath.endsWith(".zip")) {
+        return (await runCommand("unzip", ["-Z1", archivePath])).stdout.split(/\r?\n/).filter(Boolean);
+    }
+    return (await runCommand("tar", tarArchiveArgs("list", archivePath))).stdout.split(/\r?\n/).filter(Boolean);
+}
+
+async function extractArchive(archivePath, destination) {
+    await ensureDir(destination);
+    if (archivePath.endsWith(".zip")) {
+        await runCommand("unzip", ["-oq", archivePath, "-d", destination]);
+        return;
+    }
+    await runCommand("tar", [...tarArchiveArgs("extract", archivePath), "-C", destination]);
+}
+
 async function refreshArchiveExtraction(archivePath, extractDir) {
     validateArchiveEntries(await listArchiveEntries(archivePath), archivePath);
-    const tempExtractDir = extractDir + ".tmp-" + crypto.randomBytes(4).toString("hex");
+    const tempExtractDir = `${extractDir}.tmp-${crypto.randomBytes(4).toString("hex")}`;
     await fsp.rm(tempExtractDir, { recursive: true, force: true });
     await extractArchive(archivePath, tempExtractDir);
     await fsp.rm(extractDir, { recursive: true, force: true });
@@ -383,7 +328,7 @@ async function findFile(rootDir, matcher) {
     if (!fileExistsSync(rootDir)) return null;
     const queue = [rootDir];
     while (queue.length) {
-        const current = queue.shift();
+        const current = queue.pop();
         const entries = await fsp.readdir(current, { withFileTypes: true });
         for (const entry of entries) {
             const fullPath = path.join(current, entry.name);
@@ -397,63 +342,56 @@ async function findFile(rootDir, matcher) {
     return null;
 }
 
+const findNamedFile = async (rootDir, basename) => await findFile(rootDir, (candidate) => path.basename(candidate) === basename);
+function pickAsset(candidates, predicates) {
+    for (const predicate of predicates) {
+        const match = candidates.find(predicate);
+        if (match) return match;
+    }
+    return null;
+}
+
 function resolveXmrigAsset(release) {
-    const platform = process.platform;
-    const arch = process.arch;
     const candidates = release.assets || [];
-
-    function pick(predicate) {
-        return candidates.find(predicate) || null;
+    if (process.platform === "linux" && process.arch === "x64") {
+        return pickAsset(candidates, [
+            (asset) => asset.name.includes("lin64-compat"),
+            (asset) => asset.name.includes("lin64.tar.gz")
+        ]);
     }
-
-    if (platform === "linux" && arch === "x64") {
-        return pick((asset) => asset.name.includes("lin64-compat")) ||
-            pick((asset) => asset.name.includes("lin64.tar.gz"));
+    if (process.platform === "darwin" && process.arch === "arm64") {
+        return pickAsset(candidates, [(asset) => asset.name.includes("mac64")]);
     }
-    if (platform === "darwin" && arch === "arm64") {
-        return pick((asset) => asset.name.includes("mac64"));
+    if (process.platform === "darwin" && process.arch === "x64") {
+        return pickAsset(candidates, [
+            (asset) => asset.name.includes("mac-intel"),
+            (asset) => asset.name.includes("mac64")
+        ]);
     }
-    if (platform === "darwin" && arch === "x64") {
-        return pick((asset) => asset.name.includes("mac-intel")) ||
-            pick((asset) => asset.name.includes("mac64"));
+    if (process.platform === "win32" && process.arch === "x64") {
+        return pickAsset(candidates, [(asset) => asset.name.includes("win64.zip")]);
     }
-    if (platform === "win32" && arch === "x64") {
-        return pick((asset) => asset.name.includes("win64.zip"));
-    }
-
     return null;
 }
 
 function resolveSrbMinerAsset(release) {
-    const platform = process.platform;
-    const arch = process.arch;
     const candidates = release.assets || [];
-
-    function pick(predicate) {
-        return candidates.find(predicate) || null;
+    if (process.platform === "linux" && process.arch === "x64") {
+        return pickAsset(candidates, [(asset) => /^SRBMiner-Multi-.*-Linux\.tar\.(gz|xz)$/i.test(asset.name)]);
     }
-
-    if (platform === "linux" && arch === "x64") {
-        return pick((asset) => /^SRBMiner-Multi-.*-Linux\.tar\.(gz|xz)$/i.test(asset.name));
+    if (process.platform === "win32" && process.arch === "x64") {
+        return pickAsset(candidates, [(asset) => /^SRBMiner-Multi-.*-win64\.zip$/i.test(asset.name)]);
     }
-    if (platform === "win32" && arch === "x64") {
-        return pick((asset) => /^SRBMiner-Multi-.*-win64\.zip$/i.test(asset.name));
-    }
-
     return null;
 }
 
 function resolveMoMinerAsset(release) {
-    const platform = process.platform;
-    const arch = process.arch;
     const candidates = release.assets || [];
-
-    if (platform !== "linux" || arch !== "x64") return null;
-
-    return candidates.find((asset) => {
-        const name = String(asset.name || "");
-        return /mominer/i.test(name) && /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(name);
-    }) || candidates.find((asset) => /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || ""))) || null;
+    if (process.platform !== "linux" || process.arch !== "x64") return null;
+    return pickAsset(candidates, [
+        (asset) => /mominer/i.test(String(asset.name || "")) && /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || "")),
+        (asset) => /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || ""))
+    ]);
 }
 
 function assertTrustedDownloadUrl(asset, expectedPrefix) {
@@ -465,44 +403,27 @@ function assertTrustedDownloadUrl(asset, expectedPrefix) {
     }
 }
 
-async function ensureXmrigBinary(config, logger) {
-    if (!commandExists("tar")) {
-        throw new Error("Missing required archive tool: tar");
-    }
-    if (process.platform === "win32" && !commandExists("unzip")) {
-        throw new Error("Missing required archive tool: unzip");
-    }
+async function ensureReleaseAsset(config, logger, spec) {
+    ensureArchiveTools(spec.includeUnzipOnWindows);
 
-    const release = await fetchJson(XMRIG_RELEASE_API);
-    const asset = resolveXmrigAsset(release);
-    if (!asset) {
-        throw new Error(`No MoneroOcean xmrig asset is available for ${process.platform}/${process.arch}`);
-    }
+    const release = await fetchJson(spec.releaseApi);
+    const asset = spec.resolveAsset(release);
+    if (!asset) throw new Error(spec.missingAsset(release));
+    if (spec.downloadPrefix) assertTrustedDownloadUrl(asset, spec.downloadPrefix);
 
-    const versionDir = path.join(config.cacheDir, "xmrig-mo", release.tag_name);
+    const versionDir = path.join(config.cacheDir, spec.cacheKey, release.tag_name);
     const archivePath = path.join(versionDir, asset.name);
-    const extractDir = path.join(versionDir, sanitizeName(asset.name.replace(/(\.tar\.gz|\.zip)$/i, "")));
-    const binaryName = process.platform === "win32" ? "xmrig.exe" : "xmrig";
-    const binaryPath = await findFile(extractDir, (candidate) => path.basename(candidate) === binaryName);
+    const extractDir = path.join(versionDir, sanitizeName(asset.name.replace(spec.archiveSuffixPattern, "")));
+    const located = await spec.locate(extractDir);
 
-    if (binaryPath) {
-        logger.event("miner.binary.cached", {
-            miner: "xmrig-mo",
-            release: release.tag_name,
-            asset: asset.name,
-            binaryPath
-        });
-        return {
-            binaryPath,
-            source: "cache",
-            release,
-            asset
-        };
+    if (located) {
+        logger.event("miner.binary.cached", spec.logPayload(located, release, asset));
+        return spec.result(located, release, asset, "cache");
     }
 
     await ensureDir(versionDir);
     logger.event("miner.binary.download.start", {
-        miner: "xmrig-mo",
+        miner: spec.miner,
         release: release.tag_name,
         asset: asset.name,
         url: asset.browser_download_url
@@ -513,188 +434,114 @@ async function ensureXmrigBinary(config, logger) {
     }
 
     await refreshArchiveExtraction(archivePath, extractDir);
+    const extracted = await spec.locate(extractDir);
+    if (!extracted) throw new Error(spec.missingExtracted(asset));
 
-    const extractedBinaryPath = await findFile(extractDir, (candidate) => path.basename(candidate) === binaryName);
-    if (!extractedBinaryPath) {
-        throw new Error(`Could not find ${binaryName} after extracting ${asset.name}`);
-    }
-    if (process.platform !== "win32") {
-        await fsp.chmod(extractedBinaryPath, 0o755);
+    const chmodPath = spec.chmodPath ? spec.chmodPath(extracted) : "";
+    if (chmodPath && process.platform !== "win32") {
+        await fsp.chmod(chmodPath, 0o755);
     }
 
-    logger.event("miner.binary.ready", {
+    logger.event("miner.binary.ready", spec.logPayload(extracted, release, asset));
+    return spec.result(extracted, release, asset, "download");
+}
+
+async function ensureXmrigBinary(config, logger) {
+    const binaryName = process.platform === "win32" ? "xmrig.exe" : "xmrig";
+    return await ensureReleaseAsset(config, logger, {
         miner: "xmrig-mo",
-        release: release.tag_name,
-        asset: asset.name,
-        binaryPath: extractedBinaryPath
+        cacheKey: "xmrig-mo",
+        releaseApi: XMRIG_RELEASE_API,
+        resolveAsset: resolveXmrigAsset,
+        archiveSuffixPattern: /(\.tar\.gz|\.zip)$/i,
+        includeUnzipOnWindows: true,
+        async locate(extractDir) {
+            const binaryPath = await findNamedFile(extractDir, binaryName);
+            return binaryPath ? { binaryPath } : null;
+        },
+        missingAsset() {
+            return `No MoneroOcean xmrig asset is available for ${process.platform}/${process.arch}`;
+        },
+        missingExtracted(asset) {
+            return `Could not find ${binaryName} after extracting ${asset.name}`;
+        },
+        chmodPath(located) {
+            return located.binaryPath;
+        },
+        logPayload(located, release, asset) {
+            return { miner: "xmrig-mo", release: release.tag_name, asset: asset.name, binaryPath: located.binaryPath };
+        },
+        result(located, release, asset, source) {
+            return { ...located, source, release, asset };
+        }
     });
-
-    return {
-        binaryPath: extractedBinaryPath,
-        source: "download",
-        release,
-        asset
-    };
 }
 
 async function ensureSrbMinerBinary(config, logger) {
-    if (!commandExists("tar")) {
-        throw new Error("Missing required archive tool: tar");
-    }
-    if (process.platform === "win32" && !commandExists("unzip")) {
-        throw new Error("Missing required archive tool: unzip");
-    }
-
-    const release = await fetchJson(SRBMINER_RELEASE_API);
-    const asset = resolveSrbMinerAsset(release);
-    if (!asset) {
-        throw new Error(`No SRBMiner-Multi asset is available for ${process.platform}/${process.arch}`);
-    }
-    assertTrustedDownloadUrl(asset, SRBMINER_DOWNLOAD_PREFIX);
-
-    const versionDir = path.join(config.cacheDir, "srbminer-multi", release.tag_name);
-    const archivePath = path.join(versionDir, asset.name);
-    const extractDir = path.join(versionDir, sanitizeName(asset.name.replace(/(\.tar\.(gz|xz|bz2)|\.tgz|\.txz|\.tbz2|\.zip)$/i, "")));
     const binaryName = process.platform === "win32" ? "SRBMiner-MULTI.exe" : "SRBMiner-MULTI";
-    const binaryPath = await findFile(extractDir, (candidate) => path.basename(candidate) === binaryName);
-
-    if (binaryPath) {
-        logger.event("miner.binary.cached", {
-            miner: "srbminer-multi",
-            release: release.tag_name,
-            asset: asset.name,
-            binaryPath
-        });
-        return {
-            binaryPath,
-            source: "cache",
-            release,
-            asset
-        };
-    }
-
-    await ensureDir(versionDir);
-    logger.event("miner.binary.download.start", {
+    return await ensureReleaseAsset(config, logger, {
         miner: "srbminer-multi",
-        release: release.tag_name,
-        asset: asset.name,
-        url: asset.browser_download_url
+        cacheKey: "srbminer-multi",
+        releaseApi: SRBMINER_RELEASE_API,
+        resolveAsset: resolveSrbMinerAsset,
+        archiveSuffixPattern: /(\.tar\.(gz|xz|bz2)|\.tgz|\.txz|\.tbz2|\.zip)$/i,
+        downloadPrefix: SRBMINER_DOWNLOAD_PREFIX,
+        includeUnzipOnWindows: true,
+        async locate(extractDir) {
+            const binaryPath = await findNamedFile(extractDir, binaryName);
+            return binaryPath ? { binaryPath } : null;
+        },
+        missingAsset() {
+            return `No SRBMiner-Multi asset is available for ${process.platform}/${process.arch}`;
+        },
+        missingExtracted(asset) {
+            return `Could not find ${binaryName} after extracting ${asset.name}`;
+        },
+        chmodPath(located) {
+            return located.binaryPath;
+        },
+        logPayload(located, release, asset) {
+            return { miner: "srbminer-multi", release: release.tag_name, asset: asset.name, binaryPath: located.binaryPath };
+        },
+        result(located, release, asset, source) {
+            return { ...located, source, release, asset };
+        }
     });
-
-    if (!fileExistsSync(archivePath)) {
-        await downloadToFile(asset.browser_download_url, archivePath);
-    }
-
-    await refreshArchiveExtraction(archivePath, extractDir);
-
-    const extractedBinaryPath = await findFile(extractDir, (candidate) => path.basename(candidate) === binaryName);
-    if (!extractedBinaryPath) {
-        throw new Error(`Could not find ${binaryName} after extracting ${asset.name}`);
-    }
-    if (process.platform !== "win32") {
-        await fsp.chmod(extractedBinaryPath, 0o755);
-    }
-
-    logger.event("miner.binary.ready", {
-        miner: "srbminer-multi",
-        release: release.tag_name,
-        asset: asset.name,
-        binaryPath: extractedBinaryPath
-    });
-
-    return {
-        binaryPath: extractedBinaryPath,
-        source: "download",
-        release,
-        asset
-    };
 }
 
 async function ensureMoMinerRoot(config, logger) {
-    if (!commandExists("tar")) {
-        throw new Error("Missing required archive tool: tar");
-    }
-
-    const release = await fetchJson(MOMINER_RELEASE_API);
-    const asset = resolveMoMinerAsset(release);
-    if (!asset) {
-        throw new Error(`No MoMiner Linux x64 archive asset is available in ${release.tag_name || "latest release"}`);
-    }
-    assertTrustedDownloadUrl(asset, MOMINER_DOWNLOAD_PREFIX);
-
-    const versionDir = path.join(config.cacheDir, "mominer", release.tag_name);
-    const archivePath = path.join(versionDir, asset.name);
-    const extractDir = path.join(versionDir, sanitizeName(asset.name.replace(/(\.tar\.(gz|xz|bz2)|\.tgz|\.txz|\.tbz2)$/i, "")));
-    const scriptPath = await findFile(extractDir, (candidate) => path.basename(candidate) === "mominer.js");
-
-    if (scriptPath) {
-        logger.event("miner.binary.cached", {
-            miner: "mominer",
-            release: release.tag_name,
-            asset: asset.name,
-            rootDir: path.dirname(scriptPath)
-        });
-        return {
-            rootDir: path.dirname(scriptPath),
-            scriptPath,
-            source: "cache",
-            release,
-            asset
-        };
-    }
-
-    await ensureDir(versionDir);
-    logger.event("miner.binary.download.start", {
+    return await ensureReleaseAsset(config, logger, {
         miner: "mominer",
-        release: release.tag_name,
-        asset: asset.name,
-        url: asset.browser_download_url
+        cacheKey: "mominer",
+        releaseApi: MOMINER_RELEASE_API,
+        resolveAsset: resolveMoMinerAsset,
+        archiveSuffixPattern: /(\.tar\.(gz|xz|bz2)|\.tgz|\.txz|\.tbz2)$/i,
+        downloadPrefix: MOMINER_DOWNLOAD_PREFIX,
+        includeUnzipOnWindows: false,
+        async locate(extractDir) {
+            const scriptPath = await findNamedFile(extractDir, "mominer.js");
+            return scriptPath ? { rootDir: path.dirname(scriptPath), scriptPath } : null;
+        },
+        missingAsset(release) {
+            return `No MoMiner Linux x64 archive asset is available in ${release.tag_name || "latest release"}`;
+        },
+        missingExtracted(asset) {
+            return `Could not find mominer.js after extracting ${asset.name}`;
+        },
+        logPayload(located, release, asset) {
+            return { miner: "mominer", release: release.tag_name, asset: asset.name, rootDir: located.rootDir };
+        },
+        result(located, release, asset, source) {
+            return { ...located, source, release, asset };
+        }
     });
-
-    if (!fileExistsSync(archivePath)) {
-        await downloadToFile(asset.browser_download_url, archivePath);
-    }
-
-    await refreshArchiveExtraction(archivePath, extractDir);
-
-    const extractedScriptPath = await findFile(extractDir, (candidate) => path.basename(candidate) === "mominer.js");
-    if (!extractedScriptPath) {
-        throw new Error(`Could not find mominer.js after extracting ${asset.name}`);
-    }
-
-    logger.event("miner.binary.ready", {
-        miner: "mominer",
-        release: release.tag_name,
-        asset: asset.name,
-        rootDir: path.dirname(extractedScriptPath)
-    });
-
-    return {
-        rootDir: path.dirname(extractedScriptPath),
-        scriptPath: extractedScriptPath,
-        source: "download",
-        release,
-        asset
-    };
 }
 
 function parseDiffToken(token) {
     if (!token) return null;
     const match = String(token).trim().match(/^([0-9]+(?:\.[0-9]+)?)([kmgthp]?)(?:\+)?$/i);
     if (!match) return null;
-
-    const suffix = match[2].toLowerCase();
-    const scale = {
-        "": 1,
-        k: 1e3,
-        m: 1e6,
-        g: 1e9,
-        t: 1e12,
-        p: 1e15,
-        h: 1e2
-    };
-
-    return Number(match[1]) * (scale[suffix] || 1);
+    return Number(match[1]) * (DIFF_SCALE[match[2].toLowerCase()] || 1);
 }
 
 function parseHashrateToken(token) {
@@ -703,222 +550,199 @@ function parseHashrateToken(token) {
     return Number.isFinite(value) ? value : null;
 }
 
-function createXmrigParser() {
-    return function parseXmrigLine(line, metrics) {
+const parseScaledHashrate = (value, unit) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return numeric * (HASHRATE_SCALE[String(unit || "").trim().toLowerCase().replace(/h\/s$/, "")] || 1);
+};
+const markConnected = (metrics) => {
+    metrics.connected = true;
+    metrics.connectedAtMs = metrics.connectedAtMs || Date.now();
+};
+
+function markJob(metrics, algorithm, diffToken) {
+    markConnected(metrics);
+    metrics.jobReceived = true;
+    metrics.jobAtMs = metrics.jobAtMs || Date.now();
+    if (algorithm) metrics.reportedAlgorithm = algorithm;
+    const diff = parseDiffToken(diffToken);
+    if (diff !== null) metrics.assignedDifficulties.push(diff);
+}
+
+function recordAccepted(metrics, line, latencyPattern) {
+    metrics.acceptedShares += 1;
+    metrics.firstAcceptedAtMs = metrics.firstAcceptedAtMs || Date.now();
+    if (!latencyPattern) return;
+    const latency = Number(line.match(latencyPattern)?.[1]);
+    if (Number.isFinite(latency)) metrics.latenciesMs.push(latency);
+}
+
+const recordRejected = (metrics, line) => {
+    metrics.rejectedShares += 1;
+    metrics.lastErrorLine = line;
+};
+const recordInvalid = (metrics, line) => {
+    metrics.invalidShares += 1;
+    metrics.lastErrorLine = line;
+};
+const recordError = (metrics, line, retryPattern) => {
+    metrics.lastErrorLine = line;
+    if (retryPattern && retryPattern.test(line)) metrics.retriesObserved += 1;
+};
+const recordDisconnect = (metrics) => {
+    metrics.disconnects += 1;
+};
+
+function createMinerParser(spec) {
+    return function parseMinerLine(line, metrics) {
         const cleanLine = stripAnsi(line);
         let matched = false;
 
-        if (/\bnew job from\b/i.test(cleanLine)) {
-            metrics.connected = true;
-            metrics.jobReceived = true;
-            metrics.connectedAtMs = metrics.connectedAtMs || Date.now();
-            metrics.jobAtMs = metrics.jobAtMs || Date.now();
+        if (spec.connect && spec.connect.test(cleanLine)) {
+            markConnected(metrics);
+            matched = true;
+        }
 
-            const algoMatch = cleanLine.match(/\balgo\s+([^\s]+)/i);
-            if (algoMatch) metrics.reportedAlgorithm = algoMatch[1];
-            const diffMatch = cleanLine.match(/\bdiff\s+([^\s]+)/i);
-            if (diffMatch) {
-                const diff = parseDiffToken(diffMatch[1]);
-                if (diff !== null) metrics.assignedDifficulties.push(diff);
+        if (spec.job && spec.job.test(cleanLine) && !(spec.jobExclude && spec.jobExclude.test(cleanLine))) {
+            markJob(
+                metrics,
+                spec.extractAlgorithm ? spec.extractAlgorithm(cleanLine) : "",
+                spec.extractDifficulty ? spec.extractDifficulty(cleanLine) : ""
+            );
+            matched = true;
+        }
+
+        if (spec.accepted && spec.accepted.test(cleanLine)) {
+            recordAccepted(metrics, cleanLine, spec.acceptedLatency);
+            matched = true;
+        }
+
+        if (spec.rejected && spec.rejected.test(cleanLine)) {
+            recordRejected(metrics, cleanLine);
+            matched = true;
+        }
+
+        if (spec.invalid && spec.invalid.test(cleanLine)) {
+            recordInvalid(metrics, cleanLine);
+            matched = true;
+        }
+
+        if (spec.error && spec.error.test(cleanLine)) {
+            recordError(metrics, cleanLine, spec.retry);
+            matched = true;
+        }
+
+        if (spec.disconnect && spec.disconnect.test(cleanLine)) {
+            recordDisconnect(metrics);
+            matched = true;
+        }
+
+        if (spec.hashrate) {
+            const parsed = spec.hashrate(cleanLine);
+            if (parsed) {
+                if (parsed.reportedAlgorithm) metrics.reportedAlgorithm = parsed.reportedAlgorithm;
+                metrics.hashrate = parsed.hashrate || parsed;
+                matched = true;
             }
-            matched = true;
-        }
-
-        if (/\buse pool\b/i.test(cleanLine) || /\bconnected to\b/i.test(cleanLine)) {
-            metrics.connected = true;
-            metrics.connectedAtMs = metrics.connectedAtMs || Date.now();
-            matched = true;
-        }
-
-        if (/\baccepted\b/i.test(cleanLine)) {
-            metrics.acceptedShares += 1;
-            metrics.firstAcceptedAtMs = metrics.firstAcceptedAtMs || Date.now();
-            const latencyMatch = cleanLine.match(/\((\d+(?:\.\d+)?)\s*ms\)/i);
-            if (latencyMatch) {
-                const latency = Number(latencyMatch[1]);
-                if (Number.isFinite(latency)) metrics.latenciesMs.push(latency);
-            }
-            matched = true;
-        }
-
-        if (/\brejected\b/i.test(cleanLine)) {
-            metrics.rejectedShares += 1;
-            metrics.lastErrorLine = cleanLine;
-            matched = true;
-        }
-
-        if (/\binvalid\b/i.test(cleanLine) && /\bshare\b/i.test(cleanLine)) {
-            metrics.invalidShares += 1;
-            metrics.lastErrorLine = cleanLine;
-            matched = true;
-        }
-
-        if (/\b(no active pools|connect error|connection refused|net error|read error|TLS|SSL|failed to resolve|retry in|job timeout)\b/i.test(cleanLine)) {
-            metrics.lastErrorLine = cleanLine;
-            if (/\bretry in\b/i.test(cleanLine)) metrics.retriesObserved += 1;
-            matched = true;
-        }
-
-        if (/\b(connection closed|disconnect|retry in|reconnect)\b/i.test(cleanLine)) {
-            metrics.disconnects += 1;
-            matched = true;
-        }
-
-        const speedMatch = cleanLine.match(/\bspeed\s+10s\/60s\/15m\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+H\/s(?:\s+max\s+([^\s]+))?/i);
-        if (speedMatch) {
-            metrics.hashrate = {
-                tenSeconds: parseHashrateToken(speedMatch[1]),
-                sixtySeconds: parseHashrateToken(speedMatch[2]),
-                fifteenMinutes: parseHashrateToken(speedMatch[3]),
-                max: parseHashrateToken(speedMatch[4])
-            };
-            matched = true;
         }
 
         return matched;
     };
+}
+
+function parseXmrigHashrate(line) {
+    const match = line.match(/\bspeed\s+10s\/60s\/15m\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+H\/s(?:\s+max\s+([^\s]+))?/i);
+    if (!match) return null;
+    return {
+        tenSeconds: parseHashrateToken(match[1]),
+        sixtySeconds: parseHashrateToken(match[2]),
+        fifteenMinutes: parseHashrateToken(match[3]),
+        max: parseHashrateToken(match[4])
+    };
+}
+
+function parseSrbMinerHashrate(line) {
+    const match = line.match(/\b([0-9]+(?:\.[0-9]+)?)\s*([kmg]?h\/s)\b/i);
+    if (!match) return null;
+    return {
+        tenSeconds: parseScaledHashrate(match[1], match[2]),
+        sixtySeconds: null,
+        fifteenMinutes: null,
+        max: null
+    };
+}
+
+function parseMoMinerHashrate(line) {
+    const match = line.match(/\bAlgo\s+([^\s]+).*?\bhashrate:\s+([0-9]+(?:\.[0-9]+)?)\s+H\/s/i);
+    if (!match) return null;
+    return {
+        reportedAlgorithm: match[1],
+        hashrate: {
+            tenSeconds: Number(match[2]),
+            sixtySeconds: null,
+            fifteenMinutes: null,
+            max: null
+        }
+    };
+}
+
+function createXmrigParser() {
+    return createMinerParser({
+        connect: /\buse pool\b|\bconnected to\b/i,
+        job: /\bnew job from\b/i,
+        extractAlgorithm: (line) => line.match(/\balgo\s+([^\s]+)/i)?.[1] || "",
+        extractDifficulty: (line) => line.match(/\bdiff\s+([^\s]+)/i)?.[1] || "",
+        accepted: /\baccepted\b/i,
+        acceptedLatency: /\((\d+(?:\.\d+)?)\s*ms\)/i,
+        rejected: /\brejected\b/i,
+        invalid: /\binvalid\b.*\bshare\b|\bshare\b.*\binvalid\b/i,
+        error: /\b(no active pools|connect error|connection refused|net error|read error|TLS|SSL|failed to resolve|retry in|job timeout)\b/i,
+        retry: /\bretry in\b/i,
+        disconnect: /\b(connection closed|disconnect|retry in|reconnect)\b/i,
+        hashrate: parseXmrigHashrate
+    });
 }
 
 function createSrbMinerParser() {
-    return function parseSrbMinerLine(line, metrics) {
-        const cleanLine = stripAnsi(line);
-        let matched = false;
-
-        if (/\b(connected|logged in|authorized|subscribed|set difficulty)\b/i.test(cleanLine)) {
-            metrics.connected = true;
-            metrics.connectedAtMs = metrics.connectedAtMs || Date.now();
-            matched = true;
-        }
-
-        if (/\b(new job|job received|job from|set difficulty|difficulty)\b/i.test(cleanLine) && !/\b(no job|job timeout)\b/i.test(cleanLine)) {
-            metrics.jobReceived = true;
-            metrics.jobAtMs = metrics.jobAtMs || Date.now();
-            const algoMatch = cleanLine.match(/\balgo(?:rithm)?\s+([^\s,]+)/i);
-            if (algoMatch) metrics.reportedAlgorithm = algoMatch[1];
-            const diffMatch = cleanLine.match(/\bdiff(?:iculty)?\s+([^\s,]+)/i);
-            if (diffMatch) {
-                const diff = parseDiffToken(diffMatch[1]);
-                if (diff !== null) metrics.assignedDifficulties.push(diff);
-            }
-            matched = true;
-        }
-
-        if (/\b(share|result)\s+accepted\b|\baccepted\s+(share|result)\b/i.test(cleanLine)) {
-            metrics.acceptedShares += 1;
-            metrics.firstAcceptedAtMs = metrics.firstAcceptedAtMs || Date.now();
-            matched = true;
-        }
-
-        if (/\b(share|result)\s+rejected\b|\brejected\s+(share|result)\b/i.test(cleanLine)) {
-            metrics.rejectedShares += 1;
-            metrics.lastErrorLine = cleanLine;
-            matched = true;
-        }
-
-        if (/\binvalid\b/i.test(cleanLine) && /\bshare\b/i.test(cleanLine)) {
-            metrics.invalidShares += 1;
-            metrics.lastErrorLine = cleanLine;
-            matched = true;
-        }
-
-        if (/\b(no active pools|connect error|connection refused|socket error|network error|failed to resolve|retry|job timeout)\b/i.test(cleanLine)) {
-            metrics.lastErrorLine = cleanLine;
-            if (/\bretry\b/i.test(cleanLine)) metrics.retriesObserved += 1;
-            matched = true;
-        }
-
-        if (/\b(disconnect|connection closed|reconnect)\b/i.test(cleanLine)) {
-            metrics.disconnects += 1;
-            matched = true;
-        }
-
-        const speedMatch = cleanLine.match(/\b([0-9]+(?:\.[0-9]+)?)\s*([kmg]?h\/s)\b/i);
-        if (speedMatch) {
-            const value = Number(speedMatch[1]);
-            const unit = speedMatch[2].toLowerCase();
-            const scale = unit.startsWith("g") ? 1e9 : (unit.startsWith("m") ? 1e6 : (unit.startsWith("k") ? 1e3 : 1));
-            metrics.hashrate = {
-                tenSeconds: Number.isFinite(value) ? value * scale : null,
-                sixtySeconds: null,
-                fifteenMinutes: null,
-                max: null
-            };
-            matched = true;
-        }
-
-        return matched;
-    };
+    return createMinerParser({
+        connect: /\b(connected|logged in|authorized|subscribed|set difficulty)\b/i,
+        job: /\b(new job|job received|job from|set difficulty|difficulty)\b/i,
+        jobExclude: /\b(no job|job timeout)\b/i,
+        extractAlgorithm: (line) => line.match(/\balgo(?:rithm)?\s+([^\s,]+)/i)?.[1] || "",
+        extractDifficulty: (line) => line.match(/\bdiff(?:iculty)?\s+([^\s,]+)/i)?.[1] || "",
+        accepted: /\b(share|result)\s+accepted\b|\baccepted\s+(share|result)\b/i,
+        rejected: /\b(share|result)\s+rejected\b|\brejected\s+(share|result)\b/i,
+        invalid: /\binvalid\b.*\bshare\b|\bshare\b.*\binvalid\b/i,
+        error: /\b(no active pools|connect error|connection refused|socket error|network error|failed to resolve|retry|job timeout)\b/i,
+        retry: /\bretry\b/i,
+        disconnect: /\b(disconnect|connection closed|reconnect)\b/i,
+        hashrate: parseSrbMinerHashrate
+    });
 }
 
 function createMoMinerParser() {
-    return function parseMoMinerLine(line, metrics) {
-        const cleanLine = stripAnsi(line);
-        let matched = false;
-
-        if (/\bConnecting to\b.*\bpool\b|\bConnected to\b/i.test(cleanLine)) {
-            metrics.connected = true;
-            metrics.connectedAtMs = metrics.connectedAtMs || Date.now();
-            matched = true;
-        }
-
-        const jobMatch = cleanLine.match(/\bGot new\s+([^\s]+)\s+algo job\b/i);
-        if (jobMatch) {
-            metrics.connected = true;
-            metrics.jobReceived = true;
-            metrics.connectedAtMs = metrics.connectedAtMs || Date.now();
-            metrics.jobAtMs = metrics.jobAtMs || Date.now();
-            metrics.reportedAlgorithm = jobMatch[1];
-            const diffMatch = cleanLine.match(/\bwith\s+([^\s]+)\s+diff\b/i);
-            if (diffMatch) {
-                const diff = parseDiffToken(diffMatch[1]);
-                if (diff !== null) metrics.assignedDifficulties.push(diff);
-            }
-            matched = true;
-        }
-
-        if (/\bShare accepted by the pool\b/i.test(cleanLine)) {
-            metrics.acceptedShares += 1;
-            metrics.firstAcceptedAtMs = metrics.firstAcceptedAtMs || Date.now();
-            matched = true;
-        }
-
-        if (/\b(Share rejected|rejected by the pool)\b/i.test(cleanLine)) {
-            metrics.rejectedShares += 1;
-            metrics.lastErrorLine = cleanLine;
-            matched = true;
-        }
-
-        if (/\b(ERROR|invalid|failed|timeout|disconnected|connection refused)\b/i.test(cleanLine)) {
-            metrics.lastErrorLine = cleanLine;
-            if (/\b(disconnected|reconnect)\b/i.test(cleanLine)) metrics.disconnects += 1;
-            matched = true;
-        }
-
-        const speedMatch = cleanLine.match(/\bAlgo\s+([^\s]+).*?\bhashrate:\s+([0-9]+(?:\.[0-9]+)?)\s+H\/s/i);
-        if (speedMatch) {
-            metrics.reportedAlgorithm = speedMatch[1];
-            metrics.hashrate = {
-                tenSeconds: Number(speedMatch[2]),
-                sixtySeconds: null,
-                fifteenMinutes: null,
-                max: null
-            };
-            matched = true;
-        }
-
-        return matched;
-    };
+    return createMinerParser({
+        connect: /\bConnecting to\b.*\bpool\b|\bConnected to\b/i,
+        job: /\bGot new\s+[^\s]+\s+algo job\b/i,
+        extractAlgorithm: (line) => line.match(/\bGot new\s+([^\s]+)\s+algo job\b/i)?.[1] || "",
+        extractDifficulty: (line) => line.match(/\bwith\s+([^\s]+)\s+diff\b/i)?.[1] || "",
+        accepted: /\bShare accepted by the pool\b/i,
+        rejected: /\b(Share rejected|rejected by the pool)\b/i,
+        error: /\b(ERROR|invalid|failed|timeout|disconnected|connection refused)\b/i,
+        disconnect: /\b(disconnected|reconnect)\b/i,
+        hashrate: parseMoMinerHashrate
+    });
 }
 
 function buildXmrigMiner(binaryPath) {
-    const parser = createXmrigParser();
-
     return {
         name: "xmrig-mo",
         binaryPath,
         algorithms: new Set(XMRIG_CPU_ALGOS),
+        parser: createXmrigParser(),
+        style: "xmrig",
         buildArgs(context) {
-            const args = [
+            return [
                 "-c", context.configPath,
                 "-o", `${context.host}:${context.port}`,
                 "-u", context.walletWithDifficulty,
@@ -929,29 +753,20 @@ function buildXmrigMiner(binaryPath) {
                 "--donate-level", "0",
                 "--bench-algo-time", "0",
                 "--print-time", "1",
-                "--tls",
+                ...(context.tls ? ["--tls"] : []),
                 "--keepalive"
             ];
-
-            if (!context.tls) {
-                const tlsIndex = args.indexOf("--tls");
-                if (tlsIndex !== -1) args.splice(tlsIndex, 1);
-            }
-
-            return args;
-        },
-        parser,
-        style: "xmrig"
+        }
     };
 }
 
 function buildSrbMiner(binaryPath) {
-    const parser = createSrbMinerParser();
-
     return {
         name: "srbminer-multi",
         binaryPath,
         algorithms: new Set(Object.keys(SRBMINER_INTEL_ALGORITHM_MAP)),
+        parser: createSrbMinerParser(),
+        style: "srbminer",
         buildArgs(context) {
             const args = [
                 "--algorithm", SRBMINER_INTEL_ALGORITHM_MAP[context.algorithm] || context.algorithm,
@@ -973,30 +788,15 @@ function buildSrbMiner(binaryPath) {
             ];
 
             if (SRBMINER_NICEHASH_STRATUM_ALGOS.has(context.algorithm)) {
-                args.push(
-                    "--esm", "2",
-                    "--nicehash", "true"
-                );
+                args.push("--esm", "2", "--nicehash", "true");
             }
 
             return args;
-        },
-        parser,
-        style: "srbminer"
+        }
     };
 }
 
 function buildMoMinerNoBenchConfig(context) {
-    const algoParams = {};
-    for (const algorithm of MOMINER_NO_BENCH_ALGOS) {
-        let dev = "cpu";
-        if (algorithm === "c29" || algorithm === "cn/gpu") dev = context.moMinerC29Device;
-        algoParams[algorithm] = {
-            dev,
-            perf: 1
-        };
-    }
-
     return {
         pool_time: {
             stats: 30,
@@ -1017,18 +817,17 @@ function buildMoMinerNoBenchConfig(context) {
             login: context.walletWithDifficulty,
             pass: context.password
         }],
-        pool_ids: {
-            primary: 0,
-            donate: null
-        },
-        algo_params: algoParams,
+        pool_ids: { primary: 0, donate: null },
+        algo_params: Object.fromEntries(MOMINER_NO_BENCH_ALGOS.map((algorithm) => [algorithm, {
+            dev: algorithm === "c29" || algorithm === "cn/gpu" ? context.moMinerC29Device : "cpu",
+            perf: 1
+        }])),
         default_msrs: {},
         log_level: 0
     };
 }
 
 function buildMoMiner(rootDir, scriptPath) {
-    const parser = createMoMinerParser();
     const dockerfilePath = path.join(rootDir, "deploy.dockerfile");
     const useDocker = process.platform === "linux" && commandExists("docker") && fileExistsSync(dockerfilePath);
 
@@ -1039,9 +838,11 @@ function buildMoMiner(rootDir, scriptPath) {
         scriptPath,
         dockerfilePath,
         dockerImage: DEFAULT_MOMINER_DOCKER_IMAGE,
-        useDocker,
         dockerPrepared: false,
+        useDocker,
         algorithms: new Set(MOMINER_INTEL_ALGOS),
+        parser: createMoMinerParser(),
+        style: "mominer",
         async prepare(context) {
             const configPath = path.join(context.attemptDir, "mominer-config.json");
             await writeJson(configPath, buildMoMinerNoBenchConfig(context));
@@ -1055,71 +856,54 @@ function buildMoMiner(rootDir, scriptPath) {
                 });
                 this.dockerPrepared = true;
             }
+
             context.moMinerContainerName = sanitizeName(`mominer-${context.worker}`).slice(0, 63);
             context.moMinerConfigArg = "/root/mominer-live/mominer-config.json";
         },
         buildArgs(context) {
-            const mominerArgs = [
-                "mine",
-                context.moMinerConfigArg
-            ];
+            const args = ["mine", context.moMinerConfigArg];
+            if (!this.useDocker) return [this.scriptPath, ...args];
 
-            if (this.useDocker) {
-                context.moMinerContainerName = context.moMinerContainerName || sanitizeName(`mominer-${context.worker}`).slice(0, 63);
-                return [
-                    "run",
-                    "--privileged",
-                    "--rm",
-                    "--name", context.moMinerContainerName,
-                    "--hostname", context.moMinerContainerName,
-                    "--mount", `type=bind,source=${this.rootDir},target=/root/mominer`,
-                    "--mount", `type=bind,source=${context.attemptDir},target=/root/mominer-live`,
-                    "--workdir", "/root/mominer",
-                    this.dockerImage,
-                    "node",
-                    "mominer.js",
-                    ...mominerArgs
-                ];
-            }
-
+            context.moMinerContainerName = context.moMinerContainerName || sanitizeName(`mominer-${context.worker}`).slice(0, 63);
             return [
-                this.scriptPath,
-                ...mominerArgs
+                "run",
+                "--privileged",
+                "--rm",
+                "--name", context.moMinerContainerName,
+                "--hostname", context.moMinerContainerName,
+                "--mount", `type=bind,source=${this.rootDir},target=/root/mominer`,
+                "--mount", `type=bind,source=${context.attemptDir},target=/root/mominer-live`,
+                "--workdir", "/root/mominer",
+                this.dockerImage,
+                "node",
+                "mominer.js",
+                ...args
             ];
         },
         buildEnv(context) {
             if (this.useDocker) return {};
-            const libraryPaths = [
-                this.rootDir,
-                path.join(this.rootDir, "lib"),
-                path.join(this.rootDir, "lib64"),
-                process.env.LD_LIBRARY_PATH || ""
-            ].filter(Boolean);
-
             return {
-                LD_LIBRARY_PATH: libraryPaths.join(":"),
+                LD_LIBRARY_PATH: [
+                    this.rootDir,
+                    path.join(this.rootDir, "lib"),
+                    path.join(this.rootDir, "lib64"),
+                    process.env.LD_LIBRARY_PATH || ""
+                ].filter(Boolean).join(":"),
                 MOMINER_CONFIG_DIR: context.attemptDir
             };
         },
         async cleanup(context) {
             if (!this.useDocker || !context.moMinerContainerName) return;
             await runCommand("docker", ["rm", "-f", context.moMinerContainerName]).catch(() => {});
-        },
-        parser,
-        style: "mominer"
+        }
     };
 }
 
 async function writeXmrigSeedConfig(configPath, algorithm) {
-    const algoPerf = {
-        ...XMRIG_ALGO_PERF_SEED,
-        [algorithm]: XMRIG_ALGO_PERF_SEED[algorithm] || 1
-    };
-
     await writeJson(configPath, {
         autosave: false,
         "algo-min-time": 0,
-        "algo-perf": algoPerf
+        "algo-perf": { ...XMRIG_ALGO_PERF_SEED, [algorithm]: XMRIG_ALGO_PERF_SEED[algorithm] || 1 }
     });
 }
 
@@ -1136,36 +920,28 @@ function getActiveAlgorithms(logger) {
     return selected;
 }
 
-function buildCoveragePlan(algorithms, miners, options) {
-    const config = options || {};
+function buildCoveragePlan(algorithms, miners, options = {}) {
     return algorithms.flatMap((definition) => {
-        const miner = miners.find((candidate) => candidate.algorithms.has(definition.algorithm));
-        const suppressProtocolProbe = config.suppressGpuProtocolProbes && GPU_PROTOCOL_PROBE_ALGOS.has(definition.algorithm);
-
+        const miner = miners.find((candidate) => candidate.algorithms.has(definition.algorithm)) || null;
+        const suppressProbe = options.suppressGpuProtocolProbes && GPU_PROTOCOL_PROBE_ALGOS.has(definition.algorithm);
         return [{
             algorithm: definition.algorithm,
-            miner: miner || null,
-            protocolProbe: miner || suppressProtocolProbe ? "" : (definition.protocolProbe || ""),
-            successCriterion: definition && definition.successCriterion ? definition.successCriterion : "accepted-share"
+            miner,
+            protocolProbe: miner || suppressProbe ? "" : (definition.protocolProbe || ""),
+            successCriterion: definition.successCriterion || "accepted-share"
         }];
     });
 }
 
 function makeWorkerName(config, algorithm, side, attempt) {
-    const base = [
-        "itest",
-        sanitizeName(config.runId).slice(0, 12),
-        shortAlgoName(algorithm).slice(0, 16),
-        side,
-        String(attempt)
-    ].filter(Boolean).join("-");
-
-    return base.substring(0, 63);
+    return ["itest", sanitizeName(config.runId).slice(0, 12), shortAlgoName(algorithm).slice(0, 16), side, String(attempt)]
+        .filter(Boolean)
+        .join("-")
+        .slice(0, 63);
 }
 
 async function stopProcess(processHandle) {
     if (!processHandle || processHandle.exitCode !== null || processHandle.killed) return;
-
     processHandle.kill("SIGINT");
     await sleep(1000);
     if (processHandle.exitCode !== null) return;
@@ -1180,28 +956,18 @@ function summarizeLatency(latenciesMs) {
     const min = Math.min(...latenciesMs);
     const max = Math.max(...latenciesMs);
     const sum = latenciesMs.reduce((total, current) => total + current, 0);
-
-    return {
-        min,
-        max,
-        avg: sum / latenciesMs.length,
-        count: latenciesMs.length,
-        last: latenciesMs[latenciesMs.length - 1]
-    };
+    return { min, max, avg: sum / latenciesMs.length, count: latenciesMs.length, last: latenciesMs[latenciesMs.length - 1] };
 }
 
 function hasMetSuccessCriterion(plan, metrics) {
     if (plan.successCriterion === "job") {
         return metrics.jobReceived && metrics.rejectedShares === 0 && metrics.invalidShares === 0;
     }
-
     return metrics.acceptedShares >= metrics.targetAcceptedShares && metrics.rejectedShares === 0 && metrics.invalidShares === 0;
 }
 
 function determineFailureReason(plan, metrics) {
-    if (hasMetSuccessCriterion(plan, metrics)) {
-        return "";
-    }
+    if (hasMetSuccessCriterion(plan, metrics)) return "";
     if (!metrics.connected) return "connection-failure";
     if (!metrics.jobReceived) return "job-timeout";
     if (metrics.invalidShares > 0) return "invalid-share";
@@ -1210,19 +976,9 @@ function determineFailureReason(plan, metrics) {
 }
 
 function createProbeSocket(config, target) {
-    if (config.tls) {
-        return tls.connect({
-            host: target.host,
-            port: target.port,
-            servername: target.host,
-            rejectUnauthorized: false
-        });
-    }
-
-    return net.createConnection({
-        host: target.host,
-        port: target.port
-    });
+    return config.tls
+        ? tls.connect({ host: target.host, port: target.port, servername: target.host, rejectUnauthorized: false })
+        : net.createConnection({ host: target.host, port: target.port });
 }
 
 function writeProtocolLine(stream, direction, message) {
@@ -1232,25 +988,21 @@ function writeProtocolLine(stream, direction, message) {
 function sendProtocolJson(socket, stream, payload) {
     const line = JSON.stringify(payload);
     writeProtocolLine(stream, ">", line);
-    socket.write(line + "\n");
+    socket.write(`${line}\n`);
 }
 
 function parseProtocolLines(buffer, chunk) {
-    const combined = buffer + chunk;
-    const lines = combined.split(/\r?\n/);
-    return {
-        lines: lines.slice(0, -1).filter(Boolean),
-        buffer: lines[lines.length - 1] || ""
-    };
+    const lines = `${buffer}${chunk}`.split(/\r?\n/);
+    return { lines: lines.slice(0, -1).filter(Boolean), buffer: lines[lines.length - 1] || "" };
 }
 
 function buildBadEthSubmitParams(user, jobId) {
     return [
         user,
         jobId,
-        "0x" + crypto.randomBytes(8).toString("hex"),
-        "0x" + "11".repeat(32),
-        "0x" + "22".repeat(32)
+        `0x${crypto.randomBytes(8).toString("hex")}`,
+        `0x${"11".repeat(32)}`,
+        `0x${"22".repeat(32)}`
     ];
 }
 
@@ -1263,23 +1015,107 @@ function buildBadLoginSubmitParams(loginId, jobId) {
     };
 }
 
-function hasGpuProtocolProbe(plan) {
-    return !plan.miner && !!plan.protocolProbe;
+const hasGpuProtocolProbe = (plan) => !plan.miner && !!plan.protocolProbe;
+function createDeferred() {
+    let resolve;
+    return { promise: new Promise((innerResolve) => { resolve = innerResolve; }), resolve };
+}
+
+function createAttemptFiles(run, plan, target, attempt, protocolProbe) {
+    const attemptId = protocolProbe
+        ? `${shortAlgoName(plan.algorithm)}-protocol-${target.name}-attempt-${attempt}`
+        : `${shortAlgoName(plan.algorithm)}-${sanitizeName(plan.miner.name)}-${target.name}-attempt-${attempt}`;
+
+    return {
+        attemptDir: path.join(run.runDir, "attempts", attemptId),
+        rawStdoutPath: path.join(run.runDir, "attempts", attemptId, "stdout.log"),
+        rawStderrPath: path.join(run.runDir, "attempts", attemptId, "stderr.log"),
+        worker: makeWorkerName(run.config, plan.algorithm, target.name, attempt),
+        password: `x~${plan.algorithm}`,
+        startedAtMs: Date.now()
+    };
+}
+
+function createAttemptBase(plan, target, attempt, files, minerName) {
+    return {
+        algorithm: plan.algorithm,
+        miner: minerName,
+        target: target.name,
+        host: target.host,
+        port: target.port,
+        attempt,
+        rawStdoutPath: files.rawStdoutPath,
+        rawStderrPath: files.rawStderrPath
+    };
+}
+
+function createMinerMetrics(targetAcceptedShares) {
+    return {
+        targetAcceptedShares,
+        startedAtMs: Date.now(),
+        connected: false,
+        jobReceived: false,
+        acceptedShares: 0,
+        rejectedShares: 0,
+        invalidShares: 0,
+        disconnects: 0,
+        retriesObserved: 0,
+        assignedDifficulties: [],
+        latenciesMs: [],
+        connectedAtMs: 0,
+        jobAtMs: 0,
+        firstAcceptedAtMs: 0,
+        hashrate: null,
+        reportedAlgorithm: null,
+        lastErrorLine: ""
+    };
+}
+
+function openLogStreams(stdoutPath, stderrPath) {
+    return { stdout: fs.createWriteStream(stdoutPath, { flags: "a" }), stderr: fs.createWriteStream(stderrPath, { flags: "a" }) };
+}
+const closeStreams = async (...streams) => await Promise.all(streams.filter(Boolean).map((stream) => new Promise((resolve) => stream.end(resolve))));
+
+function attachAttemptStream(run, plan, target, attempt, name, stream, sink, onLine) {
+    const rl = readline.createInterface({ input: stream });
+    rl.on("line", (line) => {
+        const cleanLine = stripAnsi(line);
+        sink.write(`${cleanLine}\n`);
+        onLine(cleanLine);
+        run.logger.event("attempt.output", {
+            algorithm: plan.algorithm,
+            miner: plan.miner.name,
+            target: target.name,
+            attempt,
+            stream: name,
+            line: cleanLine
+        });
+    });
+    return rl;
+}
+
+async function waitForMinerAttempt(child, metrics, plan, timeoutMs, getProcessError) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (getProcessError()) break;
+        if (hasMetSuccessCriterion(plan, metrics)) break;
+        if (child.exitCode !== null) break;
+        await sleep(1000);
+    }
 }
 
 function createProtocolProbeSession(config, run, plan, target, attempt) {
-    const attemptDir = path.join(
-        run.runDir,
-        "attempts",
-        `${shortAlgoName(plan.algorithm)}-protocol-${target.name}-attempt-${attempt}`
-    );
-
-    const rawStdoutPath = path.join(attemptDir, "stdout.log");
-    const rawStderrPath = path.join(attemptDir, "stderr.log");
-    const startedAtMs = Date.now();
-    const worker = makeWorkerName(config, plan.algorithm, target.name, attempt);
-    const user = `${config.wallet}.${worker}`;
-    const password = `x~${plan.algorithm}`;
+    const files = createAttemptFiles(run, plan, target, attempt, true);
+    const probe = PROTOCOL_PROBES[plan.protocolProbe];
+    const base = createAttemptBase(plan, target, attempt, files, "protocol-probe");
+    const readyDeferred = createDeferred();
+    const doneDeferred = createDeferred();
+    const context = {
+        config,
+        user: `${config.wallet}.${files.worker}`,
+        password: files.password,
+        worker: files.worker
+    };
     const metrics = {
         connected: false,
         authorized: false,
@@ -1292,55 +1128,35 @@ function createProtocolProbeSession(config, run, plan, target, attempt) {
         lastError: ""
     };
 
+    let socket = null;
+    let socketError = null;
+    let stdoutStream = null;
+    let stderrStream = null;
     let lineBuffer = "";
     let nextId = 1;
     let authId = 0;
     let submitId = 0;
-    let finished = false;
     let ready = false;
-    let socketError = null;
-    let socket = null;
-    let stdoutStream = null;
-    let stderrStream = null;
-    let resolveReady = null;
-    let resolveDone = null;
-    const readyPromise = new Promise((resolve) => {
-        resolveReady = resolve;
-    });
-    const donePromise = new Promise((resolve) => {
-        resolveDone = resolve;
-    });
+    let finished = false;
 
     function markReady() {
         if (ready) return;
         ready = true;
-        resolveReady();
+        readyDeferred.resolve();
     }
 
     function markFinished() {
         if (finished) return;
         finished = true;
         markReady();
-        resolveDone();
+        doneDeferred.resolve();
     }
 
-    function submitBadShare() {
-        if (submitId || !metrics.jobId) return;
-        submitId = nextId++;
-        if (plan.protocolProbe === "login-bad-share") {
-            sendProtocolJson(socket, stdoutStream, {
-                id: submitId,
-                method: "submit",
-                params: buildBadLoginSubmitParams(metrics.loginId, metrics.jobId)
-            });
-            return;
-        }
-
-        sendProtocolJson(socket, stdoutStream, {
-            id: submitId,
-            method: "mining.submit",
-            params: buildBadEthSubmitParams(user, metrics.jobId)
-        });
+    function rememberJob(jobId) {
+        if (!jobId) return;
+        metrics.jobReceived = true;
+        metrics.jobId = jobId;
+        markReady();
     }
 
     function handleMessage(message) {
@@ -1359,25 +1175,16 @@ function createProtocolProbeSession(config, run, plan, target, attempt) {
                 return;
             }
             metrics.authorized = true;
-            const loginResult = message.result || {};
-            metrics.loginId = loginResult.id || metrics.loginId;
-            if (loginResult.job && loginResult.job.job_id) {
-                metrics.jobReceived = true;
-                metrics.jobId = loginResult.job.job_id;
-                markReady();
-            }
+            metrics.loginId = message.result?.id || metrics.loginId;
+            rememberJob(message.result?.job?.job_id || "");
         }
 
         if (message.method === "mining.notify") {
-            metrics.jobReceived = true;
-            metrics.jobId = Array.isArray(message.params) ? String(message.params[0] || "") : "";
-            markReady();
+            rememberJob(Array.isArray(message.params) ? String(message.params[0] || "") : "");
         }
 
-        if (message.method === "job" && message.params && message.params.job_id) {
-            metrics.jobReceived = true;
-            metrics.jobId = message.params.job_id;
-            markReady();
+        if (message.method === "job" && message.params?.job_id) {
+            rememberJob(message.params.job_id);
         }
 
         if (message.id === submitId) {
@@ -1387,211 +1194,149 @@ function createProtocolProbeSession(config, run, plan, target, attempt) {
                 markFinished();
                 return;
             }
-            if (message.result === true || (message.result && message.result.status === "OK")) {
+            if (message.result === true || message.result?.status === "OK") {
                 metrics.badShareAccepted = true;
                 markFinished();
             }
         }
     }
 
-    async function start() {
-        await ensureDir(attemptDir);
-        stdoutStream = fs.createWriteStream(rawStdoutPath, { flags: "a" });
-        stderrStream = fs.createWriteStream(rawStderrPath, { flags: "a" });
-        socket = createProbeSocket(config, target);
-        socket.setEncoding("utf8");
-        socket.setTimeout(config.timeoutMs);
-
-        if (config.emitStartLines) {
-            emitProgress(`[${formatReadableTime(new Date())}] start ${plan.algorithm} protocol probe on ${target.host}:${target.port}`);
-        }
-
-        run.logger.event("probe.start", {
-            algorithm: plan.algorithm,
-            protocolProbe: plan.protocolProbe,
-            target: target.name,
-            host: target.host,
-            port: target.port,
-            attempt
-        });
-
-        socket.once(config.tls ? "secureConnect" : "connect", () => {
-            metrics.connected = true;
-            if (plan.protocolProbe === "login-bad-share") {
-                authId = nextId++;
-                sendProtocolJson(socket, stdoutStream, {
-                    id: authId,
-                    jsonrpc: "2.0",
-                    method: "login",
-                    params: {
-                        login: config.wallet,
-                        pass: password,
-                        agent: "nodejs-pool-live-probe/1.0",
-                        rigid: worker
-                    }
-                });
-                return;
-            }
-
-            sendProtocolJson(socket, stdoutStream, {
-                id: nextId++,
-                method: "mining.subscribe",
-                params: []
-            });
-            authId = nextId++;
-            setTimeout(() => {
-                if (socket.destroyed || finished) return;
-                sendProtocolJson(socket, stdoutStream, {
-                    id: authId,
-                    method: "mining.authorize",
-                    params: [user, password]
-                });
-            }, 250);
-        });
-
-        socket.on("data", (chunk) => {
-            const parsed = parseProtocolLines(lineBuffer, chunk);
-            lineBuffer = parsed.buffer;
-            for (const line of parsed.lines) {
-                writeProtocolLine(stdoutStream, "<", line);
-                let message;
-                try {
-                    message = JSON.parse(line);
-                } catch (error) {
-                    metrics.lastError = `invalid-json: ${error.message}`;
-                    continue;
-                }
-                handleMessage(message);
-            }
-        });
-
-        socket.once("timeout", () => {
-            metrics.lastError = "timeout";
-            markFinished();
-        });
-        socket.once("error", (error) => {
-            socketError = error;
-            metrics.lastError = error.message;
-            if (stderrStream) stderrStream.write(error.stack || error.message);
-            markFinished();
-        });
-    }
-
-    function submit() {
-        submitBadShare();
-        if (!submitId && !metrics.jobId) {
-            metrics.lastError = "no-job";
-            markFinished();
-        }
-    }
-
-    async function stop() {
-        if (socket) socket.destroy();
-        await Promise.all([
-            stdoutStream ? new Promise((resolve) => stdoutStream.end(resolve)) : undefined,
-            stderrStream ? new Promise((resolve) => stderrStream.end(resolve)) : undefined
-        ].filter(Boolean));
-    }
-
-    function result() {
-        let failureReason = "";
-        if (socketError || !metrics.connected) failureReason = "connection-failure";
-        else if (!metrics.authorized) failureReason = "authorization-failure";
-        else if (!metrics.jobReceived) failureReason = "job-timeout";
-        else if (metrics.badShareAccepted) failureReason = "bad-share-accepted";
-        else if (!metrics.badShareRejected) failureReason = "rejection-timeout";
-
-        return {
-            algorithm: plan.algorithm,
-            miner: "protocol-probe",
-            target: target.name,
-            host: target.host,
-            port: target.port,
-            attempt,
-            success: failureReason === "",
-            failureReason,
-            protocolProbe: plan.protocolProbe,
-            connected: metrics.connected,
-            jobReceived: metrics.jobReceived,
-            acceptedShares: 0,
-            rejectedShares: metrics.badShareRejected ? 1 : 0,
-            invalidShares: 0,
-            disconnects: 0,
-            retriesObserved: 0,
-            assignedDifficulty: null,
-            assignedDifficulties: [],
-            reportedAlgorithm: plan.algorithm,
-            hashrate: null,
-            latency: null,
-            durationMs: Math.max(0, Date.now() - startedAtMs),
-            exitCode: null,
-            exitSignal: null,
-            error: metrics.rejectionError || metrics.lastError,
-            rawStdoutPath,
-            rawStderrPath
-        };
-    }
-
     return {
         plan,
         target,
-        start,
-        submit,
-        stop,
-        result,
-        readyPromise,
-        donePromise,
+        readyPromise: readyDeferred.promise,
+        donePromise: doneDeferred.promise,
         isFinished() {
             return finished;
+        },
+        async start() {
+            await ensureDir(files.attemptDir);
+            ({ stdout: stdoutStream, stderr: stderrStream } = openLogStreams(files.rawStdoutPath, files.rawStderrPath));
+            socket = createProbeSocket(config, target);
+            socket.setEncoding("utf8");
+            socket.setTimeout(config.timeoutMs);
+
+            if (config.emitStartLines) {
+                emitProgress(`[${formatReadableTime(new Date())}] start ${plan.algorithm} protocol probe on ${target.host}:${target.port}`);
+            }
+
+            run.logger.event("probe.start", {
+                algorithm: plan.algorithm,
+                protocolProbe: plan.protocolProbe,
+                target: target.name,
+                host: target.host,
+                port: target.port,
+                attempt
+            });
+
+            socket.once(config.tls ? "secureConnect" : "connect", () => {
+                metrics.connected = true;
+
+                if (probe.useSubscribe) {
+                    sendProtocolJson(socket, stdoutStream, { id: nextId++, method: "mining.subscribe", params: [] });
+                    authId = nextId++;
+                    setTimeout(() => {
+                        if (!socket.destroyed && !finished) {
+                            sendProtocolJson(socket, stdoutStream, probe.authorize(context, authId));
+                        }
+                    }, 250);
+                    return;
+                }
+
+                authId = nextId++;
+                sendProtocolJson(socket, stdoutStream, probe.authorize(context, authId));
+            });
+
+            socket.on("data", (chunk) => {
+                const parsed = parseProtocolLines(lineBuffer, chunk);
+                lineBuffer = parsed.buffer;
+                for (const line of parsed.lines) {
+                    writeProtocolLine(stdoutStream, "<", line);
+                    try {
+                        handleMessage(JSON.parse(line));
+                    } catch (error) {
+                        metrics.lastError = `invalid-json: ${error.message}`;
+                    }
+                }
+            });
+
+            socket.once("timeout", () => {
+                metrics.lastError = "timeout";
+                markFinished();
+            });
+            socket.once("error", (error) => {
+                socketError = error;
+                metrics.lastError = error.message;
+                if (stderrStream) stderrStream.write(error.stack || error.message);
+                markFinished();
+            });
+        },
+        submit() {
+            if (submitId || !metrics.jobId) {
+                if (!metrics.jobId) {
+                    metrics.lastError = "no-job";
+                    markFinished();
+                }
+                return;
+            }
+
+            submitId = nextId++;
+            sendProtocolJson(socket, stdoutStream, probe.submit(context, metrics, submitId));
+        },
+        async stop() {
+            if (socket) socket.destroy();
+            await closeStreams(stdoutStream, stderrStream);
+        },
+        result() {
+            let failureReason = "";
+            if (socketError || !metrics.connected) failureReason = "connection-failure";
+            else if (!metrics.authorized) failureReason = "authorization-failure";
+            else if (!metrics.jobReceived) failureReason = "job-timeout";
+            else if (metrics.badShareAccepted) failureReason = "bad-share-accepted";
+            else if (!metrics.badShareRejected) failureReason = "rejection-timeout";
+
+            return {
+                ...base,
+                success: failureReason === "",
+                failureReason,
+                protocolProbe: plan.protocolProbe,
+                connected: metrics.connected,
+                jobReceived: metrics.jobReceived,
+                acceptedShares: 0,
+                rejectedShares: metrics.badShareRejected ? 1 : 0,
+                invalidShares: 0,
+                disconnects: 0,
+                retriesObserved: 0,
+                assignedDifficulty: null,
+                assignedDifficulties: [],
+                reportedAlgorithm: plan.algorithm,
+                hashrate: null,
+                latency: null,
+                durationMs: Math.max(0, Date.now() - files.startedAtMs),
+                exitCode: null,
+                exitSignal: null,
+                error: metrics.rejectionError || metrics.lastError
+            };
         }
     };
 }
 
 async function runMinerAttempt(config, run, plan, target, attempt) {
-    const attemptDir = path.join(
-        run.runDir,
-        "attempts",
-        `${shortAlgoName(plan.algorithm)}-${sanitizeName(plan.miner.name)}-${target.name}-attempt-${attempt}`
-    );
+    const files = createAttemptFiles(run, plan, target, attempt, false);
+    const base = createAttemptBase(plan, target, attempt, files, plan.miner.name);
 
-    await ensureDir(attemptDir);
-
-    const worker = makeWorkerName(config, plan.algorithm, target.name, attempt);
-    const password = `x~${plan.algorithm}`;
-    const walletWithDifficulty = config.wallet;
-    const xmrigConfigPath = path.join(attemptDir, "xmrig-config.json");
-    const rawStdoutPath = path.join(attemptDir, "stdout.log");
-    const rawStderrPath = path.join(attemptDir, "stderr.log");
-    const stdoutStream = fs.createWriteStream(rawStdoutPath, { flags: "a" });
-    const stderrStream = fs.createWriteStream(rawStderrPath, { flags: "a" });
-    const metrics = {
-        targetAcceptedShares: config.targetAcceptedShares,
-        startedAtMs: Date.now(),
-        connected: false,
-        jobReceived: false,
-        acceptedShares: 0,
-        rejectedShares: 0,
-        invalidShares: 0,
-        disconnects: 0,
-        retriesObserved: 0,
-        assignedDifficulties: [],
-        latenciesMs: [],
-        connectedAtMs: 0,
-        jobAtMs: 0,
-        firstAcceptedAtMs: 0,
-        hashrate: null,
-        reportedAlgorithm: null,
-        lastErrorLine: ""
-    };
+    await ensureDir(files.attemptDir);
+    const streams = openLogStreams(files.rawStdoutPath, files.rawStderrPath);
+    const metrics = createMinerMetrics(config.targetAcceptedShares);
     const context = {
-        attemptDir,
-        configPath: xmrigConfigPath,
+        attemptDir: files.attemptDir,
+        configPath: path.join(files.attemptDir, "xmrig-config.json"),
         host: target.host,
         port: target.port,
         wallet: config.wallet,
-        walletWithDifficulty,
-        password,
-        worker,
+        walletWithDifficulty: config.wallet,
+        password: files.password,
+        worker: files.worker,
         algorithm: plan.algorithm,
         threads: config.threads,
         tls: config.tls,
@@ -1600,32 +1345,18 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         srbMinerApiPort: config.srbMinerApiPort + attempt - 1,
         moMinerC29Device: config.moMinerC29Device
     };
-    await writeXmrigSeedConfig(xmrigConfigPath, plan.algorithm);
-    let args;
+
+    await writeXmrigSeedConfig(context.configPath, plan.algorithm);
+
+    let args = [];
     try {
-        if (typeof plan.miner.prepare === "function") {
-            await plan.miner.prepare(context);
-        }
+        if (typeof plan.miner.prepare === "function") await plan.miner.prepare(context);
         args = plan.miner.buildArgs(context);
     } catch (error) {
-        await Promise.all([
-            new Promise((resolve) => stdoutStream.end(resolve)),
-            new Promise((resolve) => stderrStream.end(resolve))
-        ]);
-        return {
-            algorithm: plan.algorithm,
-            miner: plan.miner.name,
-            target: target.name,
-            host: target.host,
-            port: target.port,
-            attempt,
-            success: false,
-            failureReason: "launch-failure",
-            error: error.message,
-            rawStdoutPath,
-            rawStderrPath
-        };
+        await closeStreams(streams.stdout, streams.stderr);
+        return { ...base, success: false, failureReason: "launch-failure", error: error.message };
     }
+
     if (config.emitStartLines) {
         emitProgress(`[${formatReadableTime(new Date())}] start ${plan.algorithm} algo on ${target.host}:${target.port}`);
     }
@@ -1642,7 +1373,7 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
 
     let processError = null;
     const child = spawn(plan.miner.binaryPath, args, {
-        cwd: attemptDir,
+        cwd: files.attemptDir,
         env: {
             ...process.env,
             ...(typeof plan.miner.buildEnv === "function" ? plan.miner.buildEnv(context) : {}),
@@ -1658,75 +1389,33 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         processError = error;
     });
 
-    const interfaces = [
-        { name: "stdout", stream: child.stdout, sink: stdoutStream },
-        { name: "stderr", stream: child.stderr, sink: stderrStream }
-    ];
+    attachAttemptStream(run, plan, target, attempt, "stdout", child.stdout, streams.stdout, (line) => {
+        plan.miner.parser(line, metrics);
+    });
+    attachAttemptStream(run, plan, target, attempt, "stderr", child.stderr, streams.stderr, (line) => {
+        plan.miner.parser(line, metrics);
+    });
 
-    for (const entry of interfaces) {
-        const rl = readline.createInterface({ input: entry.stream });
-        rl.on("line", (line) => {
-            const cleanLine = stripAnsi(line);
-            entry.sink.write(cleanLine + "\n");
-            plan.miner.parser(cleanLine, metrics);
-            run.logger.event("attempt.output", {
-                algorithm: plan.algorithm,
-                miner: plan.miner.name,
-                target: target.name,
-                attempt,
-                stream: entry.name,
-                line: cleanLine
-            });
-        });
-    }
-
-    const deadline = Date.now() + config.timeoutMs;
-    while (Date.now() < deadline) {
-        if (processError) break;
-        if (hasMetSuccessCriterion(plan, metrics)) break;
-        if (child.exitCode !== null) break;
-        await sleep(1000);
-    }
-
+    await waitForMinerAttempt(child, metrics, plan, config.timeoutMs, () => processError);
     await stopProcess(child);
 
     const exitState = await childClosed;
     if (typeof plan.miner.cleanup === "function") {
         await plan.miner.cleanup(context);
     }
-    await Promise.all([
-        new Promise((resolve) => stdoutStream.end(resolve)),
-        new Promise((resolve) => stderrStream.end(resolve))
-    ]);
+
+    await closeStreams(streams.stdout, streams.stderr);
 
     if (processError) {
-        return {
-            algorithm: plan.algorithm,
-            miner: plan.miner.name,
-            target: target.name,
-            host: target.host,
-            port: target.port,
-            attempt,
-            success: false,
-            failureReason: "launch-failure",
-            error: processError.message,
-            rawStdoutPath,
-            rawStderrPath
-        };
+        return { ...base, success: false, failureReason: "launch-failure", error: processError.message };
     }
 
     const failureReason = determineFailureReason(plan, metrics);
     const success = failureReason === "";
     const endAtMs = metrics.firstAcceptedAtMs || metrics.jobAtMs || Date.now();
-    const durationMs = Math.max(0, endAtMs - metrics.startedAtMs);
 
     return {
-        algorithm: plan.algorithm,
-        miner: plan.miner.name,
-        target: target.name,
-        host: target.host,
-        port: target.port,
-        attempt,
+        ...base,
         success,
         failureReason,
         connected: metrics.connected,
@@ -1741,12 +1430,10 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         reportedAlgorithm: metrics.reportedAlgorithm,
         hashrate: metrics.hashrate,
         latency: summarizeLatency(metrics.latenciesMs),
-        durationMs,
+        durationMs: Math.max(0, endAtMs - metrics.startedAtMs),
         exitCode: exitState.code,
         exitSignal: exitState.signal,
-        error: metrics.lastErrorLine,
-        rawStdoutPath,
-        rawStderrPath
+        error: metrics.lastErrorLine
     };
 }
 
@@ -1754,11 +1441,9 @@ async function executeScenario(run, plan, target) {
     const chosen = plan.miner
         ? await runMinerAttempt(run.config, run, plan, target, 1)
         : await runProtocolProbeAttempt(run.config, run, plan, target, 1);
+
     run.logger.event("attempt.finish", chosen);
-    return {
-        ...chosen,
-        attempts: [chosen]
-    };
+    return { ...chosen, attempts: [chosen] };
 }
 
 async function runProtocolProbeAttempt(config, run, plan, target, attempt) {
@@ -1784,85 +1469,68 @@ async function executeProtocolProbeBatch(run, plans, target) {
     }
 
     await waitWithTimeout(Promise.all(sessions.map((session) => session.donePromise)), run.config.timeoutMs);
-
     await Promise.all(sessions.map((session) => session.stop()));
 
     return sessions.map((session) => {
         const chosen = session.result();
         run.logger.event("attempt.finish", chosen);
-        return {
-            ...chosen,
-            attempts: [chosen]
-        };
+        return { ...chosen, attempts: [chosen] };
     });
 }
 
 function buildSummary(run, coveredResults) {
-    const { config, miners, algorithms, coveragePlan, unsupportedAlgorithms } = run;
-    const comparisons = coveredResults.map((result) => ({
-        algorithm: result.algorithm,
-        miner: result.miner,
-        target: result.target
-    }));
-    const failures = comparisons.filter((entry) => !entry.target.success);
-
-    let exitCode = 0;
-    if (failures.length || unsupportedAlgorithms.length > 0) exitCode = 1;
-
+    const failures = coveredResults.filter((entry) => !entry.target.success);
     return {
-        runId: config.runId,
+        runId: run.config.runId,
         generatedAt: new Date().toISOString(),
-        algorithms: algorithms.map((entry) => entry.algorithm),
+        algorithms: run.algorithms.map((entry) => entry.algorithm),
         configuration: {
-            targetHost: config.targetHost,
-            targetPort: config.targetPort,
-            tls: config.tls,
-            difficulty: config.difficulty,
-            threads: config.threads,
-            wallet: config.wallet,
-            timeoutMs: config.timeoutMs
+            targetHost: run.config.targetHost,
+            targetPort: run.config.targetPort,
+            tls: run.config.tls,
+            difficulty: run.config.difficulty,
+            threads: run.config.threads,
+            wallet: run.config.wallet,
+            timeoutMs: run.config.timeoutMs
         },
         hardware: run.hardware || {},
-        minerInventory: miners.map((miner) => ({
+        minerInventory: run.miners.map((miner) => ({
             name: miner.name,
             binaryPath: miner.scriptPath || miner.binaryPath,
             algorithms: Array.from(miner.algorithms).sort()
         })),
-        coveragePlan: coveragePlan.map((entry) => ({
+        coveragePlan: run.coveragePlan.map((entry) => ({
             algorithm: entry.algorithm,
             covered: !!entry.miner || !!entry.protocolProbe,
             miner: entry.miner ? entry.miner.name : null,
             protocolProbe: entry.protocolProbe || null
         })),
-        results: comparisons,
-        unsupportedAlgorithms,
+        results: coveredResults,
+        unsupportedAlgorithms: run.unsupportedAlgorithms,
         failureCount: failures.length,
-        unsupportedAlgorithmCount: unsupportedAlgorithms.length,
-        exitCode
+        unsupportedAlgorithmCount: run.unsupportedAlgorithms.length,
+        exitCode: failures.length || run.unsupportedAlgorithms.length ? 1 : 0
     };
 }
 
 function formatSummary(summary) {
-    const lines = [];
-    lines.push(`runId: ${summary.runId}`);
     const algorithms = Array.isArray(summary.algorithms) ? summary.algorithms : [];
     const unsupportedAlgorithms = Array.isArray(summary.unsupportedAlgorithms) ? summary.unsupportedAlgorithms : [];
-    lines.push(`active algorithms (${algorithms.length}): ${algorithms.join(", ") || "none"}`);
-    lines.push(`unsupported algorithms (${summary.unsupportedAlgorithmCount || 0}): ${unsupportedAlgorithms.map((entry) => entry.algorithm).join(", ") || "none"}`);
-    lines.push(`target failures: ${summary.failureCount}`);
-    lines.push(`logs: ${summary.logDir || "see summary.json"}`);
-
-    if (summary.error) lines.push(`error: ${summary.error}`);
-
-    return lines.join("\n");
+    return [
+        `runId: ${summary.runId}`,
+        `active algorithms (${algorithms.length}): ${algorithms.join(", ") || "none"}`,
+        `unsupported algorithms (${summary.unsupportedAlgorithmCount || 0}): ${unsupportedAlgorithms.map((entry) => entry.algorithm).join(", ") || "none"}`,
+        `target failures: ${summary.failureCount}`,
+        `logs: ${summary.logDir || "see summary.json"}`,
+        summary.error ? `error: ${summary.error}` : ""
+    ].filter(Boolean).join("\n");
 }
 
 async function formatFailureDetails(summary) {
     if (!summary || !Array.isArray(summary.results)) return "";
-
     const sections = [];
     for (const result of summary.results) {
-        if (result.target && result.target.success) continue;
+        if (result.target?.success) continue;
         const stdoutText = await readTextFileIfExists(result.target.rawStdoutPath);
         const stderrText = await readTextFileIfExists(result.target.rawStderrPath);
         sections.push([
@@ -1871,12 +1539,15 @@ async function formatFailureDetails(summary) {
             stderrText ? `stderr:\n${stderrText.trimEnd()}` : ""
         ].filter(Boolean).join("\n"));
     }
-
     return sections.join("\n\n");
 }
 
-function printSummary(summary) {
-    process.stdout.write(formatSummary(summary) + "\n");
+const printSummary = (summary) => process.stdout.write(`${formatSummary(summary)}\n`);
+function usesAny(activeAlgorithmSet, algorithms) {
+    for (const algorithm of algorithms) {
+        if (activeAlgorithmSet.has(algorithm)) return true;
+    }
+    return false;
 }
 
 async function createLivePoolRun(input) {
@@ -1887,31 +1558,26 @@ async function createLivePoolRun(input) {
     await ensureDir(path.join(runDir, "attempts"));
 
     const logger = createLogger(runDir);
-    logger.event("suite.start", {
-        runId: config.runId,
-        targetHost: config.targetHost
-    });
+    logger.event("suite.start", { runId: config.runId, targetHost: config.targetHost });
 
     try {
         const intelGpuDetected = detectIntelGpu();
         const algorithms = getActiveAlgorithms(logger);
         const activeAlgorithmSet = new Set(algorithms.map((entry) => entry.algorithm));
-        const xmrig = await ensureXmrigBinary(config, logger);
         const miners = [];
 
         logger.event("hardware.intel-gpu.detect", { detected: intelGpuDetected });
 
-        if (intelGpuDetected && Object.keys(SRBMINER_INTEL_ALGORITHM_MAP).some((algorithm) => activeAlgorithmSet.has(algorithm))) {
-            const srbminer = await ensureSrbMinerBinary(config, logger);
-            miners.push(buildSrbMiner(srbminer.binaryPath));
+        if (intelGpuDetected && usesAny(activeAlgorithmSet, Object.keys(SRBMINER_INTEL_ALGORITHM_MAP))) {
+            miners.push(buildSrbMiner((await ensureSrbMinerBinary(config, logger)).binaryPath));
         }
 
-        if (intelGpuDetected && Array.from(MOMINER_INTEL_ALGOS).some((algorithm) => activeAlgorithmSet.has(algorithm))) {
+        if (intelGpuDetected && usesAny(activeAlgorithmSet, MOMINER_INTEL_ALGOS)) {
             const mominer = await ensureMoMinerRoot(config, logger);
             miners.push(buildMoMiner(mominer.rootDir, mominer.scriptPath));
         }
 
-        miners.push(buildXmrigMiner(xmrig.binaryPath));
+        miners.push(buildXmrigMiner((await ensureXmrigBinary(config, logger)).binaryPath));
 
         const coveragePlan = buildCoveragePlan(algorithms, miners, {
             suppressGpuProtocolProbes: intelGpuDetected
@@ -1924,21 +1590,17 @@ async function createLivePoolRun(input) {
                     ? "no-real-intel-gpu-miner"
                     : "no-suitable-miner"
             }));
-        const minerPlans = coveragePlan.filter((entry) => entry.miner);
-        const protocolProbePlans = coveragePlan.filter((entry) => !entry.miner && entry.protocolProbe);
 
         return {
             config,
             runDir,
             logger,
-            hardware: {
-                intelGpuDetected
-            },
+            hardware: { intelGpuDetected },
             miners,
             algorithms,
             coveragePlan,
             unsupportedAlgorithms,
-            coveredPlans: [...minerPlans, ...protocolProbePlans]
+            coveredPlans: coveragePlan.filter((entry) => entry.miner || entry.protocolProbe)
         };
     } catch (error) {
         await logger.close();
@@ -1950,14 +1612,8 @@ async function finalizeLivePoolRun(run, coveredResults, error) {
     const { config, runDir, logger, unsupportedAlgorithms } = run;
 
     try {
-        let summary;
-        if (error) {
-            logger.event("suite.error", {
-                runId: config.runId,
-                message: error.message,
-                stack: error.stack
-            });
-            summary = {
+        const summary = error
+            ? {
                 runId: config.runId,
                 generatedAt: new Date().toISOString(),
                 logDir: runDir,
@@ -1965,9 +1621,12 @@ async function finalizeLivePoolRun(run, coveredResults, error) {
                 failureCount: 1,
                 unsupportedAlgorithmCount: unsupportedAlgorithms.length,
                 exitCode: 1
-            };
+            }
+            : buildSummary(run, coveredResults);
+
+        if (error) {
+            logger.event("suite.error", { runId: config.runId, message: error.message, stack: error.stack });
         } else {
-            summary = buildSummary(run, coveredResults);
             summary.logDir = runDir;
             logger.event("suite.finish", {
                 runId: config.runId,
@@ -1984,9 +1643,7 @@ async function finalizeLivePoolRun(run, coveredResults, error) {
     }
 }
 
-async function isDefaultTargetReachable() {
-    return await isTcpReachable(DEFAULT_TARGET_HOST, DEFAULT_TARGET_PORT);
-}
+const isDefaultTargetReachable = async () => await isTcpReachable(DEFAULT_TARGET_HOST, DEFAULT_TARGET_PORT);
 
 function buildConfig(input) {
     const options = input || {};
@@ -2027,79 +1684,66 @@ function renderCliHelp() {
     ].join("\n");
 }
 
+const buildTarget = (config) => ({ name: config.targetName, host: config.targetHost, port: config.targetPort });
+const pushCoveredResult = (coveredResults, algorithm, miner, target) => coveredResults.push({ algorithm, miner, target });
+
+async function writeStandaloneFailureSummary(input, error) {
+    const config = buildConfig(input);
+    const runDir = path.join(config.logDir, config.runId);
+    const summary = {
+        runId: config.runId,
+        generatedAt: new Date().toISOString(),
+        logDir: runDir,
+        error: error.message,
+        failureCount: 1,
+        unsupportedAlgorithmCount: 0,
+        exitCode: 1
+    };
+
+    await ensureDir(runDir);
+    await writeJson(path.join(runDir, "summary.json"), summary);
+    return summary;
+}
+
 async function runLivePoolSuite(input) {
     let run = null;
     const coveredResults = [];
+
     try {
         run = await createLivePoolRun(input);
+        const target = buildTarget(run.config);
+
         for (const plan of run.coveredPlans.filter((entry) => !hasGpuProtocolProbe(entry))) {
-            const target = await executeScenario(run, plan, {
-                name: run.config.targetName,
-                host: run.config.targetHost,
-                port: run.config.targetPort
-            });
-            coveredResults.push({
-                algorithm: plan.algorithm,
-                miner: plan.miner ? plan.miner.name : "protocol-probe",
-                target
-            });
-        }
-        const protocolPlans = run.coveredPlans.filter(hasGpuProtocolProbe);
-        if (protocolPlans.length) {
-            const targets = await executeProtocolProbeBatch(run, protocolPlans, {
-                name: run.config.targetName,
-                host: run.config.targetHost,
-                port: run.config.targetPort
-            });
-            for (const target of targets) {
-                coveredResults.push({
-                    algorithm: target.algorithm,
-                    miner: target.miner,
-                    target
-                });
-            }
-        }
-        return await finalizeLivePoolRun(run, coveredResults, null);
-    } catch (error) {
-        if (!run) {
-            const config = buildConfig(input);
-            const runDir = path.join(config.logDir, config.runId);
-            await ensureDir(runDir);
-            await writeJson(path.join(runDir, "summary.json"), {
-                runId: config.runId,
-                generatedAt: new Date().toISOString(),
-                logDir: runDir,
-                error: error.message,
-                failureCount: 1,
-                unsupportedAlgorithmCount: 0,
-                exitCode: 1
-            });
-            return {
-                runId: config.runId,
-                generatedAt: new Date().toISOString(),
-                logDir: runDir,
-                error: error.message,
-                failureCount: 1,
-                unsupportedAlgorithmCount: 0,
-                exitCode: 1
-            };
+            const result = await executeScenario(run, plan, target);
+            pushCoveredResult(coveredResults, plan.algorithm, plan.miner ? plan.miner.name : "protocol-probe", result);
         }
 
-        return await finalizeLivePoolRun(run, coveredResults, error);
+        const protocolPlans = run.coveredPlans.filter(hasGpuProtocolProbe);
+        if (protocolPlans.length) {
+            for (const result of await executeProtocolProbeBatch(run, protocolPlans, target)) {
+                pushCoveredResult(coveredResults, result.algorithm, result.miner, result);
+            }
+        }
+
+        return await finalizeLivePoolRun(run, coveredResults, null);
+    } catch (error) {
+        return run
+            ? await finalizeLivePoolRun(run, coveredResults, error)
+            : await writeStandaloneFailureSummary(input, error);
     }
 }
 
 async function runFromCli(argv) {
     const options = parseCliOptions(argv);
     if (options.help) {
-        process.stdout.write(renderCliHelp() + "\n");
+        process.stdout.write(`${renderCliHelp()}\n`);
         return 0;
     }
 
     const summary = await runLivePoolSuite(options);
     printSummary(summary);
     const failureDetails = await formatFailureDetails(summary);
-    if (failureDetails) process.stdout.write("\n" + failureDetails + "\n");
+    if (failureDetails) process.stdout.write(`\n${failureDetails}\n`);
     return summary.exitCode;
 }
 
