@@ -29,6 +29,7 @@
     "jsonwebtoken": "9.0.3",
     "node-lmdb": "0.10.1",
     "promise-mysql": "3.0.0",
-    "protocol-buffers": "5.0.0"
+    "protocol-buffers": "5.0.0",
+    "utf8": "3.0.0"
   }
 }
