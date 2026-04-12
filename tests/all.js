@@ -22,7 +22,7 @@ require("./pool-runtime.js");
 
 test("live miner integration suite", { timeout: 60 * 60 * 1000 }, async (t) => {
     if (!(await isDefaultTargetReachable())) {
-        t.skip("No live pool is reachable on localhost:443.");
+        t.skip("No live TLS pool endpoint responded on localhost:20001.");
         return;
     }
 

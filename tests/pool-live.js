@@ -1,12 +1,14 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { once } = require("node:events");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
+const { setTimeout: delay } = require("node:timers/promises");
 const tls = require("node:tls");
 const { spawn, spawnSync } = require("node:child_process");
 const { Readable } = require("node:stream");
@@ -16,7 +18,7 @@ const parseArgv = require("../parse_args.js");
 
 const ROOT_DIR = path.join(__dirname, "..");
 const DEFAULT_TARGET_HOST = "localhost";
-const DEFAULT_TARGET_PORT = 443;
+const DEFAULT_TARGET_PORT = 20001;
 const DEFAULT_CACHE_DIR = path.join(ROOT_DIR, ".cache", "live-miners");
 const DEFAULT_LOG_DIR = path.join(ROOT_DIR, "test-artifacts", "live-pool");
 const DEFAULT_WALLET = "862wu9yae6qSUaUGz3KjjSeQ3xPKKxhzf8eYd9qXFx4eTpWm1qp6tvY9mzX4YiUQyYNdwZ9T8Muy1NfydEnExWkER25EfNj";
@@ -1015,6 +1017,47 @@ function buildBadLoginSubmitParams(loginId, jobId) {
     };
 }
 
+function buildPoolEndpointProbePayload(requestId) {
+    return {
+        id: requestId,
+        jsonrpc: "2.0",
+        method: "getjob",
+        params: { id: "nodejs-pool-live-reachability" }
+    };
+}
+
+function isPoolEndpointResponse(message, requestId) {
+    return !!message
+        && typeof message === "object"
+        && message.id === requestId
+        && message.jsonrpc === "2.0"
+        && message.result === null
+        && message.error
+        && message.error.code === -1
+        && message.error.message === "Unauthenticated";
+}
+
+async function isPoolEndpointReachable(host, port, useTls, timeoutMs = 1500) {
+    if (!(await isTcpReachable(host, port))) return false;
+    const socket = createProbeSocket({ tls: useTls }, { host, port });
+    const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
+
+    try {
+        socket.setEncoding("utf8");
+        if (!(await Promise.race([once(socket, useTls ? "secureConnect" : "connect"), delay(timeoutMs, null, { ref: false })]))) {
+            return false;
+        }
+        socket.write(`${JSON.stringify(buildPoolEndpointProbePayload(1))}\n`);
+        const line = await Promise.race([once(rl, "line"), delay(timeoutMs, null, { ref: false })]);
+        return !!line && isPoolEndpointResponse(JSON.parse(line[0]), 1);
+    } catch (_error) {
+        return false;
+    } finally {
+        rl.close();
+        socket.destroy();
+    }
+}
+
 const hasGpuProtocolProbe = (plan) => !plan.miner && !!plan.protocolProbe;
 function createDeferred() {
     let resolve;
@@ -1553,8 +1596,8 @@ function usesAny(activeAlgorithmSet, algorithms) {
 async function createLivePoolRun(input) {
     const config = buildConfig(input);
 
-    if (!(await isTcpReachable(config.targetHost, config.targetPort))) {
-        throw new Error(`No live pool is reachable on ${config.targetHost}:${config.targetPort}.`);
+    if (!(await isPoolEndpointReachable(config.targetHost, config.targetPort, config.tls))) {
+        throw new Error(`No live pool endpoint responded on ${config.targetHost}:${config.targetPort}.`);
     }
 
     const runDir = path.join(config.logDir, config.runId);
@@ -1648,8 +1691,6 @@ async function finalizeLivePoolRun(run, coveredResults, error) {
     }
 }
 
-const isDefaultTargetReachable = async () => await isTcpReachable(DEFAULT_TARGET_HOST, DEFAULT_TARGET_PORT);
-
 function buildConfig(input) {
     const options = input || {};
     return {
@@ -1671,6 +1712,8 @@ function buildConfig(input) {
         emitStartLines: true
     };
 }
+
+const isDefaultTargetReachable = async () => await isPoolEndpointReachable(DEFAULT_TARGET_HOST, DEFAULT_TARGET_PORT, buildConfig().tls);
 
 function parseCliOptions(argv) {
     const parsed = parseArgv(argv, {});
