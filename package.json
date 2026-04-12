@@ -8,7 +8,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --require ./tests/test-output-buffer.js --test --test-reporter=spec --test-concurrency=1 tests/pool.js",
+    "test": "node --require ./tests/test-output-buffer.js --test --test-reporter=spec --test-concurrency=1 tests/all.js",
+    "test:long-runner": "node --test tests/pool-long-runner.js",
     "test:live": "node ./tests/pool-live.js",
     "test:live:jp": "node ./tests/pool-live.js --target-host jp.moneroocean.stream"
   },
