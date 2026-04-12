@@ -6,6 +6,8 @@ const test = require("node:test");
 
 const createConstants = require("../lib/coins/constants.js");
 const helpers = require("../lib/coins/helpers.js");
+const createPoolState = require("../lib/pool/state.js");
+const createProtocolHandler = require("../lib/pool/protocol.js");
 const createServerFactory = require("../lib/pool/servers.js");
 const createTemplateManager = require("../lib/pool/templates.js");
 const createShareProcessor = require("../lib/pool/shares.js");
@@ -300,6 +302,171 @@ test("server final replies honor explicit delay windows with random jitter", () 
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
         Math.random = originalMathRandom;
+    }
+});
+
+test("eth-style nonces are deduped across miners on the same block template", () => {
+    const originalConfig = global.config;
+    const originalCoinFuncs = global.coinFuncs;
+
+    try {
+        global.config = {
+            pool: {
+                minerThrottleShareWindow: 10,
+                minerThrottleSharePerSec: 1000,
+                trustedMiners: false,
+                targetTime: 30
+            }
+        };
+        global.coinFuncs = {
+            blobTypeEth(blobTypeNum) {
+                return blobTypeNum === 102;
+            },
+            blobTypeErg() {
+                return false;
+            },
+            blobTypeRvn() {
+                return false;
+            },
+            blobTypeGrin() {
+                return false;
+            },
+            blobTypeXTM_C() {
+                return false;
+            },
+            nonceSize() {
+                return 8;
+            },
+            c29ProofSize() {
+                return 0;
+            }
+        };
+
+        const stateTools = createPoolState();
+        const { state, retention, touchTimedEntry } = stateTools;
+        state.activeBlockTemplates.ETH = {
+            idHash: "eth-template-1",
+            timeCreated: Date.now()
+        };
+        state.lastCoinHashFactorMM.ETH = 1;
+
+        let shareCalls = 0;
+        let invalidShareCalls = 0;
+        const protocolHandler = createProtocolHandler({
+            debug() {},
+            retention,
+            state,
+            touchTimedEntry,
+            utils: {
+                getNewId() {
+                    return "unused";
+                },
+                getNewEthExtranonceId() {
+                    return 1;
+                },
+                ethExtranonce() {
+                    return "0001";
+                }
+            },
+            createMiner() {
+                throw new Error("createMiner should not be called during direct submit tests");
+            },
+            addProxyMiner() {
+                return true;
+            },
+            adjustMinerDiff() {
+                return false;
+            },
+            shareProcessor: {
+                processShare(_miner, _job, _blockTemplate, _params, callback) {
+                    shareCalls += 1;
+                    callback(true);
+                }
+            },
+            removeMiner() {},
+            processSend() {}
+        });
+
+        function createMiner(id, payout, extraNonce, jobId) {
+            const job = {
+                id: jobId,
+                coin: "ETH",
+                blob_type_num: 102,
+                blockHash: "eth-template-1",
+                extraNonce,
+                difficulty: 1,
+                coinHashFactor: 1
+            };
+            const miner = {
+                id,
+                payout,
+                logString: `${payout}:${jobId}`,
+                proxy: false,
+                validJobs: {
+                    toarray() {
+                        return [job];
+                    }
+                },
+                hasSubmittedValidShare: false,
+                invalidJobIdCount: 0,
+                touchProtocolActivity() {},
+                touchValidShare() {
+                    miner.hasSubmittedValidShare = true;
+                },
+                checkBan() {
+                    return false;
+                },
+                storeInvalidShare() {
+                    invalidShareCalls += 1;
+                },
+                sendSameCoinJob() {}
+            };
+            state.activeMiners.set(id, miner);
+            return { miner, job };
+        }
+
+        const minerA = createMiner("miner-a", "wallet-a", "0008", "job-a");
+        const minerB = createMiner("miner-b", "wallet-b", "0007", "job-b");
+
+        function submitShare(minerId, jobId, nonce) {
+            const replies = [];
+            const finals = [];
+            protocolHandler(
+                {},
+                `${minerId}-${jobId}`,
+                "submit",
+                {
+                    id: minerId,
+                    job_id: jobId,
+                    nonce,
+                    result: "f".repeat(64)
+                },
+                "127.0.0.2",
+                { port: 39002, portType: "pplns" },
+                function onReply(error, result) {
+                    replies.push({ error, result });
+                },
+                function onFinal(error, timeout) {
+                    finals.push({ error, timeout });
+                },
+                function onPush() {}
+            );
+            return { replies, finals };
+        }
+
+        const firstSubmit = submitShare(minerA.miner.id, minerA.job.id, "0x0008000000000001");
+        const replaySubmit = submitShare(minerB.miner.id, minerB.job.id, "0x0008000000000001");
+
+        assert.deepEqual(firstSubmit.finals, []);
+        assert.deepEqual(firstSubmit.replies, [{ error: null, result: true }]);
+        assert.deepEqual(replaySubmit.finals, []);
+        assert.deepEqual(replaySubmit.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(shareCalls, 1);
+        assert.equal(invalidShareCalls, 1);
+        assert.equal(state.activeBlockTemplates.ETH.sharedNonceSubmissions.has("0008000000000001"), true);
+    } finally {
+        global.config = originalConfig;
+        global.coinFuncs = originalCoinFuncs;
     }
 });
 
