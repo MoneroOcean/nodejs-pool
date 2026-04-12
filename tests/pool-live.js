@@ -1552,6 +1552,11 @@ function usesAny(activeAlgorithmSet, algorithms) {
 
 async function createLivePoolRun(input) {
     const config = buildConfig(input);
+
+    if (!(await isTcpReachable(config.targetHost, config.targetPort))) {
+        throw new Error(`No live pool is reachable on ${config.targetHost}:${config.targetPort}.`);
+    }
+
     const runDir = path.join(config.logDir, config.runId);
 
     await ensureDir(runDir);
