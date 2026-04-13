@@ -315,7 +315,7 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
     assert.equal(result.global.totalPayments, 9);
     assert.equal(result.global.lastBlockFound, 120);
     assert.equal(result.global.lastBlockFoundTime, 7);
-    assert.deepEqual(result.global.price, { btc: 0.005, usd: 150, eur: 140 });
+    assert.deepEqual(result.global.price, { btc: 0, usd: 0, eur: 0 });
     assert.equal(result.global.currentEfforts[18000], 200);
     assert.equal(result.global.currentEfforts[18081], 33);
     assert.equal(result.global.portCoinAlgo[18081], "kawpow");
@@ -422,6 +422,118 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
             }
         ]
     });
+});
+
+test("startPoolStats initializes pool and network caches without waiting for prices", async () => {
+    createTestEnvironment({
+        caches: {
+            global_stats: { hash: 111, minerCount: 5 },
+            global_stats2: { totalHashes: 1000, roundHashes: 200 },
+            pplns_stats: { hash: 99, minerCount: 4 },
+            pplns_stats2: { totalHashes: 900, roundHashes: 180 }
+        },
+        mysqlQuery(sql, params) {
+            if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") {
+                return [{ miner_count: 0 }];
+            }
+            if (
+                sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments WHERE pool_type = ? GROUP BY payment_address, payment_id) as miners" &&
+                params[0] === "pplns"
+            ) {
+                return [{ miner_count: 0 }];
+            }
+            if (sql === "SELECT count(id) as txn_count FROM transactions") {
+                return [{ txn_count: 0 }];
+            }
+            if (sql === "SELECT count(distinct transaction_id) as txn_count FROM payments WHERE pool_type = ?" && params[0] === "pplns") {
+                return [{ txn_count: 0 }];
+            }
+            if (sql === "select * from pools where id < 1000 and last_checkin >= NOW() - INTERVAL 10 MINUTE") return [];
+            if (sql === "select * from ports where hidden = 0 and pool_id < 1000 and lastSeen >= NOW() - INTERVAL 10 MINUTE") return [];
+            if (sql === "SELECT blockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") return [];
+            throw new Error("Unexpected SQL: " + sql);
+        }
+    });
+    const pendingPriceCallbacks = [];
+    const scheduledTasks = [];
+    const poolStats = loadPoolStats();
+
+    global.support.https_get = function (_url, callback) {
+        pendingPriceCallbacks.push(callback);
+    };
+    global.setInterval = function (handler, intervalMs) {
+        scheduledTasks.push({ handler, intervalMs });
+        return scheduledTasks.length;
+    };
+
+    const startPromise = poolStats.startPoolStats();
+
+    for (let attempts = 0; attempts < 20 && global.database.getCache("pool_stats_global") === false; ++attempts) {
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 0);
+        });
+    }
+
+    assert.deepEqual(global.database.getCache("pool_stats_global"), {
+        hashRate: 111,
+        miners: 5,
+        totalHashes: 1000,
+        lastBlockFoundTime: 0,
+        lastBlockFound: 0,
+        totalBlocksFound: 0,
+        totalMinersPaid: 0,
+        totalPayments: 0,
+        roundHashes: 200,
+        totalAltBlocksFound: 0,
+        altBlocksFound: {},
+        activePort: 18000,
+        activePorts: [],
+        activePortProfit: 0,
+        coinProfit: {},
+        coinComment: {},
+        minBlockRewards: { 18000: 0 },
+        pending: 0,
+        price: { btc: 0, usd: 0, eur: 0 },
+        currentEfforts: { 18000: 200 },
+        pplnsPortShares: {},
+        pplnsWindowTime: 0,
+        portHash: {},
+        portMinerCount: {},
+        portCoinAlgo: { 18000: "rx/0", 18081: "kawpow" },
+        updatedAt: global.database.getCache("pool_stats_global").updatedAt
+    });
+    assert.deepEqual(global.database.getCache("networkBlockInfo"), {
+        18000: {
+            difficulty: 100,
+            hash: "aa",
+            height: 10,
+            value: 2,
+            ts: 1234
+        },
+        18081: {
+            difficulty: 100,
+            hash: "aa",
+            height: 10,
+            value: 2,
+            ts: 1234
+        },
+        difficulty: 111,
+        hash: "aa",
+        main_height: 10,
+        height: 10,
+        value: 2,
+        ts: 1234
+    });
+    assert.equal(pendingPriceCallbacks.length, 3);
+    assert.deepEqual(
+        scheduledTasks.map(function (entry) { return entry.intervalMs; }).sort(function (left, right) { return left - right; }),
+        [30000, 30000, 60000, 300000, 900000]
+    );
+
+    pendingPriceCallbacks.forEach(function (callback) {
+        callback({ data: { monero: { quote: { USD: { price: 1 }, EUR: { price: 1 }, BTC: { price: 1 } } } } });
+    });
+    await startPromise;
 });
 
 test("second stats refresh reuses tiny history caches and avoids full DB rescans", async () => {
