@@ -1559,6 +1559,41 @@ test("expired shares close zero-trust miners before any valid share is submitted
     }
 });
 
+test("malformed zero-trust submits reply before the socket closes", async () => {
+    const { runtime } = await startHarness();
+    const client = new JsonLineClient(MAIN_PORT);
+
+    try {
+        await client.connect();
+
+        const loginReply = await client.request({
+            id: 1983,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-malformed-close"
+            }
+        });
+
+        const submitReply = await client.request({
+            id: 1984,
+            method: "submit",
+            params: {
+                id: loginReply.result.id,
+                job_id: loginReply.result.job.job_id,
+                nonce: "not-a-nonce",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.equal(submitReply.error.message, "Duplicate share");
+        await waitForSocketClose(client.socket, 1000);
+    } finally {
+        await client.close();
+        await runtime.stop();
+    }
+});
+
 test("jobs reject new nonces after reaching the tracked submission cap without evicting old ones", async () => {
     const { runtime } = await startHarness();
     const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;

@@ -599,6 +599,26 @@ test("the same socket cannot login twice", async () => {
     }
 });
 
+test("mining.authorize on a generic eth-style port falls back instead of crashing", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 9,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-generic-port~autolykos2"],
+            portData: { port: 20001, difficulty: 1, portType: "pplns" }
+        });
+
+        assert.deepEqual(authorizeReply.replies, [{ error: null, result: true }]);
+        assert.equal(authorizeReply.finals.length, 0);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("malformed submit nonces are rejected and recorded as invalid shares", async () => {
     const { runtime, database } = await startHarness();
     const socket = {};
