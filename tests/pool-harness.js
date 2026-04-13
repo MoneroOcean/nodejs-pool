@@ -69,6 +69,9 @@ const VALID_RESULT_BUFFER = Buffer.from(VALID_RESULT, "hex");
 const RAVEN_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([10])]);
 const ETH_RESULT_BUFFER = Buffer.concat([Buffer.alloc(31, 0), Buffer.from([16])]);
 const ETH_MIXHASH_BUFFER = Buffer.from("cd".repeat(32), "hex");
+const REAL_MAIN_PROFILE_PORT = 18081;
+const REAL_RAVEN_PROFILE_PORT = 8766;
+const REAL_ETH_PROFILE_PORT = 8545;
 const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "data.proto")));
 const TEST_RAVEN_ADDRESS = "16Jswqk47s9PUcyCc88MMVwzgvHPvtEpf";
 
@@ -216,6 +219,55 @@ function createCoinFuncsStub() {
         [ETH_PORT]: 101
     };
 
+    function resolvePortBlobType(context, port, version) {
+        if (context && typeof context.portBlobType === "function") return context.portBlobType(port, version);
+        if (global.coinFuncs && typeof global.coinFuncs.portBlobType === "function") return global.coinFuncs.portBlobType(port, version);
+        return portToBlob[port];
+    }
+
+    function mapRealPort(context, port, version) {
+        if (port === MAIN_PORT) return REAL_MAIN_PROFILE_PORT;
+        const blobType = resolvePortBlobType(context, port, version);
+        if (blobType === 102) return REAL_ETH_PROFILE_PORT;
+        if (blobType === 101) return REAL_RAVEN_PROFILE_PORT;
+        return port;
+    }
+
+    const realConvertBlob = realCoinFuncs.convertBlob.bind(realCoinFuncs);
+    const realConstructNewBlob = realCoinFuncs.constructNewBlob.bind(realCoinFuncs);
+    const realGetBlockID = realCoinFuncs.getBlockID.bind(realCoinFuncs);
+
+    realCoinFuncs.convertBlob = function convertBlob(blobBuffer, port) {
+        return realConvertBlob(blobBuffer, mapRealPort(global.coinFuncs || this, port, blobBuffer && blobBuffer[0]));
+    };
+    realCoinFuncs.constructNewBlob = function constructNewBlob(blockTemplateBuffer, params, port) {
+        return realConstructNewBlob(blockTemplateBuffer, params, mapRealPort(global.coinFuncs || this, port, blockTemplateBuffer && blockTemplateBuffer[0]));
+    };
+    realCoinFuncs.getBlockID = function getBlockID(blockBuffer, port) {
+        return realGetBlockID(blockBuffer, mapRealPort(global.coinFuncs || this, port, blockBuffer && blockBuffer[0]));
+    };
+
+    function resolveStubProfile(context, key) {
+        if (key === "") return realCoinFuncs.getPoolProfile("");
+        if (typeof key === "string" && key in coinToPort) return resolveStubProfile(context, coinToPort[key]);
+        if (typeof key === "number" || (typeof key === "string" && /^\d+$/.test(key))) {
+            const port = Number(key);
+            return realCoinFuncs.getPoolProfile(mapRealPort(context, port));
+        }
+        return realCoinFuncs.getPoolProfile(key);
+    }
+
+    function resolveStubJobProfile(context, job) {
+        if (job && (typeof job.blob_type_num === "number" || typeof job.blob_type_num === "string")) {
+            const blobType = Number(job.blob_type_num);
+            const jobPort = job && typeof job.coin === "string" && job.coin in coinToPort ? coinToPort[job.coin] : undefined;
+            const mappedPort = typeof jobPort === "number" ? mapRealPort(context, jobPort, blobType) : null;
+            const matchingProfile = realCoinFuncs.getProfilesByBlobType(blobType).find((profile) => profile.port === mappedPort);
+            if (matchingProfile) return matchingProfile;
+        }
+        return resolveStubProfile(context, job && typeof job.coin === "string" ? job.coin : (job ? job.blob_type_num : undefined));
+    }
+
     return {
         ...realCoinFuncs,
         __realCoinFuncs: realCoinFuncs,
@@ -241,6 +293,19 @@ function createCoinFuncsStub() {
         getMM_CHILD_PORTS() {
             return {};
         },
+        getPoolProfile(key) {
+            return resolveStubProfile(this, key);
+        },
+        getResolvedProfile(key) {
+            return resolveStubProfile(this, key);
+        },
+        getPoolSettings(key) {
+            const profile = resolveStubProfile(this, key);
+            return profile && profile.pool ? profile.pool : null;
+        },
+        getJobProfile(job) {
+            return resolveStubJobProfile(this, job);
+        },
         COIN2PORT(coin) {
             return coinToPort[coin];
         },
@@ -254,7 +319,10 @@ function createCoinFuncsStub() {
             callback(null, { height: 0 });
         },
         BlockTemplate: function TestBlockTemplate(template) {
-            const blockTemplate = new realCoinFuncs.BlockTemplate(template);
+            const mappedPort = mapRealPort(this, template.port);
+            const blockTemplate = new realCoinFuncs.BlockTemplate({ ...template, port: mappedPort });
+            blockTemplate.port = template.port;
+            blockTemplate.coin = template.coin;
             if (template.idHash) blockTemplate.idHash = template.idHash;
             if (template.clientPoolLocation !== undefined) blockTemplate.clientPoolLocation = template.clientPoolLocation;
             if (template.clientNonceLocation !== undefined) blockTemplate.clientNonceLocation = template.clientNonceLocation;
@@ -267,7 +335,8 @@ function createCoinFuncsStub() {
             return typeof address === "string" && address.length === 95;
         },
         algoShortTypeStr(port) {
-            return portToAlgo[port];
+            const profile = resolveStubProfile(this, port);
+            return profile ? profile.algo : portToAlgo[port];
         },
         algoCheck: realCoinFuncs.algoCheck,
         algoMainCheck: realCoinFuncs.algoMainCheck,
@@ -279,24 +348,31 @@ function createCoinFuncsStub() {
             const coinPerf = {};
             if ("rx/0" in algosPerf) coinPerf[""] = algosPerf["rx/0"];
             if ("kawpow" in algosPerf) coinPerf.ETH = algosPerf.kawpow;
+            if ("ethash" in algosPerf) coinPerf.ETH = algosPerf.ethash;
+            if ("etchash" in algosPerf) coinPerf.ETH = algosPerf.etchash;
             return coinPerf;
         },
         get_miner_agent_not_supported_algo: realCoinFuncs.get_miner_agent_not_supported_algo,
         get_miner_agent_warning_notification: realCoinFuncs.get_miner_agent_warning_notification,
         is_miner_agent_no_haven_support: realCoinFuncs.is_miner_agent_no_haven_support,
+        getUnsupportedAlgosForMiner: realCoinFuncs.getUnsupportedAlgosForMiner,
+        normalizeMinerAlgos: realCoinFuncs.normalizeMinerAlgos,
         isMinerSupportAlgo: realCoinFuncs.isMinerSupportAlgo,
         portBlobType(port) {
             return portToBlob[port];
         },
-        blobTypeGrin: realCoinFuncs.blobTypeGrin,
-        blobTypeRvn: realCoinFuncs.blobTypeRvn,
-        blobTypeEth: realCoinFuncs.blobTypeEth,
-        blobTypeErg: realCoinFuncs.blobTypeErg,
-        blobTypeDero: realCoinFuncs.blobTypeDero,
-        blobTypeRtm: realCoinFuncs.blobTypeRtm,
-        blobTypeKcn: realCoinFuncs.blobTypeKcn,
-        blobTypeXTM_T: realCoinFuncs.blobTypeXTM_T,
-        blobTypeXTM_C: realCoinFuncs.blobTypeXTM_C,
+        getCoinMinDifficulty(key) {
+            const profile = resolveStubProfile(this, key);
+            if (!profile || !profile.pool || profile.pool.minDifficulty === "config" || profile.pool.minDifficulty === undefined) {
+                return global.config.pool.minDifficulty;
+            }
+            return profile.pool.minDifficulty;
+        },
+        getNiceHashMinimumDifficulty(key) {
+            const profile = resolveStubProfile(this, key);
+            const multiplier = profile && profile.pool && profile.pool.niceHashDiffMultiplier ? profile.pool.niceHashDiffMultiplier : 1;
+            return this.niceHashDiff * multiplier;
+        },
         nonceSize: realCoinFuncs.nonceSize,
         c29ProofSize: realCoinFuncs.c29ProofSize,
         blobTypeStr(port) {
@@ -306,7 +382,7 @@ function createCoinFuncsStub() {
             const blobType = this.portBlobType(port, blobBuffer[0]);
             if (!(port === ETH_PORT && blobType === 102)) {
                 try {
-                    return realCoinFuncs.convertBlob.call(this, blobBuffer, port);
+                    return realCoinFuncs.convertBlob.call(this, blobBuffer, mapRealPort(this, port, blobBuffer[0]));
                 } catch (_error) {
                 }
             }

@@ -1523,6 +1523,7 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
             params: [ETH_WALLET, "eth-style-worker"],
             portData: global.config.ports[1]
         });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
 
         assert.deepEqual(authorizeReply.replies, [{ error: null, result: true }]);
         assert.equal(authorizeReply.pushes.length, 2);
@@ -1530,6 +1531,8 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
         assert.equal(typeof authorizeReply.pushes[0].params[0], "number");
         assert.equal(authorizeReply.pushes[1].method, "mining.notify");
         assert.equal(Array.isArray(authorizeReply.pushes[1].params), true);
+        assert.equal(miner.algos.ethash, 1);
+        assert.equal("kawpow" in miner.algos, false);
     } finally {
         global.coinFuncs.portBlobType = originalPortBlobType;
         await runtime.stop();
