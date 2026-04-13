@@ -169,10 +169,10 @@ function createTestEnvironment(options = {}) {
     };
     global.coinFuncs = {
         getPORTS() {
-            return [18000, 18081];
+            return options.ports || [18000, 18081];
         },
         algoShortTypeStr(port) {
-            return port === 18000 ? "rx/0" : "kawpow";
+            return Number(port) === 18000 ? "rx/0" : "kawpow";
         },
         getPortLastBlockHeaderWithRewardDiff(_port, callback) {
             callback(null, {
@@ -427,6 +427,7 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
 test("startPoolStats initializes pool and network caches without waiting for prices", async () => {
     createTestEnvironment({
         daemonPort: "18000",
+        ports: ["18000", "18081"],
         caches: {
             global_stats: { hash: 111, minerCount: 5 },
             global_stats2: { totalHashes: 1000, roundHashes: 200 },
