@@ -527,15 +527,16 @@ test("startPoolStats initializes pool and network caches without waiting for pri
         ts: 1234
     });
     assert.equal(pendingPriceCallbacks.length, 3);
-    assert.deepEqual(
-        scheduledTasks.map(function (entry) { return entry.intervalMs; }).sort(function (left, right) { return left - right; }),
-        [30000, 30000, 60000, 300000, 900000]
-    );
+    assert.deepEqual(scheduledTasks, []);
 
     pendingPriceCallbacks.forEach(function (callback) {
         callback({ data: { monero: { quote: { USD: { price: 1 }, EUR: { price: 1 }, BTC: { price: 1 } } } } });
     });
     await startPromise;
+    assert.deepEqual(
+        scheduledTasks.map(function (entry) { return entry.intervalMs; }).sort(function (left, right) { return left - right; }),
+        [30000, 30000, 60000, 300000, 900000]
+    );
 });
 
 test("second stats refresh reuses tiny history caches and avoids full DB rescans", async () => {
