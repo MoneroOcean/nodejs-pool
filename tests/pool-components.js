@@ -318,21 +318,26 @@ test("eth-style nonces are deduped across miners on the same block template", ()
                 targetTime: 30
             }
         };
+        const sharedNonceProfile = {
+            pool: {
+                sharedTemplateNonces: true,
+                submitSuccess: "boolean",
+                parseMiningSubmitParams({ params }) {
+                    params.nonce = params.raw_params[2];
+                    return true;
+                },
+                validateSubmitParams({ job, normalizeExtraNonceSubmitNonce, params, state }) {
+                    params.nonce = normalizeExtraNonceSubmitNonce(params.nonce, job.extraNonce);
+                    return state.nonceCheck64.test(params.nonce);
+                },
+                submissionKey({ params }) {
+                    return params.nonce;
+                }
+            }
+        };
         global.coinFuncs = {
-            blobTypeEth(blobTypeNum) {
-                return blobTypeNum === 102;
-            },
-            blobTypeErg() {
-                return false;
-            },
-            blobTypeRvn() {
-                return false;
-            },
-            blobTypeGrin() {
-                return false;
-            },
-            blobTypeXTM_C() {
-                return false;
+            getJobProfile(job) {
+                return job && job.blob_type_num === 102 ? sharedNonceProfile : { pool: {} };
             },
             nonceSize() {
                 return 8;
@@ -521,6 +526,9 @@ test("share processor records accepted shares through the common verification pa
     global.support = {
         sendEmail() {}
     };
+    const defaultProfile = {
+        pool: {}
+    };
     global.coinFuncs = {
         constructNewBlob() {
             return Buffer.from("feedbeef", "hex");
@@ -537,15 +545,12 @@ test("share processor records accepted shares through the common verification pa
         constructMMChildBlockBlob() {
             throw new Error("MM path should not be used in this test");
         },
-        blobTypeXTM_C() { return false; },
-        blobTypeGrin() { return false; },
-        blobTypeRvn() { return false; },
-        blobTypeEth() { return false; },
-        blobTypeErg() { return false; },
-        blobTypeDero() { return false; },
-        blobTypeXTM_T() { return false; },
-        blobTypeRtm() { return false; },
-        blobTypeKcn() { return false; }
+        getPoolProfile() {
+            return defaultProfile;
+        },
+        getJobProfile() {
+            return defaultProfile;
+        }
     };
 
     const originalSetTimeout = global.setTimeout;
