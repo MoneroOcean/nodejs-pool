@@ -305,6 +305,58 @@ test("server final replies honor explicit delay windows with random jitter", () 
     }
 });
 
+test("server startup ignores legacy non-pplns port rows", async () => {
+    const listenCalls = [];
+    const state = {
+        threadName: "(Test) ",
+        activeConnectionsByIP: {},
+        activeConnectionsBySubnet: {},
+        activeMiners: new Map(),
+        activeMinerSockets: new Map(),
+        freeEthExtranonces: []
+    };
+
+    global.config = {
+        bind_ip: "127.0.0.1",
+        pplns: { enable: true }
+    };
+
+    const netServers = [];
+    const net = {
+        createServer() {
+            const server = {
+                once() {},
+                removeListener() {},
+                on() {},
+                listen(port, host, callback) {
+                    listenCalls.push({ port, host });
+                    callback();
+                }
+            };
+            netServers.push(server);
+            return server;
+        }
+    };
+    const serverFactory = createServerFactory({
+        debug() {},
+        fs: require("node:fs"),
+        net,
+        tls: require("node:tls"),
+        state,
+        handleMinerData() {},
+        removeMiner() {}
+    });
+
+    const servers = await serverFactory.startPortServers([
+        { port: 39002, portType: "pplns", ssl: false },
+        { port: 39003, portType: "solo", ssl: false }
+    ]);
+
+    assert.equal(servers.length, 1);
+    assert.equal(netServers.length, 1);
+    assert.deepEqual(listenCalls, [{ port: 39002, host: "127.0.0.1" }]);
+});
+
 test("eth-style nonces are deduped across miners on the same block template", () => {
     const originalConfig = global.config;
     const originalCoinFuncs = global.coinFuncs;

@@ -491,9 +491,7 @@ function installTestGlobals() {
         pool_id: 1,
         worker_num: 1,
         eth_pool_support: false,
-        payout: {
-            bestExchange: "test"
-        },
+        payout: {},
         general: {
             adminEmail: "admin@example.com",
             allowStuckPoolKill: false
@@ -539,8 +537,6 @@ function installTestGlobals() {
             banPercent: 50
         },
         pplns: { enable: true },
-        pps: { enable: true },
-        solo: { enable: true },
         prop: { enable: true },
         ports: [
             { port: MAIN_PORT, difficulty: 1, portType: "pplns", desc: "main", hidden: false },
