@@ -3,8 +3,6 @@
     "funcFile": "./lib/coins/index.js",
     "paymentFile": "./payment_systems/xmr.js",
     "sigDigits": 1000000000000,
-    "shapeshift": "xmr_btc",
-    "xmrTo": true,
     "name": "Monero",
     "mixIn": 4,
     "shortCode": "XMR"
