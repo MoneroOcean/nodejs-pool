@@ -15,7 +15,7 @@ const {
 require("./pool-components.js");
 require("./pool-coin.js");
 require("./long-runner.js");
-require("./pool-stats.js");
+require("./stats.js");
 require("./pool-protocol.js");
 require("./pool-remote-comms.js");
 require("./pool-validation.js");
