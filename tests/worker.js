@@ -513,7 +513,11 @@ test.describe("worker", { concurrency: false }, () => {
     test("worker skips unchanged LMDB writes between identical non-history cycles", async () => {
         const now = 1710000000000;
         let fakeNow = now;
+        const logs = [];
         Date.now = function () { return fakeNow; };
+        console.log = function (message) {
+            logs.push(message);
+        };
         const address = "4".repeat(95);
         const workerName = "rigStable";
         const state = createFakeEnvironment({
@@ -552,6 +556,9 @@ test.describe("worker", { concurrency: false }, () => {
 
         assert.equal(state.env.writeCommits, writeCommitsAfterFirstRun);
         assert.equal(state.env.commits.length, commitsAfterFirstRun);
+        assert.equal(logs.some(function (message) {
+            return /^Processed .*?, [1-9]\d* skipped unchanged cache writes\)\. Pool hashrate is: /.test(message);
+        }), true);
     });
 
     test("worker recreates externally removed cache rows on the next identical cycle", async () => {
