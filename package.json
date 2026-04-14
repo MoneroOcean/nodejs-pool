@@ -23,7 +23,7 @@
     "apicache": "1.2.1",
     "async": "3.2.2",
     "crypto-js": "4.2.0",
-    "cryptoforknote-util": "git+https://github.com/MoneroOcean/node-cryptoforknote-util.git#v15.8.8",
+    "cryptoforknote-util": "git+https://github.com/MoneroOcean/node-cryptoforknote-util.git#v15.8.9",
     "cryptonight-hashing": "git+https://github.com/MoneroOcean/node-cryptonight-hashing.git#v29.1.5",
     "debug": "2.6.9",
     "express": "4.22.1",
