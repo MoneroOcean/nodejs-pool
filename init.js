@@ -15,6 +15,43 @@ global.argv = argv;
 let comms;
 let coinInc;
 
+function logStartup(kind, name) {
+    console.log("Starting " + name + " " + kind + ".");
+}
+
+function loadPoolModule() {
+    global.config.ports = [];
+    return global.mysql.query("SELECT * FROM port_config").then(function(rows){
+        rows.forEach(function(row){
+            row.hidden = row.hidden === 1;
+            row.ssl = row.ssl === 1;
+            global.config.ports.push({
+                port: row.poolPort,
+                difficulty: row.difficulty,
+                desc: row.portDesc,
+                portType: row.portType,
+                hidden: row.hidden,
+                ssl: row.ssl
+            });
+        });
+    }).then(function(){
+        require('./lib/pool.js');
+    });
+}
+
+const moduleLoaders = {
+    pool: loadPoolModule,
+    blockManager: function () { require('./lib/blockManager.js'); },
+    altblockManager: function () { require('./lib2/altblockManager.js'); },
+    altblockExchange: function () { require('./lib2/altblockExchange.js'); },
+    payments: function () { require('./lib/payments.js'); },
+    api: function () { require('./lib/api.js'); },
+    remoteShare: function () { require('./lib/remoteShare.js'); },
+    worker: function () { require('./lib/worker.js'); },
+    pool_stats: function () { require('./lib/pool_stats.js'); },
+    longRunner: function () { require('./lib/longRunner.js'); }
+};
+
 // Config Table Layout
 // <module>.<item>
 
@@ -55,59 +92,16 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
     global.coinFuncs.blockedAddresses.push(global.config.pool.address);
     global.coinFuncs.blockedAddresses.push(global.config.payout.feeAddress);
     if (argv.hasOwnProperty('tool') && fs.existsSync('./tools/'+argv.tool+'.js')) {
+        logStartup("tool", argv.tool);
         require('./tools/'+argv.tool+'.js');
     } else if (argv.hasOwnProperty('module')){
-        switch(argv.module){
-            case 'pool':
-                global.config.ports = [];
-                global.mysql.query("SELECT * FROM port_config").then(function(rows){
-                    rows.forEach(function(row){
-                        row.hidden = row.hidden === 1;
-                        row.ssl = row.ssl === 1;
-                        global.config.ports.push({
-                            port: row.poolPort,
-                            difficulty: row.difficulty,
-                            desc: row.portDesc,
-                            portType: row.portType,
-                            hidden: row.hidden,
-                            ssl: row.ssl
-                        });
-                    });
-                }).then(function(){
-                    require('./lib/pool.js');
-                });
-                break;
-            case 'blockManager':
-                require('./lib/blockManager.js');
-                break;
-            case 'altblockManager':
-                require('./lib2/altblockManager.js');
-                break;
-            case 'altblockExchange':
-                require('./lib2/altblockExchange.js');
-                break;
-            case 'payments':
-                require('./lib/payments.js');
-                break;
-            case 'api':
-                require('./lib/api.js');
-                break;
-            case 'remoteShare':
-                require('./lib/remoteShare.js');
-                break;
-            case 'worker':
-                require('./lib/worker.js');
-                break;
-            case 'pool_stats':
-                require('./lib/pool_stats.js');
-                break;
-            case 'longRunner':
-                require('./lib/longRunner.js');
-                break;
-            default:
-                console.error("Invalid module provided.  Please provide a valid module");
-                process.exit(1);
+        const loader = moduleLoaders[argv.module];
+        if (!loader) {
+            console.error("Invalid module provided.  Please provide a valid module");
+            process.exit(1);
         }
+        logStartup("module", argv.module);
+        loader();
     } else {
         console.error("Invalid module/tool provided.  Please provide a valid module/tool");
         console.error("Valid Modules: pool, blockManager, payments, api, remoteShare, worker, longRunner");
