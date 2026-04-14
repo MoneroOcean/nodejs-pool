@@ -515,7 +515,7 @@ test.describe("worker", { concurrency: false }, () => {
         const address = "4".repeat(95);
         const shares = [];
 
-        for (let index = 0; index < 260; ++index) {
+        for (let index = 0; index < 600; ++index) {
             shares.push({
                 height: 1,
                 share: createShare({
@@ -566,7 +566,7 @@ test.describe("worker", { concurrency: false }, () => {
         const address = "4".repeat(95);
         const shares = [];
 
-        for (let index = 0; index < 260; ++index) {
+        for (let index = 0; index < 600; ++index) {
             shares.push({
                 height: 1,
                 share: createShare({
