@@ -1,6 +1,7 @@
 "use strict";
 let mysql = require("promise-mysql");
 let fs = require("fs");
+let cluster = require("cluster");
 let argv = require('./parse_args')(process.argv.slice(2));
 let config = fs.readFileSync("./config.json");
 let coinConfig = fs.readFileSync("./coinConfig.json");
@@ -100,8 +101,10 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
             console.error("Invalid module provided.  Please provide a valid module");
             process.exit(1);
         }
-        console.log("");
-        logStartup("module", argv.module);
+        if (!cluster.isWorker) {
+            console.log("");
+            logStartup("module", argv.module);
+        }
         loader();
     } else {
         console.error("Invalid module/tool provided.  Please provide a valid module/tool");
