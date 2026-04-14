@@ -16,7 +16,7 @@ let comms;
 let coinInc;
 
 function logStartup(kind, name) {
-    console.log("Starting " + name + " " + kind + ".");
+    console.log("=== STARTING " + kind.toUpperCase() + ": " + name + " ===");
 }
 
 function loadPoolModule() {
