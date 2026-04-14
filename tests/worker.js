@@ -3,7 +3,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const RECENT_SHARE_WINDOW_PATH = require.resolve("../lib/recent_share_window.js");
 const WORKER_PATH = require.resolve("../lib/worker.js");
 const WORKER_HISTORY_PATH = require.resolve("../lib/worker_history.js");
 
@@ -23,11 +22,6 @@ function loadWorker() {
 function loadWorkerHistory() {
     delete require.cache[WORKER_HISTORY_PATH];
     return require(WORKER_HISTORY_PATH);
-}
-
-function loadRecentShareWindow() {
-    delete require.cache[RECENT_SHARE_WINDOW_PATH];
-    return require(RECENT_SHARE_WINDOW_PATH);
 }
 
 function createFakeEnvironment(options) {
@@ -211,7 +205,6 @@ test.describe("worker", { concurrency: false }, () => {
     test.beforeEach(() => {
         delete require.cache[WORKER_PATH];
         delete require.cache[WORKER_HISTORY_PATH];
-        delete require.cache[RECENT_SHARE_WINDOW_PATH];
         originalConfig = global.config;
         originalDatabase = global.database;
         originalMysql = global.mysql;
@@ -236,7 +229,6 @@ test.describe("worker", { concurrency: false }, () => {
         delete global.__workerAutostart;
         delete require.cache[WORKER_PATH];
         delete require.cache[WORKER_HISTORY_PATH];
-        delete require.cache[RECENT_SHARE_WINDOW_PATH];
     });
 
     test("worker histories import legacy points and continue in v2 format", async () => {
@@ -402,60 +394,6 @@ test.describe("worker", { concurrency: false }, () => {
         assert.equal(decoded[2].ts, toStoredTimestamp(oldPointTs));
     });
 
-    test("recent share window builds aligned slot updates and resets stale ring payloads", () => {
-        const recentShareWindow = loadRecentShareWindow();
-        const baseTime = 1710000000000;
-        const address = "4".repeat(95);
-        const shares = [
-            createShare({
-                paymentAddress: address,
-                identifier: "rigA",
-                rawShares: 400,
-                shares2: 200,
-                timestamp: baseTime + 5 * 1000
-            }),
-            createShare({
-                paymentAddress: address,
-                identifier: "rigA",
-                rawShares: 600,
-                shares2: 300,
-                timestamp: baseTime + 15 * 1000
-            }),
-            createShare({
-                paymentAddress: address,
-                identifier: "rigB",
-                rawShares: 700,
-                shares2: 0,
-                timestamp: baseTime + recentShareWindow.SLOT_INTERVAL_MS + 1
-            })
-        ];
-
-        const updates = recentShareWindow.buildSlotUpdates(shares, {
-            defaultPort: 18081,
-            pplnsPoolType: 0
-        });
-        const firstSlotId = recentShareWindow.getSlotId(baseTime + 5 * 1000);
-        const secondSlotId = recentShareWindow.getSlotId(baseTime + recentShareWindow.SLOT_INTERVAL_MS + 1);
-        const firstSlot = updates.get(firstSlotId);
-        const secondSlot = updates.get(secondSlotId);
-
-        assert.equal(updates.size, 2);
-        assert.equal(firstSlot.globalShares2, 500);
-        assert.equal(firstSlot.miners[address][0], 1000);
-        assert.equal(firstSlot.miners[address][1], 500);
-        assert.equal(firstSlot.miners[address + "_rigA"][0], 1000);
-        assert.equal(firstSlot.identifiers[address].rigA, 1);
-        assert.equal(firstSlot.portHashes["18081"], 1000);
-        assert.equal(secondSlot.globalShares2, 0);
-        assert.equal(secondSlot.identifiers[address].rigB, 1);
-
-        const staleRingPayload = JSON.parse(JSON.stringify(firstSlot));
-        staleRingPayload.slot = firstSlotId - recentShareWindow.SLOT_RING_SIZE;
-        const writable = recentShareWindow.getWritableSlotPayload(staleRingPayload, firstSlotId);
-        assert.equal(writable.slot, firstSlotId);
-        assert.deepEqual(Object.keys(writable.miners), []);
-    });
-
     test("worker histories are written on each history cycle without the old ten minute gate", async () => {
         const now = 1710000000000;
         let fakeNow = now;
@@ -514,53 +452,52 @@ test.describe("worker", { concurrency: false }, () => {
         assert.ok(decoded[0].hs > decoded[1].hs);
     });
 
-    test("worker merges cached recent-window slots with exact tail rescan", async () => {
-        const recentShareWindow = loadRecentShareWindow();
-        const now = recentShareWindow.alignTimestampToSlot(1710002400000) + 1234;
-        let fakeNow = now;
-        Date.now = function () { return fakeNow; };
-        const bounds = recentShareWindow.getHybridWindowBounds(fakeNow);
+    test("worker exact rescan includes older recent shares without bucket cache", async () => {
+        const now = 1710002401234;
+        Date.now = function () { return now; };
         const address = "4".repeat(95);
-        const workerName = "rigHybrid";
-        const tailShare = createShare({
+        const workerName = "rigExact";
+        const recentShare = createShare({
             paymentAddress: address,
             identifier: workerName,
             rawShares: 1200,
             shares2: 900,
-            timestamp: bounds.tailStart + 15 * 1000
+            timestamp: now - 30 * 1000
         });
-        const olderWindowShare = createShare({
+        const olderHashShare = createShare({
             paymentAddress: address,
             identifier: workerName,
             rawShares: 600,
             shares2: 300,
-            timestamp: bounds.tailStart - recentShareWindow.SLOT_INTERVAL_MS
+            timestamp: now - 9 * 60 * 1000
         });
-        const slotUpdates = recentShareWindow.buildSlotUpdates([olderWindowShare], {
-            defaultPort: 18081,
-            pplnsPoolType: 0
+        const identifierOnlyShare = createShare({
+            paymentAddress: address,
+            identifier: "rigOld",
+            rawShares: 200,
+            shares2: 0,
+            timestamp: now - 15 * 60 * 1000
         });
-        const slotId = recentShareWindow.getSlotId(olderWindowShare.timestamp);
-        const slotKey = recentShareWindow.getSlotCacheKey(slotId);
         const stopShare = createShare({
             paymentAddress: address,
-            identifier: "old",
+            identifier: "ancient",
             rawShares: 1,
             shares2: 0,
-            timestamp: bounds.tailStart - 3 * 60 * 60 * 1000
+            timestamp: now - 3 * 60 * 60 * 1000
         });
 
         const state = createFakeEnvironment({
-            cacheEntries: [[slotKey, JSON.stringify(slotUpdates.get(slotId))]],
             shares: [
-                { height: 1, share: tailShare },
+                { height: 2, share: recentShare },
+                { height: 1, share: olderHashShare },
+                { height: 1, share: identifierOnlyShare },
                 { height: 0, share: stopShare }
             ]
         });
         const worker = loadWorker();
         const runtime = worker.createWorkerRuntime();
 
-        await runUpdate(runtime, 1);
+        await runUpdate(runtime, 2);
 
         const workerStats = JSON.parse(state.cacheStore.get("stats:" + address + "_" + workerName));
         const addressStats = JSON.parse(state.cacheStore.get("stats:" + address));
@@ -570,7 +507,7 @@ test.describe("worker", { concurrency: false }, () => {
         assert.equal(workerStats.hash2, (300 + 900) / (10 * 60));
         assert.equal(addressStats.hash, (600 + 1200) / (10 * 60));
         assert.equal(addressStats.hash2, (300 + 900) / (10 * 60));
-        assert.deepEqual(identifiers, [workerName]);
+        assert.deepEqual(identifiers, [workerName, "rigOld"]);
     });
 
     test("worker cache writes flush in batches for large history updates", async () => {
