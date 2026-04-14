@@ -100,6 +100,7 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
             console.error("Invalid module provided.  Please provide a valid module");
             process.exit(1);
         }
+        console.log("");
         logStartup("module", argv.module);
         loader();
     } else {
