@@ -83,7 +83,7 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
     coinInc = require(global.config.coin.funcFile);
     global.coinFuncs = new coinInc();
     if (argv.module === 'pool'){
-        comms = require('./lib/remote_comms');
+        comms = require('./lib/pool/remote_uplink');
     } else {
         comms = require('./lib/local_comms');
     }
