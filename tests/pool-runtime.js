@@ -541,6 +541,155 @@ test("main-algo shares are rejected when the submitted nonce does not match the 
     }
 });
 
+test("first-share bogus block candidates are verified locally before any daemon submit", async () => {
+    const mainPowVectors = createMainPowVectorMap();
+    const { runtime, database } = await startHarness({ realMainPow: true, mainPowVectors });
+    const socket = {};
+    const mismatchedVector = RX0_MAIN_SHARE_VECTORS[1];
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1997,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-first-block-candidate-check"
+            }
+        });
+
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const blockTemplate = runtime.getState().activeBlockTemplates[""];
+        const result = buildMainShareResult(runtime, socket, jobId, mismatchedVector.nonce);
+
+        job.difficulty = 2;
+        job.rewarded_difficulty = 2;
+        job.rewarded_difficulty2 = 2;
+        job.norm_diff = 2;
+        blockTemplate.difficulty = 1;
+        blockTemplate.xmr_difficulty = 1;
+        blockTemplate.xtm_difficulty = Number.MAX_SAFE_INTEGER;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 1998,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000001b",
+                result
+            }
+        });
+
+        await flushTimers();
+        assert.equal(result, mismatchedVector.expected);
+        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 0);
+        assert.equal(global.support.rpcPortDaemon2Calls.length, 0);
+        assert.equal(global.support.emails.length, 0);
+        assert.equal(database.invalidShares.length, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("wallet trust enables daemon-first block submit for a new same-wallet session", async () => {
+    const mainPowVectors = createMainPowVectorMap();
+    const { runtime } = await startHarness({ realMainPow: true, mainPowVectors });
+    const acceptedSocket = {};
+    const candidateSocket = {};
+    const validVector = RX0_MAIN_SHARE_VECTORS[0];
+    const mismatchedVector = RX0_MAIN_SHARE_VECTORS[1];
+
+    try {
+        const acceptedLoginReply = invokePoolMethod({
+            socket: acceptedSocket,
+            id: 1999,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-wallet-trust-seed"
+            }
+        });
+
+        const acceptedJobId = acceptedLoginReply.replies[0].result.job.job_id;
+        const acceptedMiner = runtime.getState().activeMiners.get(acceptedSocket.miner_id);
+        const acceptedJob = acceptedMiner.validJobs.toarray().find((entry) => entry.id === acceptedJobId);
+        const acceptedBlockTemplate = runtime.getState().activeBlockTemplates[""];
+        const acceptedResult = buildMainShareResult(runtime, acceptedSocket, acceptedJobId, validVector.nonce);
+
+        acceptedJob.difficulty = 1;
+        acceptedJob.rewarded_difficulty = 1;
+        acceptedJob.rewarded_difficulty2 = 1;
+        acceptedJob.norm_diff = 1;
+        acceptedBlockTemplate.difficulty = 1000;
+
+        const acceptedSubmitReply = invokePoolMethod({
+            socket: acceptedSocket,
+            id: 2000,
+            method: "submit",
+            params: {
+                id: acceptedSocket.miner_id,
+                job_id: acceptedJobId,
+                nonce: validVector.nonce,
+                result: acceptedResult
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(acceptedSubmitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(runtime.getState().walletTrust[MAIN_WALLET] > 0, true);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 0);
+
+        const candidateLoginReply = invokePoolMethod({
+            socket: candidateSocket,
+            id: 2001,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-wallet-trust-candidate"
+            }
+        });
+
+        const candidateJobId = candidateLoginReply.replies[0].result.job.job_id;
+        const candidateMiner = runtime.getState().activeMiners.get(candidateSocket.miner_id);
+        const candidateJob = candidateMiner.validJobs.toarray().find((entry) => entry.id === candidateJobId);
+        const candidateBlockTemplate = runtime.getState().activeBlockTemplates[""];
+        const candidateResult = buildMainShareResult(runtime, candidateSocket, candidateJobId, mismatchedVector.nonce);
+
+        candidateJob.difficulty = 2;
+        candidateJob.rewarded_difficulty = 2;
+        candidateJob.rewarded_difficulty2 = 2;
+        candidateJob.norm_diff = 2;
+        candidateBlockTemplate.difficulty = 1;
+        candidateBlockTemplate.xmr_difficulty = 1;
+        candidateBlockTemplate.xtm_difficulty = Number.MAX_SAFE_INTEGER;
+
+        const candidateSubmitReply = invokePoolMethod({
+            socket: candidateSocket,
+            id: 2002,
+            method: "submit",
+            params: {
+                id: candidateSocket.miner_id,
+                job_id: candidateJobId,
+                nonce: "0000001b",
+                result: candidateResult
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(candidateSubmitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 1);
+        assert.equal(global.support.rpcPortDaemonCalls[0].port, MAIN_PORT + 2);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("main-chain candidates that only satisfy the XMR threshold submit only to the XMR daemon", async () => {
     const { runtime, database } = await startHarness({
         templates: [
