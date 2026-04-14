@@ -18,9 +18,10 @@ require("./long-runner.js");
 require("./stats.js");
 require("./worker.js");
 require("./pool-protocol.js");
-require("./pool-remote-comms.js");
+require("./pool_remote_uplink.js");
 require("./pool-validation.js");
 require("./pool-runtime.js");
+require("./remote_share.js");
 
 test("live miner integration suite", { timeout: 60 * 60 * 1000 }, async (t) => {
     if (!(await isDefaultTargetReachable())) {

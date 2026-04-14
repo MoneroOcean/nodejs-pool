@@ -4,13 +4,13 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 
-test("remote_comms posts raw share payloads as application/octet-stream", async () => {
-    const Database = require("../lib/remote_comms.js");
+test("pool remote uplink posts raw share payloads as application/octet-stream", async () => {
+    const Database = require("../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const handles = [];
     let server;
 
-    global.setInterval = function (...args) {
+    global.setInterval = function patchedSetInterval(...args) {
         const handle = originalSetInterval(...args);
         if (handle && typeof handle.unref === "function") handle.unref();
         handles.push(handle);
@@ -40,7 +40,9 @@ test("remote_comms posts raw share payloads as application/octet-stream", async 
         });
 
         global.config = {
+            hostname: "pool-harness",
             general: {
+                adminEmail: "admin@example.com",
                 shareHost: `http://127.0.0.1:${server.address().port}/leafApi`
             }
         };
@@ -58,6 +60,7 @@ test("remote_comms posts raw share payloads as application/octet-stream", async 
         const request = await requestPromise;
         assert.equal(request.headers["content-type"], "application/octet-stream");
         assert.equal(request.body.equals(payload), true);
+        database.close();
     } finally {
         global.setInterval = originalSetInterval;
         delete global.config;
@@ -66,5 +69,61 @@ test("remote_comms posts raw share payloads as application/octet-stream", async 
         if (server) {
             await new Promise((resolve) => server.close(resolve));
         }
+    }
+});
+
+test("pool remote uplink queue monitor emits FYI backlog email once threshold is reached", async () => {
+    const Database = require("../lib/pool/remote_uplink.js");
+    const originalSetInterval = global.setInterval;
+    const intervals = [];
+
+    global.setInterval = function captureSetInterval(fn, ms, queue) {
+        intervals.push({ fn, ms, queue });
+        return {
+            unref() {},
+            hasRef() { return false; }
+        };
+    };
+
+    try {
+        const emails = [];
+        global.config = {
+            hostname: "pool-harness",
+            general: {
+                adminEmail: "admin@example.com",
+                shareHost: "http://127.0.0.1:8000/leafApi"
+            }
+        };
+        global.support = {
+            sendEmail(to, subject, body) {
+                emails.push({ to, subject, body });
+            }
+        };
+        global.database = {
+            thread_id: "(Master) "
+        };
+
+        const database = new Database();
+        const monitor = intervals.find((entry) => entry.ms === 30 * 1000);
+        assert.ok(monitor);
+
+        monitor.fn({
+            length() {
+                return 20000;
+            },
+            running() {
+                return 3;
+            }
+        });
+
+        assert.equal(emails.length, 1);
+        assert.equal(emails[0].subject, "FYI: Pool uplink backlog");
+        assert.match(emails[0].body, /Queued shares: 20000/);
+        database.close();
+    } finally {
+        global.setInterval = originalSetInterval;
+        delete global.config;
+        delete global.database;
+        delete global.support;
     }
 });
