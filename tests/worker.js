@@ -720,6 +720,60 @@ test.describe("worker", { concurrency: false }, () => {
         assert.strictEqual(runtime.state.historyLayoutCache.layout, firstLayout);
     });
 
+    test("worker logs history tiers only on the first cycle", async () => {
+        const now = 1710000000000;
+        let fakeNow = now;
+        const logs = [];
+        Date.now = function () { return fakeNow; };
+        console.log = function (message) {
+            logs.push(message);
+        };
+
+        const address = "4".repeat(95);
+        createFakeEnvironment({
+            shares: [
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: "rigA",
+                        rawShares: 800,
+                        shares2: 400,
+                        timestamp: now - 15 * 1000
+                    })
+                },
+                {
+                    height: 0,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: "old",
+                        rawShares: 1,
+                        shares2: 0,
+                        timestamp: now - 3 * 60 * 60 * 1000
+                    })
+                }
+            ],
+            statsBufferLength: 27,
+            statsBufferHours: 4
+        });
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+        fakeNow += 20 * 1000;
+        await runUpdate(runtime, 1);
+
+        const startLogs = logs.filter(function (message) {
+            return message.indexOf("Starting stats collection for ") === 0;
+        });
+        const tierLogs = startLogs.filter(function (message) {
+            return message.indexOf("history tiers: ") >= 0;
+        });
+
+        assert.equal(startLogs.length, 2);
+        assert.equal(tierLogs.length, 1);
+    });
+
     test("worker history tier layout honors both statsBufferLength and statsBufferHours", () => {
         const workerHistory = loadWorkerHistory();
         const layout = workerHistory.buildTierLayout(1001, 72);
