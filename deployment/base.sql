@@ -241,10 +241,7 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('rpc', 'https', 'false', 'bool', 'Enable RPC over SSL');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'maxDifficulty', '10000000000000', 'int', 'Maximum difficulty for VarDiff');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'minDifficulty', '10000', 'int', 'Minimum difficulty for VarDiff');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'varDiffVariance', '20', 'int', 'Percentage out of the target time that difficulty changes');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'varDiffMaxChange', '125', 'int', 'Percentage amount that the difficulty may change');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'pplnsFee', '.6', 'float', 'Fee charged for the usage of the PPLNS pool');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'propFee', '.7', 'float', 'Fee charged for the usage of the proportial pool');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'exchangeMin', '.1', 'float', 'Minimum XMR balance for payout to exchange/payment ID');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'walletMin', '.01', 'float', 'Minimum XMR balance for payout to personal wallet');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'defaultPay', '.1', 'float', 'Default XMR balance for payout');
@@ -255,14 +252,12 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'anchorRound', '1', 'int', 'Round anchor height to group payment block pre-calc better. 1 - no round, 2 - round to every even block, 3 - round to every 3-rd block, etc.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'sigDivisor', '1000000000000', 'int', 'Divisor for turning coin into human readable amounts ');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feesForTXN', '10', 'int', 'Amount of XMR that is left from the fees to pay miner fees.');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'maxTxnValue', '250', 'int', 'Maximum amount of XMR to send in a single transaction');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'coinCode', 'XMR', 'string', 'Coin code exposed by the API and payout layer.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'mixIn', '10', 'int', 'Mixin count for coins that support such things.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'ethWalletPass', '', 'string', 'Ethereum wallet password');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'statsBufferLength', '1001', 'int', 'Number of items to be cached in the stats buffers.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'statsBufferHours', '72', 'int', 'Number of hours to be cached in the stats buffers.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pplns', 'shareMulti', '2', 'int', 'Multiply this times difficulty to set the N in PPLNS');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pplns', 'shareMultiLog', '3', 'int', 'How many times the difficulty of the current block do we keep in shares before clearing them out');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'blockCleaner', 'true', 'bool', 'Enable the deletion of blocks or not.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address', '', 'string', 'Address to mine to, this should be the wallet-rpc address.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_19734', '', 'string', 'Address to mine to for 19734 (SUMO) port.');
@@ -313,8 +308,6 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pplns', 'enable', 'true', 'bool', 'Enable PPLNS on the pool.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feeSlewAmount', '.0001', 'float', 'Amount to charge for the txn fee');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feeSlewEnd', '4', 'float', 'Value at which txn fee amount drops to 0');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'rpcPasswordEnabled', 'false', 'bool', 'Does the wallet use a RPC password?');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'rpcPasswordPath', '', 'string', 'Path and file for the RPC password file location');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'maxPaymentTxns', '15', 'int', 'Maximum number of transactions in a single payment');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'shareHost', 'http://localhost/leafApi', 'string', 'Host that receives share information');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('email', 'workerNotHashingBody', 'Your worker: %(worker)s has stopped submitting hashes at: %(timestamp)s UTC\n', 'string', 'Email sent to the miner when their worker stops hashing');
