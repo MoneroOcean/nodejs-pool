@@ -1594,6 +1594,45 @@ test("malformed zero-trust submits reply before the socket closes", async () => 
     }
 });
 
+test("zero-hash zero-trust submits reply before the socket closes", async () => {
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const { runtime } = await startHarness();
+    const client = new JsonLineClient(MAIN_PORT);
+
+    try {
+        global.config.pool.trustedMiners = false;
+        await client.connect();
+
+        const loginReply = await client.request({
+            id: 1985,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-zero-hash-close"
+            }
+        });
+        runtime.getState().activeBlockTemplates[""].difficulty = BigInt(global.coinFuncs.baseDiff().toString()) + 1n;
+
+        const submitReply = await client.request({
+            id: 1986,
+            method: "submit",
+            params: {
+                id: loginReply.result.id,
+                job_id: loginReply.result.job.job_id,
+                nonce: "00000000",
+                result: "00".repeat(32)
+            }
+        });
+
+        assert.equal(submitReply.error.message, "Low difficulty share");
+        await waitForSocketClose(client.socket, 1000);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        await client.close();
+        await runtime.stop();
+    }
+});
+
 test("jobs reject new nonces after reaching the tracked submission cap without evicting old ones", async () => {
     const { runtime } = await startHarness();
     const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
