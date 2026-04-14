@@ -537,7 +537,6 @@ function installTestGlobals() {
             banPercent: 50
         },
         pplns: { enable: true },
-        prop: { enable: true },
         ports: [
             { port: MAIN_PORT, difficulty: 1, portType: "pplns", desc: "main", hidden: false },
             { port: ETH_PORT, difficulty: 1, portType: "pplns", desc: "eth", hidden: false }
