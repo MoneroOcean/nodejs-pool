@@ -510,6 +510,99 @@ test.describe("worker", { concurrency: false }, () => {
         assert.deepEqual(identifiers, [workerName, "rigOld"]);
     });
 
+    test("worker skips unchanged LMDB writes between identical non-history cycles", async () => {
+        const now = 1710000000000;
+        let fakeNow = now;
+        Date.now = function () { return fakeNow; };
+        const address = "4".repeat(95);
+        const workerName = "rigStable";
+        const state = createFakeEnvironment({
+            shares: [
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: workerName,
+                        rawShares: 900,
+                        shares2: 450,
+                        timestamp: now - 15 * 1000
+                    })
+                },
+                {
+                    height: 0,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: "old",
+                        rawShares: 1,
+                        shares2: 0,
+                        timestamp: now - 3 * 60 * 60 * 1000
+                    })
+                }
+            ]
+        });
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+        const writeCommitsAfterFirstRun = state.env.writeCommits;
+        const commitsAfterFirstRun = state.env.commits.length;
+
+        fakeNow += 20 * 1000;
+        await runUpdate(runtime, 1);
+
+        assert.equal(state.env.writeCommits, writeCommitsAfterFirstRun);
+        assert.equal(state.env.commits.length, commitsAfterFirstRun);
+    });
+
+    test("worker recreates externally removed cache rows on the next identical cycle", async () => {
+        const now = 1710000000000;
+        let fakeNow = now;
+        Date.now = function () { return fakeNow; };
+        const address = "4".repeat(95);
+        const workerName = "rigRecover";
+        const workerStatsKey = "stats:" + address + "_" + workerName;
+        const globalStatsKey = "global_stats";
+        const state = createFakeEnvironment({
+            shares: [
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: workerName,
+                        rawShares: 900,
+                        shares2: 450,
+                        timestamp: now - 15 * 1000
+                    })
+                },
+                {
+                    height: 0,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: "old",
+                        rawShares: 1,
+                        shares2: 0,
+                        timestamp: now - 3 * 60 * 60 * 1000
+                    })
+                }
+            ]
+        });
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+        const writeCommitsAfterFirstRun = state.env.writeCommits;
+
+        state.cacheStore.delete(workerStatsKey);
+        state.cacheStore.delete(globalStatsKey);
+
+        fakeNow += 20 * 1000;
+        await runUpdate(runtime, 1);
+
+        assert.equal(state.cacheStore.has(workerStatsKey), true);
+        assert.equal(state.cacheStore.has(globalStatsKey), true);
+        assert.ok(state.env.writeCommits > writeCommitsAfterFirstRun);
+    });
+
     test("worker cache writes flush in batches for large history updates", async () => {
         const now = Date.now();
         const address = "4".repeat(95);
