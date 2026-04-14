@@ -556,9 +556,12 @@ test.describe("worker", { concurrency: false }, () => {
 
         assert.equal(state.env.writeCommits, writeCommitsAfterFirstRun);
         assert.equal(state.env.commits.length, commitsAfterFirstRun);
-        assert.equal(logs.some(function (message) {
-            return /^Processed .*?, [1-9]\d* skipped unchanged cache writes\)\. Pool hashrate is: /.test(message);
-        }), true);
+        const processedLog = logs.filter(function (message) {
+            return message.indexOf("Processed ") === 0;
+        }).pop();
+        const skippedMatch = processedLog && processedLog.match(/, ([0-9.]+) MB skipped unchanged cache writes\)\. Pool hashrate is: /);
+        assert.notEqual(skippedMatch, null);
+        assert.ok(Number(skippedMatch[1]) > 0);
     });
 
     test("worker recreates externally removed cache rows on the next identical cycle", async () => {
