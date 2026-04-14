@@ -657,7 +657,7 @@ test.describe("worker", { concurrency: false }, () => {
         assert.strictEqual(runtime.state.historyLayoutCache.layout, firstLayout);
     });
 
-    test("worker logs history tiers only on the first cycle", async () => {
+    test("worker logs history layout once and keeps cycle start logs clean", async () => {
         const now = 1710000000000;
         let fakeNow = now;
         const logs = [];
@@ -703,12 +703,15 @@ test.describe("worker", { concurrency: false }, () => {
         const startLogs = logs.filter(function (message) {
             return message.indexOf("Starting stats collection for ") === 0;
         });
-        const tierLogs = startLogs.filter(function (message) {
-            return message.indexOf("history tiers: ") >= 0;
+        const layoutLogs = logs.filter(function (message) {
+            return message.indexOf("Worker history layout: tiers ") === 0;
         });
 
         assert.equal(startLogs.length, 2);
-        assert.equal(tierLogs.length, 1);
+        assert.equal(startLogs.every(function (message) {
+            return message.indexOf("history tiers: ") === -1;
+        }), true);
+        assert.deepEqual(layoutLogs, ["Worker history layout: tiers 7/7/7/6, intervals 2m/6m/18m/54m"]);
     });
 
     test("worker history tier layout honors both statsBufferLength and statsBufferHours", () => {
