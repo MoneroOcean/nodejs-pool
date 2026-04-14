@@ -624,6 +624,62 @@ test.describe("worker", { concurrency: false }, () => {
         assert.equal(markerDeletes, 1);
     });
 
+    test("worker preserves an existing cacheUpdate marker while flushing batches", async () => {
+        const now = Date.now();
+        const address = "4".repeat(95);
+        const shares = [];
+
+        for (let index = 0; index < 260; ++index) {
+            shares.push({
+                height: 1,
+                share: createShare({
+                    paymentAddress: address,
+                    identifier: "rig" + index,
+                    rawShares: 600 + index,
+                    shares2: 300 + index,
+                    timestamp: now - 30 * 1000
+                })
+            });
+        }
+
+        shares.push({
+            height: 0,
+            share: createShare({
+                paymentAddress: address,
+                identifier: "old",
+                rawShares: 1,
+                shares2: 0,
+                timestamp: now - 3 * 60 * 60 * 1000
+            })
+        });
+
+        const state = createFakeEnvironment({
+            cacheEntries: [["cacheUpdate", "1"]],
+            shares: shares,
+            statsBufferLength: 27,
+            statsBufferHours: 4
+        });
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+
+        assert.equal(state.cacheStore.get("cacheUpdate"), "1");
+
+        const flattenedOps = state.env.commits.flat();
+        const markerWrites = flattenedOps.filter(function (entry) {
+            return entry[0] === "putString" && entry[2] === "cacheUpdate";
+        }).map(function (entry) {
+            return entry[3];
+        });
+        const markerDeletes = flattenedOps.filter(function (entry) {
+            return entry[0] === "del" && entry[2] === "cacheUpdate";
+        }).length;
+
+        assert.deepEqual(markerWrites.slice(-2), ["2", "1"]);
+        assert.equal(markerDeletes, 0);
+    });
+
     test("worker runtime reuses cached history layout when config is unchanged", async () => {
         const now = Date.now();
         const address = "4".repeat(95);
