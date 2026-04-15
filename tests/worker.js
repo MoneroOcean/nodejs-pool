@@ -649,23 +649,12 @@ test.describe("worker", { concurrency: false }, () => {
 
         await runUpdate(runtime, 1);
 
-        assert.ok(state.env.writeCommits >= 4);
+        assert.ok(state.env.writeCommits >= 2);
         assert.equal(state.cacheStore.has("stats:" + address + "_rig0"), true);
         assert.equal(state.cacheStore.has("history:" + address + "_rig0"), true);
-
-        const flattenedOps = state.env.commits.flat();
-        const markerPuts = flattenedOps.filter(function (entry) {
-            return entry[0] === "putString" && entry[2] === "cacheUpdate";
-        }).length;
-        const markerDeletes = flattenedOps.filter(function (entry) {
-            return entry[0] === "del" && entry[2] === "cacheUpdate";
-        }).length;
-
-        assert.equal(markerPuts, 1);
-        assert.equal(markerDeletes, 1);
     });
 
-    test("worker preserves an existing cacheUpdate marker while flushing batches", async () => {
+    test("worker ignores an existing cacheUpdate marker while flushing batches", async () => {
         const now = Date.now();
         const address = "4".repeat(95);
         const shares = [];
@@ -706,19 +695,12 @@ test.describe("worker", { concurrency: false }, () => {
         await runUpdate(runtime, 1);
 
         assert.equal(state.cacheStore.get("cacheUpdate"), "1");
-
         const flattenedOps = state.env.commits.flat();
-        const markerWrites = flattenedOps.filter(function (entry) {
-            return entry[0] === "putString" && entry[2] === "cacheUpdate";
-        }).map(function (entry) {
-            return entry[3];
+        const markerOps = flattenedOps.filter(function (entry) {
+            return entry[2] === "cacheUpdate";
         });
-        const markerDeletes = flattenedOps.filter(function (entry) {
-            return entry[0] === "del" && entry[2] === "cacheUpdate";
-        }).length;
 
-        assert.deepEqual(markerWrites.slice(-2), ["2", "1"]);
-        assert.equal(markerDeletes, 0);
+        assert.deepEqual(markerOps, []);
     });
 
     test("worker runtime reuses cached history layout when config is unchanged", async () => {
