@@ -198,16 +198,25 @@ test.afterEach(() => {
     delete require.cache[LONG_RUNNER_PATH];
 });
 
-test("cleanCacheDB prunes stale workers, freezes dead account stats, and ignores malformed cache rows", () => {
+test("cleanCacheDB prunes stale workers, orphan worker families, stale account histories, and ignores malformed cache rows", () => {
     const now = Date.now();
     const address = "4".repeat(95);
+    const freshAddress = "5".repeat(95);
+    const staleHistoryAddress = "6".repeat(95);
     const state = createFakeEnvironment({
         cacheEntries: [
             ["identifiers:" + address, JSON.stringify(["rigA", "rigB"])],
             ["stats:" + address + "_rigA", JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
             ["stats:" + address + "_rigB", JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
             ["identifiers:" + address + "-broken", "{not-json"],
-            ["stats:" + address, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 2 * 24 * 60 * 60 * 1000, other: 9 })],
+            ["stats:" + address, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 8 * 24 * 60 * 60 * 1000, other: 9 })],
+            ["history:" + address, JSON.stringify({ hashHistory: [1, 2, 3] })],
+            [freshAddress, JSON.stringify({ totalHashes: 12 })],
+            ["stats:" + freshAddress, JSON.stringify({ hash: 0, hash2: 0, lastHash: now, other: 7 })],
+            ["history:" + freshAddress, JSON.stringify({ hashHistory: [4, 5] })],
+            [staleHistoryAddress, JSON.stringify({ totalHashes: 34 })],
+            ["stats:" + staleHistoryAddress, JSON.stringify({ hash: 0, hash2: 0, lastHash: now - 31 * 24 * 60 * 60 * 1000, other: 8 })],
+            ["history:" + staleHistoryAddress, JSON.stringify({ hashHistory: [6, 7] })],
             [address + "_oldworker", JSON.stringify({ value: 1 })],
             ["history:" + address + "_oldworker", JSON.stringify({ hashHistory: [1] })],
             ["stats:" + address + "_oldworker", JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
@@ -215,6 +224,10 @@ test("cleanCacheDB prunes stale workers, freezes dead account stats, and ignores
             ["stats:" + address + "_missingHistory", JSON.stringify({ lastHash: now })],
             [address + "_missingStats", JSON.stringify({ value: 3 })],
             ["history:" + address + "_missingStats", JSON.stringify({ hashHistory: [2] })],
+            ["stats:" + address + "_orphanStatsOnly", JSON.stringify({ lastHash: now })],
+            ["history:" + address + "_orphanHistoryOnly", JSON.stringify({ hashHistory: [8] })],
+            ["stats:" + address + "_orphanFamily", JSON.stringify({ lastHash: now })],
+            ["history:" + address + "_orphanFamily", JSON.stringify({ hashHistory: [9] })],
             [address + "_fresh", JSON.stringify({ value: 4 })],
             ["history:" + address + "_fresh", JSON.stringify({ hashHistory: [3] })],
             ["stats:" + address + "_fresh", JSON.stringify({ lastHash: now })],
@@ -225,13 +238,16 @@ test("cleanCacheDB prunes stale workers, freezes dead account stats, and ignores
 
     longRunner.cleanCacheDB();
 
-    assert.equal(state.cacheStore.get("identifiers:" + address), "[]");
+    assert.equal(state.cacheStore.has("identifiers:" + address), false);
     assert.deepEqual(JSON.parse(state.cacheStore.get("stats:" + address)), {
         hash: 0,
         hash2: 0,
-        lastHash: now - 2 * 24 * 60 * 60 * 1000,
+        lastHash: now - 8 * 24 * 60 * 60 * 1000,
         other: 9
     });
+    assert.equal(state.cacheStore.has("history:" + address), true);
+    assert.equal(state.cacheStore.has("history:" + freshAddress), true);
+    assert.equal(state.cacheStore.has("history:" + staleHistoryAddress), false);
     assert.equal(state.cacheStore.has(address + "_oldworker"), false);
     assert.equal(state.cacheStore.has("history:" + address + "_oldworker"), false);
     assert.equal(state.cacheStore.has("stats:" + address + "_oldworker"), false);
@@ -239,6 +255,10 @@ test("cleanCacheDB prunes stale workers, freezes dead account stats, and ignores
     assert.equal(state.cacheStore.has("stats:" + address + "_missingHistory"), false);
     assert.equal(state.cacheStore.has(address + "_missingStats"), false);
     assert.equal(state.cacheStore.has("history:" + address + "_missingStats"), false);
+    assert.equal(state.cacheStore.has("stats:" + address + "_orphanStatsOnly"), false);
+    assert.equal(state.cacheStore.has("history:" + address + "_orphanHistoryOnly"), false);
+    assert.equal(state.cacheStore.has("stats:" + address + "_orphanFamily"), false);
+    assert.equal(state.cacheStore.has("history:" + address + "_orphanFamily"), false);
     assert.equal(state.cacheStore.has(address + "_fresh"), true);
     assert.equal(state.cacheStore.has("history:" + address + "_fresh"), true);
     assert.equal(state.cacheStore.has("stats:" + address + "_fresh"), true);
