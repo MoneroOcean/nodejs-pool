@@ -49,7 +49,7 @@ test("pool remote uplink posts raw share payloads as application/octet-stream", 
 
         const database = new Database();
         global.database = {
-            thread_id: "(Master) "
+            thread_id: "[M] "
         };
 
         const payload = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
@@ -100,7 +100,7 @@ test("pool remote uplink queue monitor emits FYI backlog email once threshold is
             }
         };
         global.database = {
-            thread_id: "(Master) "
+            thread_id: "[M] "
         };
 
         const database = new Database();
@@ -166,7 +166,7 @@ test("pool remote uplink queue monitor reports failed response statuses", async 
             }
         };
         global.database = {
-            thread_id: "(Master) "
+            thread_id: "[M] "
         };
 
         const database = new Database();
