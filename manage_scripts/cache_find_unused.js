@@ -35,57 +35,69 @@ const ACTIVE_KEY_PATTERNS = [
     /^(global|pplns|legacy)_stats2(?:_\d+)?$/
 ];
 
-function hasRelatedCache(cacheEntries, baseKey) {
-    return cacheEntries.has(baseKey) ||
-        cacheEntries.has("stats:" + baseKey) ||
-        cacheEntries.has("history:" + baseKey) ||
-        cacheEntries.has("identifiers:" + baseKey);
+const PROGRESS_EVERY = 100000;
+
+function hasKey(txn, key) {
+    if (!key) return false;
+
+    try {
+        return txn.getString(global.database.cacheDB, key) !== null;
+    } catch (_error) {
+        return false;
+    }
 }
 
-function isRuntimeActiveKey(key, cacheEntries) {
+function hasRelatedCache(txn, baseKey) {
+    return hasKey(txn, baseKey) ||
+        hasKey(txn, "stats:" + baseKey) ||
+        hasKey(txn, "history:" + baseKey) ||
+        hasKey(txn, "identifiers:" + baseKey);
+}
+
+function isRuntimeActiveKey(txn, key) {
     if (EXACT_ACTIVE_KEYS.has(key)) return true;
     if (ACTIVE_KEY_PATTERNS.some(function (pattern) { return pattern.test(key); })) return true;
 
     if (key.indexOf("identifiers:") === 0) {
         const baseKey = key.slice("identifiers:".length);
-        return cacheEntries.has(baseKey) ||
-            cacheEntries.has("stats:" + baseKey) ||
-            cacheEntries.has("history:" + baseKey);
+        return hasKey(txn, baseKey) ||
+            hasKey(txn, "stats:" + baseKey) ||
+            hasKey(txn, "history:" + baseKey);
     }
 
     if (key.indexOf("stats:") === 0) {
         const baseKey = key.slice("stats:".length);
-        return cacheEntries.has(baseKey) || cacheEntries.has("identifiers:" + baseKey);
+        return hasKey(txn, baseKey) || hasKey(txn, "identifiers:" + baseKey);
     }
 
     if (key.indexOf("history:") === 0) {
         const baseKey = key.slice("history:".length);
-        return cacheEntries.has(baseKey) ||
-            cacheEntries.has("stats:" + baseKey) ||
-            cacheEntries.has("identifiers:" + baseKey);
+        return hasKey(txn, baseKey) ||
+            hasKey(txn, "stats:" + baseKey) ||
+            hasKey(txn, "identifiers:" + baseKey);
     }
 
-    return hasRelatedCache(cacheEntries, key);
+    return hasRelatedCache(txn, key);
 }
 
-function isLongRunnerManagedKey(key, cacheEntries, minKeyLength) {
+function isLongRunnerManagedKey(txn, key, minKeyLength) {
     if (!key || key.length < minKeyLength) return false;
 
     if (key.indexOf("identifiers:") === 0) return true;
     if (key.indexOf("stats:") === 0) {
         if (key.indexOf("_") === -1) return true;
-        return cacheEntries.has(key.slice("stats:".length));
+        return hasKey(txn, key.slice("stats:".length));
     }
     if (key.indexOf("history:") === 0) {
-        return cacheEntries.has(key.slice("history:".length));
+        return hasKey(txn, key.slice("history:".length));
     }
 
     return key.indexOf("_") >= 0;
 }
 
-function classifyReason(key, cacheEntries, minKeyLength) {
-    if (key.indexOf("history:") === 0) return cacheEntries.has(key.slice("history:".length)) ? "managed-history" : "orphan-history";
-    if (key.indexOf("stats:") === 0) return cacheEntries.has(key.slice("stats:".length)) ? "managed-stats" : "orphan-stats";
+function classifyReason(txn, key, minKeyLength) {
+    if (key.indexOf("history:") === 0) return hasKey(txn, key.slice("history:".length)) ? "managed-history" : "orphan-history";
+    if (key.indexOf("stats:") === 0) return hasKey(txn, key.slice("stats:".length)) ? "managed-stats" : "orphan-stats";
     if (key.indexOf("identifiers:") === 0) return "orphan-identifiers";
     if (key.length < minKeyLength) return "short-unknown";
     if (key.indexOf("_") >= 0) return "worker-like";
@@ -93,49 +105,64 @@ function classifyReason(key, cacheEntries, minKeyLength) {
 }
 
 require("../init_mini.js").init(function () {
-    const cacheEntries = new Map();
     const txn = global.database.env.beginTxn({ readOnly: true });
     const cursor = new global.database.lmdb.Cursor(txn, global.database.cacheDB);
-
-    for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
-        cursor.getCurrentString(function (key, data) {  // jshint ignore:line
-            cacheEntries.set(String(key), String(data));
-        });
-    }
-
-    cursor.close();
-    txn.abort();
-
     const minKeyLength = global.config.pool.address.length;
-    const rows = [];
-
-    cacheEntries.forEach(function (data, key) {
-        if (isRuntimeActiveKey(key, cacheEntries)) return;
-        if (isLongRunnerManagedKey(key, cacheEntries, minKeyLength)) return;
-
-        rows.push({
-            key: key,
-            reason: classifyReason(key, cacheEntries, minKeyLength),
-            value: data
-        });
-    });
-
-    rows.sort(function (left, right) {
-        return left.key.localeCompare(right.key);
-    });
+    let scannedCount = 0;
+    let foundCount = 0;
+    let wroteJsonRow = false;
 
     if (argv.json) {
-        console.log(JSON.stringify(rows, null, 2));
-    } else {
-        rows.forEach(function (row) {
-            if (argv.value) {
-                console.log(row.reason + "\t" + row.key + "\t" + row.value);
-            } else {
-                console.log(row.reason + "\t" + row.key);
-            }
-        });
-        console.error("Found " + rows.length + " cache keys outside runtime usage and longRunner cleanup");
+        process.stdout.write("[\n");
     }
 
+    try {
+        for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
+            cursor.getCurrentString(function (key, data) {  // jshint ignore:line
+                key = String(key);
+                ++scannedCount;
+
+                if (scannedCount % PROGRESS_EVERY === 0) {
+                    console.error("Scanned " + scannedCount + " cache keys, found " + foundCount + " unused");
+                }
+
+                if (isRuntimeActiveKey(txn, key)) return;
+                if (isLongRunnerManagedKey(txn, key, minKeyLength)) return;
+
+                const row = {
+                    key: key,
+                    reason: classifyReason(txn, key, minKeyLength)
+                };
+
+                if (argv.value) row.value = String(data);
+                ++foundCount;
+
+                if (argv.json) {
+                    if (wroteJsonRow) process.stdout.write(",\n");
+                    process.stdout.write(JSON.stringify(row));
+                    wroteJsonRow = true;
+                    return;
+                }
+
+                if (argv.value) {
+                    console.log(row.reason + "\t" + row.key + "\t" + row.value);
+                } else {
+                    console.log(row.reason + "\t" + row.key);
+                }
+            });
+        }
+    } finally {
+        cursor.close();
+        txn.abort();
+    }
+
+    if (argv.json) {
+        if (wroteJsonRow) process.stdout.write("\n");
+        process.stdout.write("]\n");
+    } else {
+        console.error("Found " + foundCount + " cache keys outside runtime usage and longRunner cleanup");
+    }
+
+    console.error("Scanned " + scannedCount + " cache keys total");
     process.exit(0);
 });
