@@ -18,13 +18,22 @@ function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForCondition(check, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (check()) return;
+        await wait(10);
+    }
+    throw new Error("Condition not met within " + timeoutMs + "ms");
+}
+
 async function waitForListening(runtime) {
     for (let attempt = 0; attempt < 50; attempt += 1) {
         const address = runtime.address();
         if (address && address.port) return address;
         await wait(10);
     }
-    throw new Error("remoteShare runtime did not start listening");
+    throw new Error("remote_share runtime did not start listening");
 }
 
 function postFrame(port, body) {
@@ -178,7 +187,7 @@ function createPendingJobDatabase() {
     return { database, resets, stores };
 }
 
-test("remoteShare accepts valid share frames and flushes queued shares", async () => {
+test("remote_share accepts valid share frames and flushes queued shares", async () => {
     const restore = installRemoteShareGlobals();
     const shareStore = {
         batches: [],
@@ -240,7 +249,7 @@ test("remoteShare accepts valid share frames and flushes queued shares", async (
     }
 });
 
-test("remoteShare rejects malformed share payloads and bad auth", async () => {
+test("remote_share rejects malformed share payloads and bad auth", async () => {
     const restore = installRemoteShareGlobals();
     const runtime = createRemoteShareRuntime({
         clusterEnabled: false,
@@ -296,7 +305,7 @@ test("remoteShare rejects malformed share payloads and bad auth", async () => {
     }
 });
 
-test("remoteShare logs ingress summaries for accepted and rejected frames", async () => {
+test("remote_share logs ingress summaries for accepted and rejected frames", async () => {
     const restore = installRemoteShareGlobals();
     const originalConsoleLog = console.log;
     const logs = [];
@@ -362,16 +371,14 @@ test("remoteShare logs ingress summaries for accepted and rejected frames", asyn
         assert.equal(await postFrame(address.port, malformedShareFrame), 400);
         assert.equal(await postFrame(address.port, badAuthFrame), 403);
         assert.equal(await postFrame(address.port, Buffer.from([0x01, 0x02, 0x03])), 400);
-        await wait(50);
-
-        assert.ok(logs.some((line) => (
+        await waitForCondition(() => logs.some((line) => (
             line.includes("(Single) Ingress summary:") &&
             /req=4/.test(line) &&
             /ok=1/.test(line) &&
             /share=1/.test(line) &&
             /fail=400:2,403:1/.test(line) &&
             /reject=frame:1,auth:1,share:1/.test(line)
-        )));
+        )), 200);
     } finally {
         console.log = originalConsoleLog;
         await runtime.stop();
@@ -379,7 +386,7 @@ test("remoteShare logs ingress summaries for accepted and rejected frames", asyn
     }
 });
 
-test("remoteShare enqueues block work durably and returns success immediately", async () => {
+test("remote_share enqueues block work durably and returns success immediately", async () => {
     const restore = installRemoteShareGlobals();
     const pendingJobs = {
         blocks: [],
@@ -432,7 +439,7 @@ test("remoteShare enqueues block work durably and returns success immediately", 
     }
 });
 
-test("remoteShare stop flushes queued shares and awaits pending job shutdown", async () => {
+test("remote_share stop flushes queued shares and awaits pending job shutdown", async () => {
     const restore = installRemoteShareGlobals();
     const shareStore = {
         batches: [],
@@ -779,7 +786,7 @@ test("pending block summary groups jobs by coin and port", () => {
     }
 });
 
-test("remoteShare logs periodic pending block summaries with coin labels", async () => {
+test("remote_share logs periodic pending block summaries with coin labels", async () => {
     const restore = installRemoteShareGlobals();
     const originalConsoleLog = console.log;
     const logs = [];
@@ -808,8 +815,7 @@ test("remoteShare logs periodic pending block summaries with coin labels", async
 
     try {
         runtime.start();
-        await wait(50);
-        assert.equal(logs.some((line) => line.includes("(Single) Pending blocks: total=3 WOW/11812=1 XMR/18081=2")), true);
+        await waitForCondition(() => logs.some((line) => line.includes("(Single) Pending blocks: total=3 WOW/11812=1 XMR/18081=2")), 200);
     } finally {
         console.log = originalConsoleLog;
         await runtime.stop();

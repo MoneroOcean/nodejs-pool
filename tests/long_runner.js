@@ -166,7 +166,7 @@ function createFakeEnvironment(options = {}) {
     };
 }
 
-test.describe("longRunner", { concurrency: false }, () => {
+test.describe("long_runner", { concurrency: false }, () => {
 let originalConsoleError;
 let originalConsoleLog;
 let originalSetInterval;
@@ -372,7 +372,7 @@ test("scheduleTask skips overlapping runs and resumes after the active run finis
     assert.equal(runCount, 2);
 });
 
-test("startLongRunner executes all startup tasks once and schedules recurring intervals", async () => {
+test("start_long_runner executes all startup tasks once and schedules recurring intervals", async () => {
     const intervals = [];
     const state = createFakeEnvironment({
         mysqlQuery(sql) {

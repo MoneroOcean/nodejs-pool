@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const process = require("node:process");
 const test = require("node:test");
 
 const loadRegistry = require("../lib/coins/core/registry.js");
@@ -14,6 +15,47 @@ const {
 } = require("./pool_harness.js");
 
 const REAL_ETH_STYLE_PORT = 8645;
+const INSTANCE_ID_PID_MASK = (1 << 22) - 1;
+
+function withPatchedPid(pid, fn) {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(process, "pid");
+    Object.defineProperty(process, "pid", {
+        configurable: true,
+        value: pid
+    });
+
+    try {
+        return fn();
+    } finally {
+        Object.defineProperty(process, "pid", originalDescriptor);
+    }
+}
+
+function createInstanceIdWord(poolId, pid) {
+    const Coin = require("../lib/coins/index.js");
+    const previousPoolId = global.config.pool_id;
+    const realMainPort = global.coinFuncs.__realCoinFuncs.COIN2PORT("");
+    const template = {
+        ...createBaseTemplate({
+            coin: "",
+            port: MAIN_PORT,
+            idHash: "instance-id-" + poolId + "-" + pid,
+            height: 501
+        }),
+        port: realMainPort
+    };
+
+    try {
+        global.config.pool_id = poolId;
+        return withPatchedPid(pid, function buildInstanceIdWord() {
+            const realCoinFuncs = new Coin({});
+            const blockTemplate = new realCoinFuncs.BlockTemplate(template);
+            return blockTemplate.buffer.readUInt32LE(blockTemplate.reserved_offset + 4);
+        });
+    } finally {
+        global.config.pool_id = previousPoolId;
+    }
+}
 
 test.describe("pool coin helpers", { concurrency: false }, () => {
 test.beforeEach(() => {
@@ -73,6 +115,29 @@ test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex c
         ),
         true
     );
+});
+
+test("BlockTemplate instanceId encodes pool_id and pid into separate bit ranges", () => {
+    const poolId = 513;
+    const pid = 0x2abcde;
+    const instanceIdWord = createInstanceIdWord(poolId, pid);
+
+    assert.equal(instanceIdWord >>> 22, poolId);
+    assert.equal(instanceIdWord & INSTANCE_ID_PID_MASK, pid);
+});
+
+test("BlockTemplate instanceId stays unique across pool nodes and cluster threads within supported bit ranges", () => {
+    const pairs = [
+        [1, 1001],
+        [1, 1002],
+        [2, 1001],
+        [1023, INSTANCE_ID_PID_MASK]
+    ];
+    const instanceIds = pairs.map(function buildInstanceId(pair) {
+        return createInstanceIdWord(pair[0], pair[1]);
+    });
+
+    assert.equal(new Set(instanceIds).size, instanceIds.length);
 });
 
 test("BlockTemplate uses hash-only fast path for extra-nonce templates without a blob payload", () => {
