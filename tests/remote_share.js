@@ -432,6 +432,71 @@ test("remoteShare enqueues block work durably and returns success immediately", 
     }
 });
 
+test("remoteShare stop flushes queued shares and awaits pending job shutdown", async () => {
+    const restore = installRemoteShareGlobals();
+    const shareStore = {
+        batches: [],
+        storeShares(batch) {
+            this.batches.push(batch);
+        }
+    };
+    const pendingJobs = {
+        closeFinished: false,
+        enqueueBlock() {},
+        enqueueAltBlock() {},
+        processDueJobs() {},
+        close() {
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    this.closeFinished = true;
+                    resolve();
+                }, 20);
+            });
+        }
+    };
+    const runtime = createRemoteShareRuntime({
+        clusterEnabled: false,
+        host: "127.0.0.1",
+        port: 0,
+        pendingJobs,
+        shareFlushIntervalMs: 1000,
+        shareStore
+    });
+
+    try {
+        runtime.start();
+        const address = await waitForListening(runtime);
+        const sharePayload = PROTOS.Share.encode({
+            paymentAddress: "49abc",
+            foundBlock: false,
+            trustedShare: false,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            poolID: 1,
+            blockDiff: 100,
+            blockHeight: 55,
+            timestamp: Date.now(),
+            identifier: "rigStop",
+            raw_shares: 42
+        });
+        const frame = PROTOS.WSData.encode({
+            msgType: PROTOS.MESSAGETYPE.SHARE,
+            key: "secret",
+            msg: sharePayload,
+            exInt: 55
+        });
+
+        assert.equal(await postFrame(address.port, frame), 200);
+        await runtime.stop();
+
+        assert.equal(shareStore.batches.length, 1);
+        assert.equal(shareStore.batches[0].length, 1);
+        assert.equal(shareStore.batches[0][0].identifier, "rigStop");
+        assert.equal(pendingJobs.closeFinished, true);
+    } finally {
+        restore();
+    }
+});
+
 test("pending block jobs retry until a reward is available and then store the block", () => {
     const restore = installRemoteShareGlobals();
     const { database, stores } = createPendingJobDatabase();
@@ -490,6 +555,88 @@ test("pending block jobs retry until a reward is available and then store the bl
         assert.match(logs.join("\n"), /Block XMR\/18081 hash .* stored/);
     } finally {
         pendingJobs.close();
+        restore();
+    }
+});
+
+test("pending job close waits for in-flight processing before closing storage", async () => {
+    const restore = installRemoteShareGlobals();
+    const { database } = createPendingJobDatabase();
+    const jobs = new Map();
+    const storage = {
+        closed: false,
+        closeCount: 0,
+        save(job) {
+            assert.equal(this.closed, false);
+            jobs.set(job.key, { ...job });
+        },
+        remove(key) {
+            assert.equal(this.closed, false);
+            jobs.delete(key);
+        },
+        loadDueJobs(now, limit) {
+            return Array.from(jobs.values())
+                .filter((job) => job.nextAttemptAt <= now)
+                .slice(0, limit)
+                .map((job) => ({ ...job }));
+        },
+        loadAllJobs() {
+            return Array.from(jobs.values()).map((job) => ({ ...job }));
+        },
+        close() {
+            this.closed = true;
+            this.closeCount += 1;
+        }
+    };
+    let finishHeaderLookup;
+
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback) {
+            finishHeaderLookup = callback;
+        },
+        getPoolProfile() {
+            return { pool: {} };
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log() {} },
+        retryDelayMs: 1,
+        storage
+    });
+
+    try {
+        const block = {
+            hash: "aa".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true
+        };
+        pendingJobs.enqueueBlock(12, PROTOS.Block.encode(block), block);
+        pendingJobs.processDueJobs();
+
+        const closePromise = pendingJobs.close();
+        assert.equal(storage.closed, false);
+        assert.equal(typeof finishHeaderLookup, "function");
+
+        finishHeaderLookup(true, null);
+        await closePromise;
+
+        assert.equal(storage.closed, true);
+        assert.equal(storage.closeCount, 1);
+        assert.equal(jobs.size, 1);
+        assert.equal(Array.from(jobs.values())[0].attempts, 1);
+    } finally {
         restore();
     }
 });
