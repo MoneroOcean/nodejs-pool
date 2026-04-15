@@ -14,6 +14,7 @@ const {
 
 require("./pool_components.js");
 require("./pool_coin.js");
+require("./block_manager.js");
 require("./long_runner.js");
 require("./stats.js");
 require("./worker.js");

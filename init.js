@@ -146,7 +146,11 @@ function loadPoolModule() {
 
 const moduleLoaders = {
     pool: loadPoolModule,
-    block_manager: function () { return require('./lib/block_manager.js'); },
+    block_manager: function () {
+        const runtime = require('./lib/block_manager.js').createBlockManagerRuntime();
+        runtime.start();
+        return runtime;
+    },
     altblockManager: function () { return require('./lib2/altblockManager.js'); },
     altblockExchange: function () { return require('./lib2/altblockExchange.js'); },
     payments: function () { return require('./lib/payments.js'); },
