@@ -4,6 +4,7 @@ const { parseArgs } = require("node:util");
 
 module.exports = function parseArgv(args, options) {
     const config = options || {};
+    const captureRemainder = config["--"] === true;
     const parsed = parseArgs({
         args: args,
         options: {},
@@ -20,7 +21,7 @@ module.exports = function parseArgv(args, options) {
 
         if (token.kind === "option-terminator") {
             afterTerminator = true;
-            if (config["--"] === true) result["--"] = [];
+            if (captureRemainder) result["--"] = [];
             continue;
         }
 
@@ -40,14 +41,10 @@ module.exports = function parseArgv(args, options) {
             continue;
         }
 
-        if (afterTerminator && config["--"] === true) {
-            result["--"].push(token.value);
-        } else {
-            result._.push(token.value);
-        }
+        (afterTerminator && captureRemainder ? result["--"] : result._).push(token.value);
     }
 
-    if (config["--"] === true && !Object.prototype.hasOwnProperty.call(result, "--")) {
+    if (captureRemainder && !Object.prototype.hasOwnProperty.call(result, "--")) {
         result["--"] = [];
     }
 
