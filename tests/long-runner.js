@@ -133,8 +133,9 @@ function createFakeEnvironment(options = {}) {
         getValidLockedAltBlocks() {
             return (options.lockedAltBlocks || []).slice();
         },
-        cleanShareDB() {
+        cleanShareDB(callback) {
             cleanShareCalls += 1;
+            if (typeof callback === "function") callback(null);
         }
     };
     global.protos = {
