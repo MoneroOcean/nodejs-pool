@@ -61,6 +61,57 @@ test("xmr helpers keep bigint conversions stable and calculate rewards", () => {
     assert.equal(ergReward, 3000000026);
 });
 
+test("pool state thread names use short master and worker prefixes", () => {
+    const originalConfig = global.config;
+    const originalDatabase = global.database;
+    const originalCoinFuncs = global.coinFuncs;
+    const poolState = createPoolState();
+
+    try {
+        global.config = {
+            daemon: {
+                port: 39001
+            },
+            pool: {
+                minerThrottleShareWindow: 10
+            }
+        };
+        global.database = {};
+        global.coinFuncs = {
+            COIN2PORT(coin) {
+                return coin === "" ? 39001 : 39002;
+            },
+            PORT2COIN(port) {
+                return port === 39001 ? "" : "ALT";
+            },
+            PORT2COIN_FULL(port) {
+                return port === 39001 ? "XMR" : "ALT";
+            }
+        };
+
+        poolState.initThreadContext(true, undefined, { enableStats: false });
+        assert.equal(poolState.state.threadName, "[M] ");
+        assert.equal(global.database.thread_id, "[M] ");
+        assert.equal(poolState.formatCoinPort("", 39001), "XMR/39001");
+        assert.equal(poolState.formatCoinPort("ALT", 39002), "ALT/39002");
+        assert.equal(poolState.formatCoinPort("ALT"), "ALT/39002");
+        assert.equal(poolState.formatPoolEvent("Verify", { action: "wallet-add", wallet: "test-wallet" }), "Verify: action=wallet-add wallet=test-wallet");
+        assert.equal("IMPORTANT: " + poolState.formatPoolEvent("Summary", { total: 10, trusted: "7(70.00%)" }), "IMPORTANT: Summary: total=10 trusted=\"7(70.00%)\"");
+
+        poolState.resetRuntimeState();
+        global.database = {};
+
+        poolState.initThreadContext(false, 7, { enableShareWindowReset: false });
+        assert.equal(poolState.state.threadName, `[S7:${process.pid}] `);
+        assert.equal(global.database.thread_id, `[S7:${process.pid}] `);
+    } finally {
+        poolState.resetRuntimeState();
+        global.config = originalConfig;
+        global.database = originalDatabase;
+        global.coinFuncs = originalCoinFuncs;
+    }
+});
+
 test("template manager rotates templates and notifies miners through the right update path", () => {
     const activeMiners = new Map();
     const activeBlockTemplates = {};
@@ -111,6 +162,9 @@ test("template manager rotates templates and notifies miners through the right u
         },
         PORT2COIN(port) {
             return port === 39001 ? "" : "ALT";
+        },
+        PORT2COIN_FULL(port) {
+            return port === 39001 ? "XMR" : "ALT";
         },
         getMM_PORTS() {
             return {};
@@ -172,6 +226,10 @@ test("template manager rotates templates and notifies miners through the right u
         },
         getThreadName() {
             return "(Test) ";
+        },
+        formatCoinPort(coin, port) {
+            const resolvedPort = typeof port === "undefined" ? global.coinFuncs.COIN2PORT(coin) : port;
+            return `${global.coinFuncs.PORT2COIN_FULL(resolvedPort)}/${resolvedPort}`;
         }
     });
 
@@ -355,6 +413,84 @@ test("server startup ignores legacy non-pplns port rows", async () => {
     assert.equal(servers.length, 1);
     assert.equal(netServers.length, 1);
     assert.deepEqual(listenCalls, [{ port: 39002, host: "127.0.0.1" }]);
+});
+
+test("missing rpc id warnings are summarized instead of logged on every malformed request", () => {
+    const originalConfig = global.config;
+    const originalWarn = console.warn;
+    const originalDateNow = Date.now;
+    const warnings = [];
+    let timeNow = 1_000;
+
+    try {
+        global.config = { pool: {} };
+        console.warn = function captureWarning(message) {
+            warnings.push(message);
+        };
+        Date.now = function fakeNow() {
+            return timeNow;
+        };
+
+        const state = {
+            threadName: "(Test) ",
+            activeConnectionsByIP: {},
+            activeConnectionsBySubnet: {},
+            activeMiners: new Map(),
+            activeMinerSockets: new Map(),
+            freeEthExtranonces: [],
+            protocolWarningState: Object.create(null)
+        };
+        const serverFactory = createServerFactory({
+            debug() {},
+            fs: require("node:fs"),
+            net: require("node:net"),
+            tls: require("node:tls"),
+            state,
+            formatPoolEvent(label, fields) {
+                const parts = [];
+                Object.keys(fields || {}).forEach(function (key) {
+                    if (fields[key] === undefined || fields[key] === null || fields[key] === "") return;
+                    parts.push(`${key}=${fields[key]}`);
+                });
+                return parts.length ? `${label}: ${parts.join(" ")}` : label;
+            },
+            handleMinerData() {
+                assert.fail("Malformed RPC requests should not reach the miner handler");
+            },
+            removeMiner() {}
+        });
+        const socket = new EventEmitter();
+        socket.remoteAddress = "127.0.0.2";
+        socket.writable = true;
+        socket.finalizing = false;
+        socket.setKeepAlive = function setKeepAlive() {};
+        socket.setEncoding = function setEncoding() {};
+        socket.write = function write() {};
+        socket.end = function end() {
+            socket.writable = false;
+        };
+        socket.destroy = function destroy() {
+            socket.writable = false;
+        };
+
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+        handleSocket(socket);
+
+        socket.emit("data", `${JSON.stringify({ method: "login", params: { login: "wallet" } })}\n`);
+        socket.emit("data", `${JSON.stringify({ method: "login", params: { login: "wallet" } })}\n`);
+        timeNow += 5 * 60 * 1000;
+        socket.emit("data", `${JSON.stringify({ method: "login", params: { login: "wallet" } })}\n`);
+        socket.emit("close");
+
+        assert.deepEqual(warnings, [
+            "(Test) Miner RPC missing id: ip=127.0.0.2",
+            "(Test) Miner RPC missing id: ip=127.0.0.2 (suppressed: count=1 lastIp=127.0.0.2)"
+        ]);
+    } finally {
+        global.config = originalConfig;
+        console.warn = originalWarn;
+        Date.now = originalDateNow;
+    }
 });
 
 test("eth-style nonces are deduped across miners on the same block template", () => {
@@ -649,6 +785,9 @@ test("share processor records accepted shares through the common verification pa
         },
         getThreadName() {
             return "(Test) ";
+        },
+        formatCoinPort(coin) {
+            return coin === "" ? "XMR/39001" : `${coin}/39002`;
         },
         getLastMinerLogTime() {
             return lastMinerLogTime;

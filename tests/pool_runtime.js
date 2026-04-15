@@ -1426,7 +1426,7 @@ test("closing a miner socket removes it from the active miner map", async () => 
     }
 });
 
-test("invalid logins are throttled by login value instead of ip or agent", async () => {
+test("invalid payout logins are throttled by payout instead of ip or agent", async () => {
     const { runtime } = await startHarness();
     const originalWorkerId = process.env.WORKER_ID;
 
@@ -1454,10 +1454,7 @@ test("invalid logins are throttled by login value instead of ip or agent", async
 
         const state = runtime.getState();
         assert.deepEqual(Object.keys(state.minerAgents), []);
-        assert.deepEqual(Object.keys(state.lastMinerLogTime), ["invalid-address-login:bad-wallet-one"]);
-        assert.equal("bad-wallet-one" in state.lastMinerLogTime, false);
-        assert.equal("invalid-login:10.0.0.91" in state.lastMinerLogTime, false);
-        assert.equal("invalid-login:10.0.0.92" in state.lastMinerLogTime, false);
+        assert.deepEqual(Object.keys(state.lastMinerLogTime), ["bad-wallet-one"]);
     } finally {
         if (typeof originalWorkerId === "undefined") delete process.env.WORKER_ID;
         else process.env.WORKER_ID = originalWorkerId;
@@ -1494,9 +1491,7 @@ test("banned payout logins are throttled by payout across IPs", async () => {
         });
 
         const state = runtime.getState();
-        assert.deepEqual(Object.keys(state.lastMinerLogTime), ["banned-login:" + MAIN_WALLET]);
-        assert.equal("invalid-login:10.0.0.92" in state.lastMinerLogTime, false);
-        assert.equal("invalid-login:10.0.0.93" in state.lastMinerLogTime, false);
+        assert.deepEqual(Object.keys(state.lastMinerLogTime), [MAIN_WALLET]);
         assert.equal(loggedMessages.length, 1);
         assert.match(loggedMessages[0], /Permanently banned payment address/);
     } finally {
@@ -1505,7 +1500,48 @@ test("banned payout logins are throttled by payout across IPs", async () => {
     }
 });
 
-test("share-path log updates do not clear existing invalid login throttle keys", async () => {
+test("unsupported algo invalid miners are throttled by payout across worker names", async () => {
+    const { runtime } = await startHarness();
+    const originalConsoleLog = console.log;
+    const loggedMessages = [];
+
+    try {
+        console.log = function patchedConsoleLog(message) {
+            loggedMessages.push(message);
+        };
+
+        invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-one",
+                algo: ["bad/algo"],
+                "algo-perf": { "bad/algo": 1 }
+            },
+            ip: "10.0.0.91"
+        });
+        invokePoolMethod({
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-two",
+                algo: ["bad/algo"],
+                "algo-perf": { "bad/algo": 1 }
+            },
+            ip: "10.0.0.92"
+        });
+
+        const state = runtime.getState();
+        assert.deepEqual(Object.keys(state.lastMinerLogTime), [MAIN_WALLET]);
+        assert.equal(loggedMessages.length, 1);
+        assert.match(loggedMessages[0], /algo array must include at least one supported pool algo/);
+    } finally {
+        console.log = originalConsoleLog;
+        await runtime.stop();
+    }
+});
+
+test("share-path log updates do not clear existing invalid miner throttle keys", async () => {
     const { runtime } = await startHarness();
     const socket = {};
 
@@ -1549,7 +1585,7 @@ test("share-path log updates do not clear existing invalid login throttle keys",
         });
 
         assert.equal(submitReply.replies[0].error, "Low difficulty share");
-        assert.equal("invalid-address-login:999" in runtime.getState().lastMinerLogTime, true);
+        assert.equal("999" in runtime.getState().lastMinerLogTime, true);
         assert.equal(MAIN_WALLET in runtime.getState().lastMinerLogTime, true);
     } finally {
         await runtime.stop();
