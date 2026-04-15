@@ -131,3 +131,58 @@ test("support rpcPortDaemon2 keeps boolean suppressErrorLog call sites working",
         restore();
     }
 });
+
+test("support rpcPortDaemon2 logs JSON-RPC errors unless suppressed", async () => {
+    const restore = installSupportGlobals();
+    const originalRequest = http.request;
+    const originalConsoleError = console.error;
+    const support = supportFactory();
+    const errors = [];
+
+    console.error = function captureConsoleError(message) {
+        errors.push(String(message));
+    };
+    http.request = function fakeRequest(_options, onResponse) {
+        const request = createRequest();
+        const response = createResponse();
+
+        setImmediate(function respond() {
+            onResponse(response);
+            response.emit("data", JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                error: {
+                    code: -32602,
+                    message: "invalid argument 0: invalid hex string"
+                }
+            }));
+            response.emit("end");
+        });
+
+        return request;
+    };
+
+    try {
+        const result = await new Promise((resolve) => {
+            support.rpcPortDaemon2(18081, "", {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "eth_getBlockByNumber",
+                params: ["0x-7", true]
+            }, function onReply(reply, statusCode) {
+                resolve({ reply, statusCode });
+            });
+        });
+
+        assert.equal(result.reply.error.code, -32602);
+        assert.equal(result.reply.error.message, "invalid argument 0: invalid hex string");
+        assert.equal(result.statusCode, 200);
+        assert.equal(errors.length, 1);
+        assert.match(errors[0], /http:\/\/127\.0\.0\.1:18081\//);
+        assert.match(errors[0], /invalid hex string/);
+    } finally {
+        console.error = originalConsoleError;
+        http.request = originalRequest;
+        restore();
+    }
+});
