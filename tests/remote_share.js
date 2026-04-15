@@ -287,6 +287,88 @@ test("remoteShare rejects malformed share payloads and bad auth", async () => {
     }
 });
 
+test("remoteShare logs ingress summaries for accepted and rejected frames", async () => {
+    const restore = installRemoteShareGlobals();
+    const originalConsoleLog = console.log;
+    const logs = [];
+    console.log = function captureLog(message) {
+        logs.push(message);
+    };
+
+    const runtime = createRemoteShareRuntime({
+        clusterEnabled: false,
+        host: "127.0.0.1",
+        port: 0,
+        pendingJobs: {
+            enqueueBlock() {},
+            enqueueAltBlock() {},
+            processDueJobs() {},
+            close() {}
+        },
+        requestSummaryIntervalMs: 20,
+        shareFlushIntervalMs: 5,
+        shareStore: {
+            storeShares() {}
+        },
+        shareSummaryIntervalMs: 20
+    });
+
+    try {
+        runtime.start();
+        const address = await waitForListening(runtime);
+
+        const validSharePayload = PROTOS.Share.encode({
+            paymentAddress: "49abc",
+            foundBlock: false,
+            trustedShare: false,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            poolID: 1,
+            blockDiff: 100,
+            blockHeight: 55,
+            timestamp: Date.now(),
+            identifier: "rig01",
+            raw_shares: 42
+        });
+
+        const validFrame = PROTOS.WSData.encode({
+            msgType: PROTOS.MESSAGETYPE.SHARE,
+            key: "secret",
+            msg: validSharePayload,
+            exInt: 1
+        });
+        const malformedShareFrame = PROTOS.WSData.encode({
+            msgType: PROTOS.MESSAGETYPE.SHARE,
+            key: "secret",
+            msg: Buffer.from([0x01, 0x02]),
+            exInt: 1
+        });
+        const badAuthFrame = PROTOS.WSData.encode({
+            msgType: PROTOS.MESSAGETYPE.SHARE,
+            key: "wrong",
+            msg: validSharePayload,
+            exInt: 1
+        });
+
+        assert.equal(await postFrame(address.port, validFrame), 200);
+        assert.equal(await postFrame(address.port, malformedShareFrame), 400);
+        assert.equal(await postFrame(address.port, badAuthFrame), 403);
+        assert.equal(await postFrame(address.port, Buffer.from([0x01, 0x02, 0x03])), 400);
+        await wait(50);
+
+        assert.ok(logs.some((line) => (
+            line.includes("(Single) Ingress summary:") &&
+            /requests=4/.test(line) &&
+            /share=2 shareAccepted=1/.test(line) &&
+            /status=200:1,400:2,403:1,500:0/.test(line) &&
+            /rejects=frame:1,auth:1,share:1,block:0,alt:0,invalidShare:0,unknown:0/.test(line)
+        )));
+    } finally {
+        console.log = originalConsoleLog;
+        await runtime.stop();
+        restore();
+    }
+});
+
 test("remoteShare enqueues block work durably and returns success immediately", async () => {
     const restore = installRemoteShareGlobals();
     const pendingJobs = {
