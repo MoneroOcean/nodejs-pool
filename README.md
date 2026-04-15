@@ -5,19 +5,19 @@ with MySQL being used to centralize configurations and ensure simple access from
 
 ```text
 api - Main API for the frontend to use and pull data from.  Expects to be hosted at  /
-remoteShare - Main API for consuming shares from remote/local pools.  Expects to be hosted at /leafApi
+remote_share - Main API for consuming shares from remote/local pools.  Expects to be hosted at /leafApi
 pool - Where the miners connect to.
-longRunner - Database share cleanup.
+long_runner - Database share cleanup.
 payments - Handles all payments to workers.
-blockManager - Unlocks blocks and distributes payments into MySQL
+block_manager - Unlocks blocks and distributes payments into MySQL
 worker - Does regular processing of statistics and sends status e-mails for non-active miners.
 ```
 
-API listens on port 8001, remoteShare listens on 8000.
+API listens on port 8001, remote_share listens on 8000.
 
 moneroocean.stream (The reference implementation) uses the following setup:
 * https://moneroocean.stream is hosted on its own server, as the main website is a static frontend
-* https://api.moneroocean.stream hosts api, remoteShare, longRunner, payments, blockManager, worker, as these must all be hosted with access to the same LMDB database.
+* https://api.moneroocean.stream hosts api, remote_share, long_runner, payments, block_manager, worker, as these must all be hosted with access to the same LMDB database.
 
 Setup Instructions
 ==================
@@ -27,7 +27,7 @@ Server Requirements
 * Ubuntu 24.04 (confirmed working)
 * 8 Gb Ram
 * 2 CPU Cores
-* 150 Gb SSD-Backed Storage - If you're doing a multi-server install, the leaf nodes do not need this much storage. They just need enough storage to hold the blockchain for your node. The pool comes configured to use up to 60Gb of storage for LMDB. Assuming you have the longRunner worker running, it should never get near this size, but be aware that it /can/ bloat readily if things error, so be ready for this!
+* 150 Gb SSD-Backed Storage - If you're doing a multi-server install, the leaf nodes do not need this much storage. They just need enough storage to hold the blockchain for your node. The pool comes configured to use up to 60Gb of storage for LMDB. Assuming you have the long_runner worker running, it should never get near this size, but be aware that it /can/ bloat readily if things error, so be ready for this!
 * Notably, this happens to be approximately the size of a 4Gb linode instance, which is where the majority of automated deployment testing happened!
 
 Pre-Deploy
@@ -178,13 +178,13 @@ If the output is not blank, then one of your node processes is reading, this is 
 
 The second step is to run:
 ```shell
-pm2 restart blockManager worker payments remoteShare longRunner api
+pm2 restart block_manager worker payments remote_share long_runner api
 ```
 This will restart all of your related daemons, and will clear any open reader connections, allowing LMDB to get back to a normal state.
 
 If on the other hand, you have no "Free pages" and your Pages used is equal to the Max Pages, then you've run out of disk space for LMDB.
 You need to verify the cleaner is working. For reference, 4.3 million shares are stored within approximately 2-3 Gb of space,
-so if you're vastly exceeding this, then your cleaner (longRunner) is likely broken.
+so if you're vastly exceeding this, then your cleaner (long_runner) is likely broken.
 
 Installation/Configuration Assistance
 =====================================

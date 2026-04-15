@@ -8,10 +8,10 @@ let coinConfig = fs.readFileSync("./coinConfig.json");
 let protobuf = require('protocol-buffers');
 let path = require('path');
 
-global.support = require("./lib/support.js")();
+global.support = require("./lib/common/support.js")();
 global.config = JSON.parse(config);
 global.mysql = mysql.createPool(global.config.mysql);
-global.protos = protobuf(fs.readFileSync('./lib/data.proto'));
+global.protos = protobuf(fs.readFileSync('./lib/common/data.proto'));
 global.argv = argv;
 let comms;
 let coinInc;
@@ -146,15 +146,15 @@ function loadPoolModule() {
 
 const moduleLoaders = {
     pool: loadPoolModule,
-    blockManager: function () { return require('./lib/blockManager.js'); },
+    block_manager: function () { return require('./lib/block_manager.js'); },
     altblockManager: function () { return require('./lib2/altblockManager.js'); },
     altblockExchange: function () { return require('./lib2/altblockExchange.js'); },
     payments: function () { return require('./lib/payments.js'); },
     api: function () { return require('./lib/api.js'); },
-    remoteShare: function () { return require('./lib/remoteShare.js'); },
+    remote_share: function () { return require('./lib/remote_share.js'); },
     worker: function () { return require('./lib/worker.js'); },
     pool_stats: function () { return require('./lib/pool_stats.js'); },
-    longRunner: function () { return require('./lib/longRunner.js'); }
+    long_runner: function () { return require('./lib/long_runner.js'); }
 };
 
 // Config Table Layout
@@ -190,7 +190,7 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
     if (argv.module === 'pool'){
         comms = require('./lib/pool/remote_uplink');
     } else {
-        comms = require('./lib/local_comms');
+        comms = require('./lib/common/local_comms');
     }
     global.database = new comms();
     global.database.initEnv();
@@ -215,7 +215,7 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
         });
     } else {
         console.error("Invalid module/tool provided.  Please provide a valid module/tool");
-        console.error("Valid Modules: pool, blockManager, payments, api, remoteShare, worker, longRunner");
+        console.error("Valid Modules: pool, block_manager, payments, api, remote_share, worker, long_runner");
         let valid_tools = "Valid Tools: ";
         fs.readdirSync('./tools/').forEach(function(line){
             valid_tools += path.parse(line).name + ", ";

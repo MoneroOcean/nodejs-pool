@@ -9,10 +9,10 @@ const test = require("node:test");
 
 const createPendingJobs = require("../lib/remote_share/pending_jobs.js");
 global.__remoteShareAutostart = false;
-const createRemoteShareRuntime = require("../lib/remoteShare.js").createRemoteShareRuntime;
+const createRemoteShareRuntime = require("../lib/remote_share.js").createRemoteShareRuntime;
 delete global.__remoteShareAutostart;
 
-const PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "data.proto")));
+const PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "common", "data.proto")));
 
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));

@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const LONG_RUNNER_PATH = require.resolve("../lib/longRunner.js");
+const LONG_RUNNER_PATH = require.resolve("../lib/long_runner.js");
 
 function loadLongRunner() {
     const previousAutostart = global.__longRunnerAutostart;

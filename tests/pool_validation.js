@@ -13,7 +13,7 @@ const {
     invokePoolMethod,
     createBaseTemplate,
     poolModule
-} = require("./pool-harness.js");
+} = require("./pool_harness.js");
 
 test.describe("pool validation", { concurrency: false }, () => {
 test("login fails cleanly when there is no active block template", async () => {

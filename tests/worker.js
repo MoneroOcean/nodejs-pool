@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const WORKER_PATH = require.resolve("../lib/worker.js");
-const WORKER_HISTORY_PATH = require.resolve("../lib/worker_history.js");
+const WORKER_HISTORY_PATH = require.resolve("../lib/common/worker_history.js");
 
 function loadWorker() {
     const previousAutostart = global.__workerAutostart;

@@ -13,7 +13,7 @@ const protobuf = require("protocol-buffers");
 const cnUtil = require("cryptoforknote-util");
 const multiHashing = require("cryptonight-hashing");
 
-const supportFactory = require("../lib/support.js");
+const supportFactory = require("../lib/common/support.js");
 
 function allocateTestPorts() {
     const script = `
@@ -72,7 +72,7 @@ const ETH_MIXHASH_BUFFER = Buffer.from("cd".repeat(32), "hex");
 const REAL_MAIN_PROFILE_PORT = 18081;
 const REAL_RAVEN_PROFILE_PORT = 8766;
 const REAL_ETH_PROFILE_PORT = 8545;
-const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "data.proto")));
+const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "lib", "common", "data.proto")));
 const TEST_RAVEN_ADDRESS = "16Jswqk47s9PUcyCc88MMVwzgvHPvtEpf";
 
 function encodeVarint(value) {

@@ -192,7 +192,7 @@ require("../init_mini.js").init(function () {
         if (wroteJsonRow) process.stdout.write("\n");
         process.stdout.write("]\n");
     } else {
-        console.error("Found " + foundCount + " cache keys outside runtime usage and longRunner cleanup");
+        console.error("Found " + foundCount + " cache keys outside runtime usage and long_runner cleanup");
     }
 
     if (argv.delete) {
