@@ -36,6 +36,7 @@ const ACTIVE_KEY_PATTERNS = [
 ];
 
 const PROGRESS_EVERY = 100000;
+const DELETE_BATCH_SIZE = 500;
 
 function hasKey(txn, key) {
     if (!key) return false;
@@ -104,12 +105,32 @@ function classifyReason(txn, key, minKeyLength) {
     return "unknown";
 }
 
+function flushDeletes(keys) {
+    if (keys.length === 0) return 0;
+
+    const txn = global.database.env.beginTxn();
+    const count = keys.length;
+    try {
+        keys.forEach(function (key) {
+            txn.del(global.database.cacheDB, key);
+        });
+        txn.commit();
+        keys.length = 0;
+        return count;
+    } catch (error) {
+        txn.abort();
+        throw error;
+    }
+}
+
 require("../init_mini.js").init(function () {
     const txn = global.database.env.beginTxn({ readOnly: true });
     const cursor = new global.database.lmdb.Cursor(txn, global.database.cacheDB);
     const minKeyLength = global.config.pool.address.length;
+    const pendingDeletes = [];
     let scannedCount = 0;
     let foundCount = 0;
+    let deletedCount = 0;
     let wroteJsonRow = false;
 
     if (argv.json) {
@@ -137,6 +158,13 @@ require("../init_mini.js").init(function () {
                 if (argv.value) row.value = String(data);
                 ++foundCount;
 
+                if (argv.delete) {
+                    pendingDeletes.push(row.key);
+                    if (pendingDeletes.length >= DELETE_BATCH_SIZE) {
+                        deletedCount += flushDeletes(pendingDeletes);
+                    }
+                }
+
                 if (argv.json) {
                     if (wroteJsonRow) process.stdout.write(",\n");
                     process.stdout.write(JSON.stringify(row));
@@ -156,6 +184,10 @@ require("../init_mini.js").init(function () {
         txn.abort();
     }
 
+    if (argv.delete) {
+        deletedCount += flushDeletes(pendingDeletes);
+    }
+
     if (argv.json) {
         if (wroteJsonRow) process.stdout.write("\n");
         process.stdout.write("]\n");
@@ -163,6 +195,9 @@ require("../init_mini.js").init(function () {
         console.error("Found " + foundCount + " cache keys outside runtime usage and longRunner cleanup");
     }
 
+    if (argv.delete) {
+        console.error("Deleted " + deletedCount + " cache keys");
+    }
     console.error("Scanned " + scannedCount + " cache keys total");
     process.exit(0);
 });
