@@ -1,20 +1,11 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const argv = cli.argv;
+const port = cli.arg("port", "Please specify port");
+const hash = cli.arg("hash", "Please specify hash");
 
-if (!argv.port) {
-	console.error("Please specify port");
-	process.exit(1);
-}
-const port = argv.port;
-
-if (!argv.hash) {
-	console.error("Please specify hash");
-	process.exit(1);
-}
-const hash = argv.hash;
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
   global.coinFuncs.getLastBlockHeader(function (err, last_block_body) {
     if (err !== null){
       console.error("Can't get last block info");
@@ -67,4 +58,3 @@ require("../init_mini.js").init(function() {
     });
   });
 });
-

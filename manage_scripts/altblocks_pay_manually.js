@@ -1,19 +1,15 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2), { '--': true });
+const cli = require("../script_utils.js")({ "--": true });
 
 let hashes = {};
-for (const h of argv['--']) {
+for (const h of cli.argv["--"]) {
   hashes[h] = 1;
 }
 
-if (!argv.pay) {
-        console.error("Please specify pay value in main currency");
-        process.exit(1);
-}
-const pay = argv.pay;
+const pay = cli.arg("pay", "Please specify pay value in main currency");
 
-require("../init_mini.js").init(function() {
+cli.init(function() {
         let changed = 0;
         let txn = global.database.env.beginTxn();
         let cursor = new global.database.lmdb.Cursor(txn, global.database.altblockDB);

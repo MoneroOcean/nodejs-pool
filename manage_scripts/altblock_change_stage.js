@@ -1,19 +1,14 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2), { '--': true });
-
-if (!argv.stage) {
-        console.error("Please specify new stage value");
-        process.exit(1);
-}
-const stage = argv.stage;
+const cli = require("../script_utils.js")({ "--": true });
+const stage = cli.arg("stage", "Please specify new stage value");
 
 let hashes = {};
-for (const h of argv['--']) {
+for (const h of cli.argv["--"]) {
   hashes[h] = 1;
 }
 
-require("../init_mini.js").init(function() {
+cli.init(function() {
         let changed = 0;
         let txn = global.database.env.beginTxn();
         let cursor = new global.database.lmdb.Cursor(txn, global.database.altblockDB);

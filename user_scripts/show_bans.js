@@ -1,21 +1,10 @@
 "use strict";
-const mysql = require("promise-mysql");
-const async = require("async");
+const printBans = require("./bans.js");
+const cli = require("../script_utils.js");
 
-require("../init_mini.js").init(function() {
-	async.waterfall([
-		function (callback) {
-			global.mysql.query("SELECT * FROM bans").then(function (rows) {
-				for (let i in rows) {
-					const row = rows[i];
-					console.log(row.mining_address + ": " + row.reason);
-				}
-				callback();
-			});
-		},
-		function (callback) {
+cli.init(function() {
+	printBans(function () {
 			console.log("Done.");
 			process.exit(0);
-	        }
-	]);
+	});
 });

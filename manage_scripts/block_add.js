@@ -1,26 +1,10 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const height = cli.arg("height", "Please specify block height");
+const body2 = cli.jsonArg("body", "Please specify block body", "Can't parse block body: ");
 
-if (!argv.height) {
-	console.error("Please specify block height");
-	process.exit(1);
-}
-const height = argv.height;
-
-if (!argv.body) {
-	console.error("Please specify block body");
-	process.exit(1);
-}
-const body = argv.body;
-let body2;
-
-try { body2 = JSON.parse(body); } catch(e) {
-	console.error("Can't parse block body: " + body);
-	process.exit(1);
-}
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
 	const body3 = {
 		"hash":       body2.hash,
 		"difficulty": body2.difficulty,

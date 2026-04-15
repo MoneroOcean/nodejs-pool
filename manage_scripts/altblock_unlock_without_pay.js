@@ -1,13 +1,9 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2), { '--': true });
+const cli = require("../script_utils.js")({ "--": true });
+const hashes = cli.argv["--"];
 
-let hashes = [];
-for (const h of argv['--']) {
-  hashes.push(h);
-}
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
         hashes.forEach(function(hash) {
           global.database.unlockAltBlock(hash);
     	  console.log("Altblock with " + hash + " hash un-locked!");

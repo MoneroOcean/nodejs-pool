@@ -1,14 +1,9 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const height = cli.arg("height", "Please specify block height");
 
-if (!argv.height) {
-        console.error("Please specify block height");
-        process.exit(1);
-}
-const height = argv.height;
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
         global.coinFuncs.getBlockHeaderByID(height, function (err, body) {
                 if (err) {
                         console.error("Can't get block header");

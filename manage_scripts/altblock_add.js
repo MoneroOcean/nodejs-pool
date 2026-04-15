@@ -1,26 +1,10 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const timestamp = cli.arg("timestamp", "Please specify altblock time");
+const body2 = cli.jsonArg("body", "Please specify altblock body", "Can't parse altblock body: ");
 
-if (!argv.timestamp) {
-	console.error("Please specify altblock time");
-	process.exit(1);
-}
-const timestamp = argv.timestamp;
-
-if (!argv.body) {
-	console.error("Please specify altblock body");
-	process.exit(1);
-}
-const body = argv.body;
-let body2;
-
-try { body2 = JSON.parse(body); } catch(e) {
-	console.error("Can't parse altblock body: " + body);
-	process.exit(1);
-}
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
 	const body3 = {
 		"hash":          body2.hash,
 		"difficulty":    body2.difficulty,

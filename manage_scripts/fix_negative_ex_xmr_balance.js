@@ -1,7 +1,5 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
-
 require("../init_mini.js").init(function() {
 	const xmr_balance = global.database.getCache("xmr_balance");
 	if (xmr_balance !== false) {
@@ -22,4 +20,3 @@ require("../init_mini.js").init(function() {
 		process.exit(1);
 	}
 });
-
