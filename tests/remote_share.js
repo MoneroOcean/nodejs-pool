@@ -27,6 +27,29 @@ async function waitForCondition(check, timeoutMs) {
     throw new Error("Condition not met within " + timeoutMs + "ms");
 }
 
+function listenOnPort(port) {
+    return new Promise((resolve, reject) => {
+        const server = http.createServer();
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", function onListen() {
+            server.removeListener("error", reject);
+            resolve(server);
+        });
+    });
+}
+
+function closeServer(server) {
+    return new Promise((resolve, reject) => {
+        server.close(function onClose(error) {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
 async function waitForListening(runtime) {
     for (let attempt = 0; attempt < 50; attempt += 1) {
         const address = runtime.address();
@@ -245,6 +268,44 @@ test("remote_share accepts valid share frames and flushes queued shares", async 
         assert.equal(shareStore.batches[0][0].identifier, "rig01");
     } finally {
         await runtime.stop();
+        restore();
+    }
+});
+
+test("remote_share honors port zero even when the default port is unavailable", async () => {
+    const restore = installRemoteShareGlobals();
+    let blocker = null;
+    try {
+        try {
+            blocker = await listenOnPort(8000);
+        } catch (error) {
+            if (!error || error.code !== "EADDRINUSE") throw error;
+        }
+
+        const runtime = createRemoteShareRuntime({
+            clusterEnabled: false,
+            host: "127.0.0.1",
+            port: 0,
+            pendingJobs: {
+                enqueueBlock() {},
+                enqueueAltBlock() {},
+                processDueJobs() {},
+                close() {}
+            },
+            shareStore: {
+                storeShares() {}
+            }
+        });
+
+        try {
+            runtime.start();
+            const address = await waitForListening(runtime);
+            assert.notEqual(address.port, 8000);
+        } finally {
+            await runtime.stop();
+        }
+    } finally {
+        if (blocker) await closeServer(blocker);
         restore();
     }
 });
