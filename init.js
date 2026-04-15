@@ -115,6 +115,13 @@ function installGracefulShutdown(name) {
             });
         });
     });
+
+    process.on("disconnect", function onDisconnect() {
+        handleSignal("disconnect").catch(function onUnhandled(error) {
+            console.error("Graceful shutdown failed for " + name + ": " + shutdownErrorMessage(error));
+            process.exit(1);
+        });
+    });
 }
 
 function loadPoolModule() {
