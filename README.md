@@ -47,7 +47,7 @@ Deployment via Installer
 
 ```shell
 cd ~/nodejs-pool/
-pm2 start init.js --name=pool --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
+pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 pm2 save
 pm2 startup
 ```
