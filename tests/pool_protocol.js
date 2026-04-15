@@ -16,7 +16,7 @@ const {
     invokePoolMethod,
     createBaseTemplate,
     poolModule
-} = require("./pool-harness.js");
+} = require("./pool_harness.js");
 
 async function flushShareAccumulator(check, timeout = 200) {
     const deadline = Date.now() + timeout;

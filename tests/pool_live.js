@@ -1722,7 +1722,7 @@ function parseCliOptions(argv) {
 
 function renderCliHelp() {
     return [
-        "Usage: node ./tests/pool-live.js [options]",
+        "Usage: node ./tests/pool_live.js [options]",
         "",
         "Runs live miner checks against a target pool.",
         "",

@@ -10,17 +10,17 @@ const {
     executeProtocolProbeBatch,
     finalizeLivePoolRun,
     formatFailureDetails
-} = require("./pool-live.js");
+} = require("./pool_live.js");
 
-require("./pool-components.js");
-require("./pool-coin.js");
-require("./long-runner.js");
+require("./pool_components.js");
+require("./pool_coin.js");
+require("./long_runner.js");
 require("./stats.js");
 require("./worker.js");
-require("./pool-protocol.js");
+require("./pool_protocol.js");
 require("./pool_remote_uplink.js");
-require("./pool-validation.js");
-require("./pool-runtime.js");
+require("./pool_validation.js");
+require("./pool_runtime.js");
 require("./remote_share.js");
 require("./support.js");
 

@@ -11,7 +11,7 @@ const {
     MAIN_PORT,
     createBaseTemplate,
     installTestGlobals
-} = require("./pool-harness.js");
+} = require("./pool_harness.js");
 
 const REAL_ETH_STYLE_PORT = 8645;
 

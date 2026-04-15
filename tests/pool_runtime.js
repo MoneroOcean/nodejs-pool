@@ -20,7 +20,7 @@ const {
     invokePoolMethod,
     createBaseTemplate,
     poolModule
-} = require("./pool-harness.js");
+} = require("./pool_harness.js");
 
 const RX0_MAIN_SHARE_VECTORS = [
     {

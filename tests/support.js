@@ -5,7 +5,7 @@ const { EventEmitter } = require("node:events");
 const http = require("node:http");
 const test = require("node:test");
 
-const supportFactory = require("../lib/support.js");
+const supportFactory = require("../lib/common/support.js");
 
 function installSupportGlobals() {
     const original = {

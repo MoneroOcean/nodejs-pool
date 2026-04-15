@@ -304,7 +304,7 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'mailgunNoCert', 'false', 'bool', 'Disable certificate check for MailGun');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'emailFrom', '', 'string', 'From address for the notification emails');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'testnet', 'false', 'bool', 'Does this pool use testnet?');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'blockCleanWarning', '360', 'int', 'Blocks before longRunner cleaner module will start to warn.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'blockCleanWarning', '360', 'int', 'Blocks before long_runner cleaner module will start to warn.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pplns', 'enable', 'true', 'bool', 'Enable PPLNS on the pool.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feeSlewAmount', '.0001', 'float', 'Amount to charge for the txn fee');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feeSlewEnd', '4', 'float', 'Value at which txn fee amount drops to 0');
