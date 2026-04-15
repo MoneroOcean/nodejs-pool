@@ -15,9 +15,106 @@ global.protos = protobuf(fs.readFileSync('./lib/data.proto'));
 global.argv = argv;
 let comms;
 let coinInc;
+let activeModule = null;
 
 function logStartup(kind, name) {
     console.log("=== STARTING " + kind.toUpperCase() + ": " + name + " ===");
+}
+
+function isPrimaryProcess(clusterApi) {
+    if (!clusterApi) return false;
+    if (typeof clusterApi.isPrimary === "boolean") return clusterApi.isPrimary;
+    return clusterApi.isMaster === true;
+}
+
+function hasClusterWorkers(clusterApi) {
+    if (!clusterApi || !clusterApi.workers) return false;
+    return Object.keys(clusterApi.workers).some(function hasWorker(id) {
+        return !!clusterApi.workers[id];
+    });
+}
+
+function shutdownErrorMessage(error) {
+    return error && error.stack ? error.stack : String(error);
+}
+
+function stopActiveModule() {
+    if (!activeModule || typeof activeModule.stop !== "function") return Promise.resolve();
+    return Promise.resolve(activeModule.stop());
+}
+
+function disconnectCluster() {
+    return new Promise(function onDisconnect(resolve) {
+        if (!isPrimaryProcess(cluster) || !hasClusterWorkers(cluster) || typeof cluster.disconnect !== "function") {
+            resolve();
+            return;
+        }
+        try {
+            cluster.disconnect(resolve);
+        } catch (_error) {
+            resolve();
+        }
+    });
+}
+
+function closeMysql() {
+    if (!global.mysql || typeof global.mysql.end !== "function") return Promise.resolve();
+    return Promise.resolve(global.mysql.end());
+}
+
+function syncDatabaseEnv() {
+    return new Promise(function onSync(resolve) {
+        const env = global.database && global.database.env;
+        if (!env || typeof env.sync !== "function") {
+            resolve();
+            return;
+        }
+        try {
+            env.sync(resolve);
+        } catch (_error) {
+            resolve();
+        }
+    });
+}
+
+function closeDatabaseEnv() {
+    const env = global.database && global.database.env;
+    if (!env || typeof env.close !== "function") return;
+    env.close();
+}
+
+function installGracefulShutdown(name) {
+    let shuttingDown = false;
+
+    async function handleSignal(signal) {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log("Graceful shutdown requested for " + name + " via " + signal);
+
+        async function runStep(label, fn) {
+            try {
+                await fn();
+            } catch (error) {
+                console.error(label + " failed: " + shutdownErrorMessage(error));
+            }
+        }
+
+        await runStep("Module shutdown", stopActiveModule);
+        await runStep("Cluster disconnect", disconnectCluster);
+        await runStep("MySQL shutdown", closeMysql);
+        await runStep("LMDB sync", syncDatabaseEnv);
+        await runStep("LMDB close", closeDatabaseEnv);
+        process.exit(0);
+    }
+
+    ["SIGINT", "SIGTERM"].forEach(function registerSignal(signal) {
+        process.on(signal, function onSignal() {
+            handleSignal(signal).catch(function onUnhandled(error) {
+                console.error("Graceful shutdown failed for " + name + ": " + shutdownErrorMessage(error));
+                process.exit(1);
+            });
+        });
+    });
 }
 
 function loadPoolModule() {
@@ -36,21 +133,21 @@ function loadPoolModule() {
             });
         });
     }).then(function(){
-        require('./lib/pool.js');
+        return require('./lib/pool.js');
     });
 }
 
 const moduleLoaders = {
     pool: loadPoolModule,
-    blockManager: function () { require('./lib/blockManager.js'); },
-    altblockManager: function () { require('./lib2/altblockManager.js'); },
-    altblockExchange: function () { require('./lib2/altblockExchange.js'); },
-    payments: function () { require('./lib/payments.js'); },
-    api: function () { require('./lib/api.js'); },
-    remoteShare: function () { require('./lib/remoteShare.js'); },
-    worker: function () { require('./lib/worker.js'); },
-    pool_stats: function () { require('./lib/pool_stats.js'); },
-    longRunner: function () { require('./lib/longRunner.js'); }
+    blockManager: function () { return require('./lib/blockManager.js'); },
+    altblockManager: function () { return require('./lib2/altblockManager.js'); },
+    altblockExchange: function () { return require('./lib2/altblockExchange.js'); },
+    payments: function () { return require('./lib/payments.js'); },
+    api: function () { return require('./lib/api.js'); },
+    remoteShare: function () { return require('./lib/remoteShare.js'); },
+    worker: function () { return require('./lib/worker.js'); },
+    pool_stats: function () { return require('./lib/pool_stats.js'); },
+    longRunner: function () { return require('./lib/longRunner.js'); }
 };
 
 // Config Table Layout
@@ -90,11 +187,12 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
     }
     global.database = new comms();
     global.database.initEnv();
+    installGracefulShutdown(argv.hasOwnProperty('module') ? argv.module : (argv.hasOwnProperty('tool') ? argv.tool : 'process'));
     global.coinFuncs.blockedAddresses.push(global.config.pool.address);
     global.coinFuncs.blockedAddresses.push(global.config.payout.feeAddress);
     if (argv.hasOwnProperty('tool') && fs.existsSync('./tools/'+argv.tool+'.js')) {
         logStartup("tool", argv.tool);
-        require('./tools/'+argv.tool+'.js');
+        activeModule = require('./tools/'+argv.tool+'.js');
     } else if (argv.hasOwnProperty('module')){
         const loader = moduleLoaders[argv.module];
         if (!loader) {
@@ -105,7 +203,9 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
             console.log("");
             logStartup("module", argv.module);
         }
-        loader();
+        return Promise.resolve(loader()).then(function(loadedModule) {
+            activeModule = loadedModule;
+        });
     } else {
         console.error("Invalid module/tool provided.  Please provide a valid module/tool");
         console.error("Valid Modules: pool, blockManager, payments, api, remoteShare, worker, longRunner");

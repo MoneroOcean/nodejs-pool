@@ -215,14 +215,14 @@ mysql -u root --password=$ROOT_SQL_PASS -e "UPDATE pool.config SET item_value = 
 pm2 start init.js --name=api --log-date-format="YYYY-MM-DD HH:mm Z" -- --module=api
 pm2 start /usr/local/src/monero/build/release/bin/monero-wallet-rpc -- --rpc-bind-port 18082 --password-file /home/user/wallets/wallet_pass --wallet-file /home/user/wallets/wallet --trusted-daemon --disable-rpc-login
 sleep 30
-pm2 start init.js --name=blockManager --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z"  -- --module=blockManager
-pm2 start init.js --name=worker --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --node-args="--max_old_space_size=8192" -- --module=worker
-pm2 start init.js --name=payments --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --no-autorestart -- --module=payments
-pm2 start init.js --name=remoteShare --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=remoteShare
-pm2 start init.js --name=longRunner --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=longRunner
-#pm2 start init.js --name=pool --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
+pm2 start init.js --name=blockManager --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z"  -- --module=blockManager
+pm2 start init.js --name=worker --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --node-args="--max_old_space_size=8192" -- --module=worker
+pm2 start init.js --name=payments --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --no-autorestart -- --module=payments
+pm2 start init.js --name=remoteShare --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=remoteShare
+pm2 start init.js --name=longRunner --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=longRunner
+#pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 sleep 20
-pm2 start init.js --name=pool_stats --kill-timeout 10000 --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
+pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
 pm2 save
 sudo env PATH=$PATH:/home/user/.nvm/versions/node/$NODEJS_VERSION/bin /home/user/.nvm/versions/node/$NODEJS_VERSION/lib/node_modules/pm2/bin/pm2 startup systemd -u user --hp /home/user
 cd /home/user
