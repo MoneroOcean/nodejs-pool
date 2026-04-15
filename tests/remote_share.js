@@ -487,7 +487,7 @@ test("pending block jobs retry until a reward is available and then store the bl
         assert.equal(stores.blockDB.size, 1);
         const stored = PROTOS.Block.decode(Array.from(stores.blockDB.values())[0]);
         assert.equal(stored.value, 25);
-        assert.match(logs.join("\n"), /Stored block/);
+        assert.match(logs.join("\n"), /Block XMR\/18081 hash .* stored/);
     } finally {
         pendingJobs.close();
         restore();
@@ -548,8 +548,10 @@ test("pending altblock jobs do not spam repeated waiting-for-depth logs", () => 
         pendingJobs.processDueJobs();
 
         assert.equal(storage.jobs.size, 1);
-        assert.equal(logs.filter((line) => line.includes("Waiting for depth")).length, 1);
-        assert.equal(logs.some((line) => line.includes("WOW(19994)")), true);
+        assert.equal(logs.filter((line) => line.includes("waiting for maturity")).length, 1);
+        assert.equal(logs.some((line) => line.includes("Altblock WOW/19994 height 1000")), true);
+        assert.equal(logs.some((line) => line.includes("waiting for maturity")), true);
+        assert.equal(logs.some((line) => line.includes("1/5")), false);
         assert.equal(logs.some((line) => line.includes("Pausing altblock")), false);
     } finally {
         pendingJobs.close();
@@ -623,7 +625,7 @@ test("pending block summary groups jobs by coin and port", () => {
             height: 1001
         });
 
-        assert.equal(pendingJobs.getPendingSummary(), "Pending blocks: total=3 AEON(11812)=2 XMR(18081)=1");
+        assert.equal(pendingJobs.getPendingSummary(), "Pending blocks: total=3 AEON/11812=2 XMR/18081=1");
     } finally {
         pendingJobs.close();
         restore();
@@ -647,7 +649,7 @@ test("remoteShare logs periodic pending block summaries with coin labels", async
             enqueueAltBlock() {},
             processDueJobs() {},
             getPendingSummary() {
-                return "Pending blocks: total=3 WOW(11812)=1 XMR(18081)=2";
+                return "Pending blocks: total=3 WOW/11812=1 XMR/18081=2";
             },
             close() {}
         },
@@ -660,7 +662,7 @@ test("remoteShare logs periodic pending block summaries with coin labels", async
     try {
         runtime.start();
         await wait(50);
-        assert.equal(logs.some((line) => line.includes("(Single) Pending blocks: total=3 WOW(11812)=1 XMR(18081)=2")), true);
+        assert.equal(logs.some((line) => line.includes("(Single) Pending blocks: total=3 WOW/11812=1 XMR/18081=2")), true);
     } finally {
         console.log = originalConsoleLog;
         await runtime.stop();
