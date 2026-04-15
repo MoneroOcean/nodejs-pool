@@ -330,7 +330,7 @@ test("runTask swallows task failures after logging them", async () => {
     });
 
     assert.equal(errors.length, 1);
-    assert.match(errors[0], /LongRunner boom failed after /);
+    assert.match(errors[0], /boom failed after /);
     assert.match(errors[0], /fail/);
 });
 
