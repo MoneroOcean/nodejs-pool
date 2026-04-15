@@ -25,6 +25,7 @@ function createFakeEnvironment(options = {}) {
         [cacheDB, new Map(options.cacheEntries || [])],
         [altblockDB, new Map(options.altblockEntries || [])]
     ]);
+    const deleteNotFoundKeys = new Set(options.deleteNotFoundKeys || []);
 
     function sortEntries(entries) {
         return Array.from(entries).sort(function (left, right) {
@@ -88,6 +89,12 @@ function createFakeEnvironment(options = {}) {
 
             return {
                 del(db, key) {
+                    if (deleteNotFoundKeys.has(key)) {
+                        stores.get(db).delete(key);
+                        const error = new Error("MDB_NOTFOUND: No matching key/data pair found");
+                        error.code = "MDB_NOTFOUND";
+                        throw error;
+                    }
                     operations.push(["del", db, key]);
                 },
                 putString(db, key, value) {
@@ -285,6 +292,28 @@ test("cleanCacheDB flushes large delete sets in multiple LMDB write transactions
 
     assert.ok(state.env.writeCommits >= 2);
     assert.equal(state.cacheStore.size, 0);
+});
+
+test("cleanCacheDB ignores MDB_NOTFOUND when a queued key disappears before delete flush", () => {
+    const now = Date.now();
+    const address = "4".repeat(95);
+    const worker = address + "_stale";
+    const state = createFakeEnvironment({
+        cacheEntries: [
+            [worker, JSON.stringify({ value: 1 })],
+            ["history:" + worker, JSON.stringify({ hashHistory: [1] })],
+            ["stats:" + worker, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })]
+        ],
+        deleteNotFoundKeys: ["history:" + worker]
+    });
+    const longRunner = loadLongRunner();
+
+    assert.doesNotThrow(function () {
+        longRunner.cleanCacheDB();
+    });
+    assert.equal(state.cacheStore.has(worker), false);
+    assert.equal(state.cacheStore.has("history:" + worker), false);
+    assert.equal(state.cacheStore.has("stats:" + worker), false);
 });
 
 test("cleanAltBlockDB removes only unlocked overflow or expired rows", () => {
