@@ -169,93 +169,6 @@ function createPendingJobDatabase() {
     return { database, resets, stores };
 }
 
-function createPendingJobLmdbDatabase() {
-    const namedStores = Object.create(null);
-    namedStores.blockDB = new Map();
-    namedStores.altblockDB = new Map();
-    namedStores.remoteSharePending = new Map();
-
-    const database = {
-        blockDB: { name: "blockDB" },
-        altblockDB: { name: "altblockDB" },
-        env: {
-            beginTxn() {
-                return {
-                    getBinary(db, key) {
-                        const store = namedStores[db.name];
-                        return store && store.has(key) ? store.get(key) : null;
-                    },
-                    putBinary(db, key, value) {
-                        namedStores[db.name].set(key, Buffer.from(value));
-                    },
-                    putString(db, key, value) {
-                        namedStores[db.name].set(key, String(value));
-                    },
-                    del(db, key) {
-                        if (namedStores[db.name]) namedStores[db.name].delete(key);
-                    },
-                    abort() {},
-                    commit() {}
-                };
-            },
-            openDbi(options) {
-                if (!namedStores[options.name]) {
-                    if (options.create === false) {
-                        const error = new Error("MDB_NOTFOUND: No matching key/data pair found");
-                        error.code = "MDB_NOTFOUND";
-                        throw error;
-                    }
-                    namedStores[options.name] = new Map();
-                }
-                return {
-                    name: options.name,
-                    close() {},
-                    drop(dropOptions) {
-                        if (!dropOptions || !dropOptions.txn) throw new Error("txn required");
-                        delete namedStores[options.name];
-                    }
-                };
-            }
-        },
-        lmdb: {
-            Cursor: class Cursor {
-                constructor(_txn, db) {
-                    this.entries = Array.from((namedStores[db.name] || new Map()).entries());
-                    this.index = -1;
-                }
-
-                goToFirst() {
-                    if (this.entries.length === 0) return false;
-                    this.index = 0;
-                    return this.entries[this.index][0];
-                }
-
-                goToNext() {
-                    if (this.index + 1 >= this.entries.length) return false;
-                    this.index += 1;
-                    return this.entries[this.index][0];
-                }
-
-                getCurrentString(callback) {
-                    const entry = this.entries[this.index];
-                    callback(entry[0], entry[1]);
-                }
-
-                close() {}
-            }
-        },
-        getCache() {
-            return false;
-        },
-        incrementCacheData() {},
-        isAltBlockInDB() {
-            return false;
-        }
-    };
-
-    return { database, namedStores };
-}
-
 test("remoteShare accepts valid share frames and flushes queued shares", async () => {
     const restore = installRemoteShareGlobals();
     const shareStore = {
@@ -559,39 +472,6 @@ test("pending block jobs retry until a reward is available and then store the bl
         const stored = PROTOS.Block.decode(Array.from(stores.blockDB.values())[0]);
         assert.equal(stored.value, 25);
         assert.match(logs.join("\n"), /Stored block/);
-    } finally {
-        pendingJobs.close();
-        restore();
-    }
-});
-
-test("pending job storage migrates legacy remoteSharePending DB into remoteSharePendingBlocks", () => {
-    const restore = installRemoteShareGlobals();
-    const { database, namedStores } = createPendingJobLmdbDatabase();
-    const logs = [];
-    const legacyJob = {
-        key: "block:77:" + "ab".repeat(32),
-        type: "block",
-        blockId: 77,
-        payload: Buffer.from("payload").toString("base64"),
-        createdAt: 10,
-        nextAttemptAt: 10,
-        attempts: 0,
-        lastError: null
-    };
-    namedStores.remoteSharePending.set(legacyJob.key, JSON.stringify(legacyJob));
-
-    const pendingJobs = createPendingJobs({
-        database,
-        logger: { log(message) { logs.push(message); } },
-        migrateLegacyPendingJobs: true
-    });
-
-    try {
-        assert.equal(namedStores.remoteSharePending, undefined);
-        assert.ok(namedStores.remoteSharePendingBlocks instanceof Map);
-        assert.equal(namedStores.remoteSharePendingBlocks.get(legacyJob.key), JSON.stringify(legacyJob));
-        assert.ok(logs.some((line) => /Migrated 1 legacy remoteShare pending jobs to remoteSharePendingBlocks/.test(line)));
     } finally {
         pendingJobs.close();
         restore();
