@@ -184,6 +184,102 @@ test("wallet reward selectors stay on the coin profiles for asset-aware chains",
     }), 7);
 });
 
+test("eth-style hash lookups preserve hex block heights when deriving canonical headers", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const etcRpc = coinFuncs.getRpcSettings("ETC");
+    const seenHeights = [];
+    let callbackArgs = null;
+
+    await new Promise((resolve) => {
+        etcRpc.getAnyBlockHeaderByHash({
+            blockHash: "9c571133e4a54f922fd497d1b80bf0e964dd799faa5dd1f24926359b57a62dea",
+            callback(err, body) {
+                callbackArgs = { err, body };
+                resolve();
+            },
+            isOurBlock: true,
+            noErrorReport: true,
+            port: REAL_ETH_STYLE_PORT,
+            runtime: {
+                async: require("async"),
+                coinFuncs: {
+                    getPortBlockHeaderByID(_port, blockHeight, callback) {
+                        seenHeights.push(blockHeight);
+                        callback(true, null);
+                    }
+                },
+                support: {
+                    rpcPortDaemon2(_port, _method, _params, callback) {
+                        callback({
+                            jsonrpc: "2.0",
+                            id: 1,
+                            result: {
+                                number: "0x1403059",
+                                hash: "0x9c571133e4a54f922fd497d1b80bf0e964dd799faa5dd1f24926359b57a62dea",
+                                transactions: [],
+                                uncles: []
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    });
+
+    assert.deepEqual(seenHeights, [20983897]);
+    assert.equal(callbackArgs.err, true);
+    assert.equal(callbackArgs.body.result.number, "0x1403059");
+});
+
+test("eth-style hash lookups propagate nested callback stalls as errors", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const etcRpc = coinFuncs.getRpcSettings("ETC");
+    const originalSetTimeout = global.setTimeout;
+
+    try {
+        global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
+            return originalSetTimeout(fn, delay === 30 * 1000 ? 10 : delay, ...args);
+        };
+
+        const result = await new Promise((resolve) => {
+            etcRpc.getAnyBlockHeaderByHash({
+                blockHash: "9c571133e4a54f922fd497d1b80bf0e964dd799faa5dd1f24926359b57a62dea",
+                callback(err, body) {
+                    resolve({ err, body });
+                },
+                isOurBlock: true,
+                noErrorReport: true,
+                port: REAL_ETH_STYLE_PORT,
+                runtime: {
+                    async: require("async"),
+                    coinFuncs: {
+                        getPortBlockHeaderByID() {}
+                    },
+                    support: {
+                        rpcPortDaemon2(_port, _method, _params, callback) {
+                            callback({
+                                jsonrpc: "2.0",
+                                id: 1,
+                                result: {
+                                    number: "0x1403059",
+                                    hash: "0x9c571133e4a54f922fd497d1b80bf0e964dd799faa5dd1f24926359b57a62dea",
+                                    transactions: [],
+                                    uncles: []
+                                }
+                            });
+                        }
+                    }
+                }
+            });
+        });
+
+        assert.equal(result.err, true);
+        assert.match(result.body.error.message, /timed out/);
+    } finally {
+        global.setTimeout = originalSetTimeout;
+    }
+});
+
 test("blob helpers preserve special nonce sizes, proof sizes, and wire names for pool families", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
 
