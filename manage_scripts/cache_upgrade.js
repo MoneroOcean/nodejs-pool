@@ -1,13 +1,10 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
-const user = argv.user ? argv.user : null;
+const cli = require("../script_utils.js")();
+const user = cli.get("user");
 
-require("../init_mini.js").init(function() {
-	let txn = global.database.env.beginTxn({readOnly: true});
-	let cursor = new global.database.lmdb.Cursor(txn, global.database.cacheDB);
-	for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
-        	cursor.getCurrentString(function(key, data){  // jshint ignore:line
+cli.init(function() {
+	cli.forEachStringEntry(global.database.cacheDB, function (key, data) {
 			if (key.length < 95) { // min XMR address length
 				if (key.includes("history:") || key.includes("stats:") || key.includes("identifiers:")) {
 					console.log(key + ": removing bad key");
@@ -70,9 +67,6 @@ require("../init_mini.js").init(function() {
 				}
 			}
 			txn2.commit();
-		});
-	}
-	cursor.close();
-        txn.commit();
+	});
 	process.exit(0);
 });

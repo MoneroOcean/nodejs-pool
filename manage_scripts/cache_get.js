@@ -1,14 +1,9 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const key = cli.arg("key", "Please specify key");
 
-if (!argv.key) {
-	console.error("Please specify key");
-	process.exit(1);
-}
-const key = argv.key;
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
 	let value = global.database.getCache(key);
 	if (value !== false) {
 		console.log(JSON.stringify(value));
@@ -18,4 +13,3 @@ require("../init_mini.js").init(function() {
 		process.exit(1);
 	}
 });
-

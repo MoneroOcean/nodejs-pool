@@ -1,14 +1,9 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const port = cli.arg("port", "Please specify port");
 
-if (!argv.port) {
-	console.error("Please specify port");
-	process.exit(1);
-}
-const port = argv.port;
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
   global.coinFuncs.getPortBlockTemplate(port, function (body_header) {
     console.log("body:" + JSON.stringify(body_header));
     process.exit(0);

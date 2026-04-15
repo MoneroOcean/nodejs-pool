@@ -1,26 +1,11 @@
 "use strict";
-const mysql = require("promise-mysql");
-const async = require("async");
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const userDb = require("./user_db_common.js");
+const user = cli.arg("user", "Please specify user address to set");
 
-if (!argv.user) {
-	console.error("Please specify user address to set");
-	process.exit(1);
-}
-const user = argv.user;
-
-require("../init_mini.js").init(function() {
-        const pay = global.support.decimalToCoin(argv.pay ? argv.pay : 0.003);
-	async.waterfall([
-		function (callback) {
-			global.mysql.query("UPDATE users SET payout_threshold=? WHERE username=?", [pay, user]).then(function (rows) {
-				console.log("UPDATE users SET payout_threshold=" + pay + " WHERE username=" + user);
-				callback();
-			});
-		},
-		function (callback) {
-			console.log("Done.");
-			process.exit(0);
-	        }
-	]);
+cli.init(function() {
+        const pay = global.support.decimalToCoin(cli.get("pay", 0.003));
+	userDb.runLoggedQuery("UPDATE users SET payout_threshold=? WHERE username=?", [pay, user], "UPDATE users SET payout_threshold=" + pay + " WHERE username=" + user).then(function () {
+		userDb.finish("Done.");
+	});
 });

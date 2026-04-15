@@ -1,14 +1,9 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const timestamp = cli.arg("timestamp", "Please specify altblock time");
 
-if (!argv.timestamp) {
-	console.error("Please specify altblock time");
-	process.exit(1);
-}
-const timestamp = argv.timestamp;
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
         let txn = global.database.env.beginTxn();
 	txn.del(global.database.altblockDB, timestamp);
         txn.commit();

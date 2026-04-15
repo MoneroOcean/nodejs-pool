@@ -1,20 +1,10 @@
 "use strict";
 
-const argv = require('../parse_args')(process.argv.slice(2));
+const cli = require("../script_utils.js")();
+const port = cli.arg("port", "Please specify port");
+const hash = cli.arg("hash", "Please specify hash");
 
-if (!argv.port) {
-	console.error("Please specify port");
-	process.exit(1);
-}
-const port = argv.port;
-
-if (!argv.hash) {
-	console.error("Please specify hash");
-	process.exit(1);
-}
-const hash = argv.hash;
-
-require("../init_mini.js").init(function() {
+cli.init(function() {
   global.coinFuncs.getPortAnyBlockHeaderByHash(port, hash, false, function (err_header, body_header) {
     console.log("err:"  + JSON.stringify(err_header));
     console.log("body:" + JSON.stringify(body_header));
