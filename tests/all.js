@@ -22,6 +22,7 @@ require("./pool_remote_uplink.js");
 require("./pool-validation.js");
 require("./pool-runtime.js");
 require("./remote_share.js");
+require("./support.js");
 
 test("live miner integration suite", { timeout: 60 * 60 * 1000 }, async (t) => {
     if (!(await isDefaultTargetReachable())) {
