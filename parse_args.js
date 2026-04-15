@@ -2,9 +2,8 @@
 
 const { parseArgs } = require("node:util");
 
-module.exports = function parseArgv(args, options) {
-    const config = options || {};
-    const captureRemainder = config["--"] === true;
+module.exports = function parseArgv(args, options = {}) {
+    const captureRemainder = options["--"] === true;
     const parsed = parseArgs({
         args: args,
         options: {},
