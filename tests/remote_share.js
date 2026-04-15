@@ -82,6 +82,12 @@ function installRemoteShareGlobals(overrides) {
         },
         COIN2PORT() {
             return 18081;
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
         }
     };
     global.support = {
@@ -115,6 +121,9 @@ function createMapStorage() {
                 .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt || left.createdAt - right.createdAt)
                 .slice(0, limit)
                 .map((job) => ({ ...job }));
+        },
+        loadAllJobs() {
+            return Array.from(jobs.values()).map((job) => ({ ...job }));
         },
         close() {}
     };
@@ -357,10 +366,11 @@ test("remoteShare logs ingress summaries for accepted and rejected frames", asyn
 
         assert.ok(logs.some((line) => (
             line.includes("(Single) Ingress summary:") &&
-            /requests=4/.test(line) &&
-            /share=2 shareAccepted=1/.test(line) &&
-            /status=200:1,400:2,403:1,500:0/.test(line) &&
-            /rejects=frame:1,auth:1,share:1,block:0,alt:0,invalidShare:0,unknown:0/.test(line)
+            /req=4/.test(line) &&
+            /ok=1/.test(line) &&
+            /share=1/.test(line) &&
+            /fail=400:2,403:1/.test(line) &&
+            /reject=frame:1,auth:1,share:1/.test(line)
         )));
     } finally {
         console.log = originalConsoleLog;
@@ -437,6 +447,12 @@ test("pending block jobs retry until a reward is available and then store the bl
         },
         getPoolProfile() {
             return { pool: {} };
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
         }
     };
 
@@ -494,6 +510,12 @@ test("pending altblock jobs do not spam repeated waiting-for-depth logs", () => 
                     unlockConfirmationDepth: 5
                 }
             };
+        },
+        PORT2COIN() {
+            return "WOW";
+        },
+        PORT2COIN_FULL() {
+            return "WOW";
         }
     };
 
@@ -527,9 +549,121 @@ test("pending altblock jobs do not spam repeated waiting-for-depth logs", () => 
 
         assert.equal(storage.jobs.size, 1);
         assert.equal(logs.filter((line) => line.includes("Waiting for depth")).length, 1);
+        assert.equal(logs.some((line) => line.includes("WOW(19994)")), true);
         assert.equal(logs.some((line) => line.includes("Pausing altblock")), false);
     } finally {
         pendingJobs.close();
+        restore();
+    }
+});
+
+test("pending block summary groups jobs by coin and port", () => {
+    const restore = installRemoteShareGlobals();
+    const { database } = createPendingJobDatabase();
+    const storage = createMapStorage();
+
+    global.coinFuncs = {
+        getPoolProfile() {
+            return { pool: {} };
+        },
+        PORT2COIN(port) {
+            return port === 11812 ? "AEON" : "XMR";
+        },
+        PORT2COIN_FULL(port) {
+            return port === 11812 ? "AEON" : "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log() {} },
+        storage
+    });
+
+    try {
+        pendingJobs.enqueueBlock(10, PROTOS.Block.encode({
+            hash: "01".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true
+        }), { hash: "01".repeat(32) });
+        pendingJobs.enqueueAltBlock(11, PROTOS.AltBlock.encode({
+            hash: "02".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true,
+            port: 11812,
+            height: 1000,
+            anchor_height: 999
+        }), {
+            hash: "02".repeat(32),
+            port: 11812,
+            height: 1000
+        });
+        pendingJobs.enqueueAltBlock(12, PROTOS.AltBlock.encode({
+            hash: "03".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true,
+            port: 11812,
+            height: 1001,
+            anchor_height: 1000
+        }), {
+            hash: "03".repeat(32),
+            port: 11812,
+            height: 1001
+        });
+
+        assert.equal(pendingJobs.getPendingSummary(), "Pending blocks: total=3 AEON(11812)=2 XMR(18081)=1");
+    } finally {
+        pendingJobs.close();
+        restore();
+    }
+});
+
+test("remoteShare logs periodic pending block summaries with coin labels", async () => {
+    const restore = installRemoteShareGlobals();
+    const originalConsoleLog = console.log;
+    const logs = [];
+    console.log = function captureLog(message) {
+        logs.push(message);
+    };
+
+    const runtime = createRemoteShareRuntime({
+        clusterEnabled: false,
+        host: "127.0.0.1",
+        port: 0,
+        pendingJobs: {
+            enqueueBlock() {},
+            enqueueAltBlock() {},
+            processDueJobs() {},
+            getPendingSummary() {
+                return "Pending blocks: total=3 WOW(11812)=1 XMR(18081)=2";
+            },
+            close() {}
+        },
+        shareStore: {
+            storeShares() {}
+        },
+        shareSummaryIntervalMs: 20
+    });
+
+    try {
+        runtime.start();
+        await wait(50);
+        assert.equal(logs.some((line) => line.includes("(Single) Pending blocks: total=3 WOW(11812)=1 XMR(18081)=2")), true);
+    } finally {
+        console.log = originalConsoleLog;
+        await runtime.stop();
         restore();
     }
 });
