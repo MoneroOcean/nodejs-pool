@@ -628,6 +628,84 @@ test("pending block jobs retry until a reward is available and then store the bl
     }
 });
 
+test("pending block jobs back off retries and cap the delay", () => {
+    const restore = installRemoteShareGlobals();
+    const { database } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    const originalDateNow = Date.now;
+    let fakeNow = 1000;
+
+    Date.now = () => fakeNow;
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback) {
+            callback(true, null);
+        },
+        getPoolProfile() {
+            return { pool: {} };
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log() {} },
+        retryDelayMs: 10,
+        maxRetryDelayMs: 80,
+        storage
+    });
+
+    try {
+        const block = {
+            hash: "ab".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: fakeNow,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true
+        };
+        pendingJobs.enqueueBlock(13, PROTOS.Block.encode(block), block);
+
+        pendingJobs.processDueJobs();
+        let retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.attempts, 1);
+        assert.equal(retryJob.nextAttemptAt, 1010);
+
+        fakeNow = 2000;
+        pendingJobs.processDueJobs();
+        retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.attempts, 2);
+        assert.equal(retryJob.nextAttemptAt, 2020);
+
+        fakeNow = 3000;
+        pendingJobs.processDueJobs();
+        retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.attempts, 3);
+        assert.equal(retryJob.nextAttemptAt, 3040);
+
+        fakeNow = 4000;
+        pendingJobs.processDueJobs();
+        retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.attempts, 4);
+        assert.equal(retryJob.nextAttemptAt, 4080);
+
+        fakeNow = 5000;
+        pendingJobs.processDueJobs();
+        retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.attempts, 5);
+        assert.equal(retryJob.nextAttemptAt, 5080);
+    } finally {
+        Date.now = originalDateNow;
+        pendingJobs.close();
+        restore();
+    }
+});
+
 test("pending job close waits for in-flight processing before closing storage", async () => {
     const restore = installRemoteShareGlobals();
     const { database } = createPendingJobDatabase();
@@ -715,7 +793,10 @@ test("pending altblock jobs do not spam repeated waiting-for-depth logs", () => 
     const { database } = createPendingJobDatabase();
     const storage = createMapStorage();
     const logs = [];
+    const originalDateNow = Date.now;
+    let fakeNow = 1000;
 
+    Date.now = () => fakeNow;
     global.coinFuncs = {
         getPortBlockHeaderByHash(_port, _hash, callback) {
             callback(null, { reward: 11, depth: 1 });
@@ -758,18 +839,24 @@ test("pending altblock jobs do not spam repeated waiting-for-depth logs", () => 
         pendingJobs.enqueueAltBlock(25, PROTOS.AltBlock.encode(altBlock), altBlock);
 
         pendingJobs.processDueJobs();
-        const retryJob = Array.from(storage.jobs.values())[0];
-        retryJob.nextAttemptAt = 0;
-        storage.save(retryJob);
+        let retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.attempts, 1);
+        assert.equal(retryJob.nextAttemptAt, 1001);
+
+        fakeNow = 2000;
         pendingJobs.processDueJobs();
+        retryJob = Array.from(storage.jobs.values())[0];
 
         assert.equal(storage.jobs.size, 1);
+        assert.equal(retryJob.attempts, 2);
+        assert.equal(retryJob.nextAttemptAt, 2001);
         assert.equal(logs.filter((line) => line.includes("waiting for maturity")).length, 1);
         assert.equal(logs.some((line) => line.includes("Altblock WOW/19994 height 1000")), true);
         assert.equal(logs.some((line) => line.includes("waiting for maturity")), true);
         assert.equal(logs.some((line) => line.includes("1/5")), false);
         assert.equal(logs.some((line) => line.includes("Pausing altblock")), false);
     } finally {
+        Date.now = originalDateNow;
         pendingJobs.close();
         restore();
     }
