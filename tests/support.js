@@ -187,4 +187,51 @@ test.describe("support", { concurrency: false }, () => {
             restore();
         }
     });
+
+    test("rpcPortDaemon2 logs transport errors without stack traces", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const originalConsoleError = console.error;
+        const support = supportFactory();
+        const errors = [];
+
+        console.error = function captureConsoleError(message) {
+            errors.push(String(message));
+        };
+        http.request = function fakeRequest() {
+            const request = createRequest();
+
+            setImmediate(function failRequest() {
+                const error = new Error("socket hang up");
+                error.stack = [
+                    "Error: socket hang up",
+                    "    at Socket.socketOnEnd (node:_http_client:524:23)",
+                    "    at Socket.emit (node:events:530:35)",
+                    "    at endReadableNT (node:internal/streams/readable:1696:12)"
+                ].join("\n");
+                request.emit("error", error);
+            });
+
+            return request;
+        };
+
+        try {
+            const result = await new Promise((resolve) => {
+                support.rpcPortDaemon2(18081, "", { ping: true }, function onReply(reply) {
+                    resolve(reply);
+                });
+            });
+
+            assert.equal(result instanceof Error, true);
+            assert.equal(errors.length, 1);
+            assert.equal(errors[0].includes("\n"), false);
+            assert.match(errors[0], /Error doing http:\/\/127\.0\.0\.1:18081\//);
+            assert.match(errors[0], /Error: socket hang up$/);
+            assert.doesNotMatch(errors[0], /Socket\.socketOnEnd|Socket\.emit|endReadableNT/);
+        } finally {
+            console.error = originalConsoleError;
+            http.request = originalRequest;
+            restore();
+        }
+    });
 });
