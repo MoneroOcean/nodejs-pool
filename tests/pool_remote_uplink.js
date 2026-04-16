@@ -4,7 +4,8 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 
-test("pool remote uplink posts raw share payloads as application/octet-stream", async () => {
+test.describe("pool remote uplink", { concurrency: false }, () => {
+test("posts raw share payloads as application/octet-stream", async () => {
     const Database = require("../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const handles = [];
@@ -72,7 +73,7 @@ test("pool remote uplink posts raw share payloads as application/octet-stream", 
     }
 });
 
-test("pool remote uplink queue monitor emits FYI backlog email once threshold is reached", async () => {
+test("queue monitor emits FYI backlog email once threshold is reached", async () => {
     const Database = require("../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const intervals = [];
@@ -128,7 +129,7 @@ test("pool remote uplink queue monitor emits FYI backlog email once threshold is
     }
 });
 
-test("pool remote uplink queue monitor reports failed response statuses", async () => {
+test("queue monitor reports failed response statuses", async () => {
     const Database = require("../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const originalConsoleLog = console.log;
@@ -190,4 +191,5 @@ test("pool remote uplink queue monitor reports failed response statuses", async 
             await new Promise((resolve) => server.close(resolve));
         }
     }
+});
 });

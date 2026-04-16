@@ -2,12 +2,15 @@
 
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const test = require("node:test");
 
 const {
     MAIN_PORT,
     ETH_PORT,
     MAIN_WALLET,
+    ALT_WALLET,
     ETH_WALLET,
     VALID_RESULT,
     JsonLineClient,
@@ -42,6 +45,7 @@ const RX0_MAIN_SHARE_VECTORS = [
         input: "sed do eiusmod tempor incididunt ut labore et dolore magna aliqua"
     }
 ];
+const ZERO_RESULT = "00".repeat(32);
 
 function buildMainShareResult(runtime, socket, jobId, nonce) {
     const miner = runtime.getState().activeMiners.get(socket.miner_id);
@@ -75,6 +79,136 @@ async function flushShareAccumulator(check, timeout = 200) {
     }
     if (!check || check()) return;
     throw new Error("Timed out waiting for deferred share flush");
+}
+
+async function enableBlockSubmitTestMode() {
+    const markerPath = poolModule.getBlockSubmitTestModeState().markerPath;
+    await fsp.writeFile(markerPath, "test\n");
+    poolModule.refreshBlockSubmitTestMode();
+    return markerPath;
+}
+
+async function disableBlockSubmitTestMode(markerPath) {
+    await fsp.rm(markerPath, { force: true });
+}
+
+function createBlockSubmitTemplates(idHash) {
+    return [
+        {
+            ...createBaseTemplate({ coin: "", port: MAIN_PORT, idHash, height: 101 }),
+            difficulty: 1
+        },
+        createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
+    ];
+}
+
+function createFrozenTime(startAt) {
+    const originalNow = Date.now;
+    let now = startAt;
+    Date.now = () => now;
+    return {
+        advance(ms) {
+            now += ms;
+        },
+        restore() {
+            Date.now = originalNow;
+        }
+    };
+}
+
+async function setBlockSubmitTestMarker(markerPath, enabled) {
+    if (enabled) {
+        await fsp.writeFile(markerPath, "enabled\n");
+        return;
+    }
+    await disableBlockSubmitTestMode(markerPath);
+}
+
+async function withBlockSubmitTestMode(fn) {
+    const markerPath = await enableBlockSubmitTestMode();
+    try {
+        return await fn(markerPath);
+    } finally {
+        await disableBlockSubmitTestMode(markerPath);
+        poolModule.refreshBlockSubmitTestMode();
+    }
+}
+
+function getLoginJobId(loginReply) {
+    return loginReply.replies[0].result.job.job_id;
+}
+
+function loginMainMiner(socket, id, pass, options) {
+    const { ip, login = MAIN_WALLET } = options || {};
+    return invokePoolMethod({
+        socket,
+        id,
+        method: "login",
+        ip,
+        params: { login, pass }
+    });
+}
+
+function submitMainBlockCandidate(socket, id, jobId, options) {
+    const {
+        ip,
+        nonce = "0000002a",
+        result = ZERO_RESULT,
+        extraParams = {}
+    } = options || {};
+    return invokePoolMethod({
+        socket,
+        id,
+        method: "submit",
+        ip,
+        params: {
+            id: socket.miner_id,
+            job_id: jobId,
+            nonce,
+            result,
+            ...extraParams
+        }
+    });
+}
+
+function authorizeEthMiner(socket, authorizeId, pass) {
+    const subscribeReply = invokePoolMethod({
+        socket,
+        id: authorizeId - 1,
+        method: "mining.subscribe",
+        params: ["HarnessEthMiner/1.0"],
+        portData: global.config.ports[1]
+    });
+    assert.equal(subscribeReply.replies[0].error, null);
+
+    const authorizeReply = invokePoolMethod({
+        socket,
+        id: authorizeId,
+        method: "mining.authorize",
+        params: [ETH_WALLET, pass],
+        portData: global.config.ports[1]
+    });
+    assert.deepEqual(authorizeReply.replies, [{ error: null, result: true }]);
+    const notifyPush = authorizeReply.pushes.find((message) => message.method === "mining.notify");
+    assert.ok(notifyPush);
+    return notifyPush;
+}
+
+function submitEthBlockCandidate(socket, id, notifyPush, result = ZERO_RESULT) {
+    return invokePoolMethod({
+        socket,
+        id,
+        method: "mining.submit",
+        params: [
+            ETH_WALLET,
+            notifyPush.params[0],
+            "0x000000000000002a",
+            `0x${notifyPush.params[1]}`,
+            `0x${"11".repeat(32)}`,
+            `0x${result}`
+        ],
+        portData: global.config.ports[1]
+    });
 }
 
 async function requestRawJson(socket, body) {
@@ -593,6 +727,189 @@ test("first-share bogus block candidates are verified locally before any daemon 
         assert.equal(database.invalidShares.length, 0);
         assert.equal(runtime.getState().shareStats.invalidShares, 1);
     } finally {
+        await runtime.stop();
+    }
+});
+
+test("block-submit test mode caches marker changes for five seconds", async () => {
+    const { runtime } = await startHarness();
+    const markerPath = poolModule.getBlockSubmitTestModeState().markerPath;
+    const clock = createFrozenTime(1700000000000);
+
+    try {
+        await disableBlockSubmitTestMode(markerPath);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), false);
+        await setBlockSubmitTestMarker(markerPath, true);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), false);
+        clock.advance(5001);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
+        await setBlockSubmitTestMarker(markerPath, false);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
+        clock.advance(5001);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), false);
+    } finally {
+        clock.restore();
+        await disableBlockSubmitTestMode(markerPath);
+        await runtime.stop();
+    }
+});
+
+test("startTestRuntime removes a stale block-submit marker file on startup", async () => {
+    const markerPath = poolModule.getBlockSubmitTestModeState().markerPath;
+    const clock = createFrozenTime(1700000205000);
+    let runtime;
+
+    try {
+        await setBlockSubmitTestMarker(markerPath, true);
+        clock.advance(5001);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
+        ({ runtime } = await startHarness());
+        assert.equal(fs.existsSync(markerPath), false);
+        const modeState = poolModule.getBlockSubmitTestModeState();
+        assert.equal(modeState.enabled, false);
+        assert.equal(modeState.lastCheckAt, 0);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), false);
+    } finally {
+        clock.restore();
+        await disableBlockSubmitTestMode(markerPath);
+        if (runtime) await runtime.stop();
+    }
+});
+
+test("block-submit test mode lets a fresh wallet reach daemon submit without sending failure email", async () => {
+    const { runtime, database } = await startHarness({
+        templates: createBlockSubmitTemplates("main-block-submit-test-mode")
+    });
+    const socket = {};
+    const originalRpcPortDaemon = global.support.rpcPortDaemon;
+
+    try {
+        await withBlockSubmitTestMode(async () => {
+            global.support.rpcPortDaemon = function rpcPortDaemonFailure(port, method, params, callback) {
+                this.rpcPortDaemonCalls.push({ port, method, params });
+                callback({ result: "high-hash" }, 200);
+            };
+
+            const loginReply = loginMainMiner(socket, 3001, "worker-block-submit-test-mode");
+            const submitReply = submitMainBlockCandidate(socket, 3002, getLoginJobId(loginReply));
+
+            await flushTimers();
+            assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+            assert.equal(global.support.rpcPortDaemonCalls.length, 1);
+            assert.equal(global.support.rpcPortDaemonCalls[0].method, "submitblock");
+            assert.equal(global.support.emails.length, 0);
+            assert.equal(database.blocks.length, 0);
+            assert.equal(database.altBlocks.length, 0);
+            assert.equal(database.shares.length, 0);
+            assert.equal(MAIN_WALLET in runtime.getState().walletTrust, false);
+        });
+    } finally {
+        global.support.rpcPortDaemon = originalRpcPortDaemon;
+        await runtime.stop();
+    }
+});
+
+test("block-submit test mode lets eth-style submits reach daemon with an appended synthetic result", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
+
+    try {
+        await withBlockSubmitTestMode(async () => {
+            global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+                if (port === ETH_PORT) return 102;
+                return originalPortBlobType.call(this, port);
+            };
+            runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
+            global.support.rpcPortDaemon2 = function rpcPortDaemonFailure(port, method, params, callback) {
+                this.rpcPortDaemon2Calls.push({ port, method, params });
+                callback({ error: "test-fail" }, 200);
+            };
+
+            const notifyPush = authorizeEthMiner(socket, 3004, "worker-block-submit-eth");
+            const submitReply = submitEthBlockCandidate(socket, 3005, notifyPush);
+
+            await flushTimers();
+            assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
+            assert.equal(global.support.rpcPortDaemon2Calls.length, 1);
+            assert.equal(global.support.rpcPortDaemon2Calls[0].params.method, "eth_submitWork");
+            assert.equal(global.support.emails.length, 0);
+        });
+    } finally {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+        global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
+        await runtime.stop();
+    }
+});
+
+test("block-submit test mode ignores synthetic-result bypass requests from non-loopback miners", async () => {
+    const { runtime } = await startHarness({
+        templates: createBlockSubmitTemplates("main-block-submit-test-non-loopback")
+    });
+    const socket = {};
+
+    try {
+        await withBlockSubmitTestMode(async () => {
+            const loginReply = loginMainMiner(socket, 30055, "worker-block-submit-remote", { ip: "10.9.8.7" });
+            const submitReply = submitMainBlockCandidate(socket, 30056, getLoginJobId(loginReply), {
+                ip: "10.9.8.7",
+                nonce: "0000002d",
+                extraParams: { block_submit_test_result: ZERO_RESULT }
+            });
+
+            await flushTimers();
+            assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+            assert.equal(global.support.rpcPortDaemonCalls.length, 0);
+            assert.equal(global.support.emails.length, 0);
+        });
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("block-submit test mode stops daemon-first submits once the marker is removed", async () => {
+    const { runtime } = await startHarness({
+        templates: createBlockSubmitTemplates("main-block-submit-test-mode-off")
+    });
+    const socketEnabled = {};
+    const socketDisabled = {};
+    const clock = createFrozenTime(1700000100000);
+    const originalRpcPortDaemon = global.support.rpcPortDaemon;
+    const markerPath = poolModule.getBlockSubmitTestModeState().markerPath;
+
+    try {
+        global.support.rpcPortDaemon = function rpcPortDaemonFailure(port, method, params, callback) {
+            this.rpcPortDaemonCalls.push({ port, method, params });
+            callback({ result: "high-hash" }, 200);
+        };
+
+        await setBlockSubmitTestMarker(markerPath, true);
+        clock.advance(5001);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
+
+        const enabledLoginReply = loginMainMiner(socketEnabled, 3003, "worker-block-submit-enabled");
+        const enabledSubmitReply = submitMainBlockCandidate(socketEnabled, 3006, getLoginJobId(enabledLoginReply), { nonce: "0000002b" });
+
+        await flushTimers();
+        assert.deepEqual(enabledSubmitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 1);
+
+        await setBlockSubmitTestMarker(markerPath, false);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
+        clock.advance(5001);
+        assert.equal(poolModule.refreshBlockSubmitTestMode(), false);
+
+        const disabledLoginReply = loginMainMiner(socketDisabled, 3005, "worker-block-submit-disabled", { login: ALT_WALLET });
+        const disabledSubmitReply = submitMainBlockCandidate(socketDisabled, 3007, getLoginJobId(disabledLoginReply), { nonce: "0000002c" });
+
+        await flushTimers();
+        assert.deepEqual(disabledSubmitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 1);
+    } finally {
+        clock.restore();
+        global.support.rpcPortDaemon = originalRpcPortDaemon;
+        await disableBlockSubmitTestMode(markerPath);
         await runtime.stop();
     }
 });
