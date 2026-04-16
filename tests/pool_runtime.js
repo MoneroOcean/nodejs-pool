@@ -1220,6 +1220,74 @@ test("successful alt-chain block candidates are stored as alt blocks", async () 
     }
 });
 
+test("accepted block submits with unresolved zero hashes are dropped before storage and alert admin", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
+            {
+                ...createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-zero-hash-drop", height: 201 }),
+                difficulty: 5
+            }
+        ]
+    });
+    const client = new JsonLineClient(ETH_PORT);
+    const errorLogs = [];
+    const originalConsoleError = console.error;
+    const ethPool = global.coinFuncs.getPoolSettings(ETH_PORT);
+    const originalResolveSubmittedBlockHash = ethPool.resolveSubmittedBlockHash;
+
+    try {
+        console.error = function captureError(message) {
+            errorLogs.push(String(message));
+        };
+        ethPool.resolveSubmittedBlockHash = function resolveSubmittedBlockHash(_ctx, callback) {
+            callback(ZERO_RESULT);
+        };
+        await client.connect();
+
+        await client.request({
+            id: 204,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+
+        const authorizeReply = await client.request({
+            id: 205,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "worker-block-zero-hash"]
+        });
+        assert.equal(authorizeReply.error, null);
+
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+        const submitReply = await client.request({
+            id: 206,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000002",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ab".repeat(32)}`
+            ]
+        });
+
+        await flushTimers();
+        assert.equal(submitReply.error, null);
+        assert.equal(submitReply.result, true);
+        assert.equal(database.blocks.length, 0);
+        assert.equal(database.altBlocks.length, 0);
+        assert.equal(global.support.emails.length, 1);
+        assert.match(global.support.emails[0].subject, /Dropped unresolved zero-hash block/);
+        assert.match(global.support.emails[0].body, /Block hash unresolved/);
+        assert.equal(errorLogs.some((line) => line.includes("Block hash unresolved")), true);
+    } finally {
+        console.error = originalConsoleError;
+        ethPool.resolveSubmittedBlockHash = originalResolveSubmittedBlockHash;
+        await client.close();
+        await runtime.stop();
+    }
+});
+
 test("block submission failures reset wallet trust even when the share stays accepted", async () => {
     const { runtime } = await startHarness({
         templates: [
