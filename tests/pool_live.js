@@ -13,6 +13,7 @@ const tls = require("node:tls");
 const { spawn, spawnSync } = require("node:child_process");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
+const CryptoJS = require("crypto-js");
 
 const parseArgv = require("../parse_args.js");
 
@@ -21,7 +22,7 @@ const DEFAULT_TARGET_HOST = "localhost";
 const DEFAULT_TARGET_PORT = 20001;
 const DEFAULT_CACHE_DIR = path.join(ROOT_DIR, ".cache", "live-miners");
 const DEFAULT_LOG_DIR = path.join(ROOT_DIR, "test-artifacts", "live-pool");
-const DEFAULT_WALLET = "862wu9yae6qSUaUGz3KjjSeQ3xPKKxhzf8eYd9qXFx4eTpWm1qp6tvY9mzX4YiUQyYNdwZ9T8Muy1NfydEnExWkER25EfNj";
+const DEFAULT_WALLET = "499fS1Phq64hGeqV8p2AfXbf6Ax7gP6FybcMJq6Wbvg8Hw6xms8tCmdYpPsTLSaTNuLEtW4kF2DDiWCFcw4u7wSvFD8wFWE";
 const DEFAULT_TIMEOUT_MS = 180000;
 const DEFAULT_THREADS = Math.max(1, os.availableParallelism());
 const DEFAULT_DIFFICULTY = 1;
@@ -42,6 +43,14 @@ const ARCHIVE_PATH_ESCAPE_PATTERN = /(^|\/)\.\.(\/|$)/;
 const USER_AGENT = "nodejs-pool-live-tests";
 const DIFF_SCALE = { "": 1, h: 1e2, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };
 const HASHRATE_SCALE = { "": 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };
+const MONERO_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const MONERO_FULL_BLOCK_ENCODED_SIZE = 11;
+const MONERO_FULL_BLOCK_DECODED_SIZE = 8;
+const MONERO_ENCODED_BLOCK_SIZES = [0, 2, 3, 5, 6, 7, 9, 10, 11];
+const MONERO_DECODED_BLOCK_SIZES = Object.freeze({ 2: 1, 3: 2, 5: 3, 6: 4, 7: 5, 9: 6, 10: 7, 11: 8 });
+const BLOCK_SUBMIT_TEST_MARKER_PATH = path.join(ROOT_DIR, ".pool-live-block-submit-test");
+const BLOCK_SUBMIT_TEST_MODE_WAIT_MS = 5500;
+const BASE_DIFF = (1n << 256n) - 1n;
 const words = (value) => value.trim().split(/\s+/).filter(Boolean);
 
 const EMBEDDED_ACTIVE_ALGOS = [
@@ -93,13 +102,13 @@ const PROTOCOL_PROBES = {
         useSubscribe: true
     },
     "login-bad-share": {
-        authorize({ config, password, worker }, id) {
+        authorize({ wallet, password, worker }, id) {
             return {
                 id,
                 jsonrpc: "2.0",
                 method: "login",
                 params: {
-                    login: config.wallet,
+                    login: wallet,
                     pass: password,
                     agent: "nodejs-pool-live-probe/1.0",
                     rigid: worker
@@ -172,12 +181,161 @@ function formatReadableTime(date) {
         .join(":");
 }
 
+function emitLiveStatus(status, label, detail = "") {
+    emitProgress(`[${formatReadableTime(new Date())}] ${status} ${label}${detail ? ` ${detail}` : ""}`);
+}
+
+function firstLine(value) {
+    return String(value || "").split(/\r?\n/, 1)[0] || "";
+}
+
+function tailText(value, maxChars = 4000) {
+    const text = String(value || "").trim();
+    if (!text || text.length <= maxChars) return text;
+    return `...${text.slice(-maxChars)}`;
+}
+
 async function readTextFileIfExists(filePath) {
     try {
         return await fsp.readFile(filePath, "utf8");
     } catch (_error) {
         return "";
     }
+}
+
+function keccak256(buffer) {
+    const hash = CryptoJS.SHA3(CryptoJS.lib.WordArray.create(buffer), { outputLength: 256 });
+    return Buffer.from(hash.toString(CryptoJS.enc.Hex), "hex");
+}
+
+function encodeVarint(value) {
+    let current = BigInt(value);
+    const bytes = [];
+    do {
+        let byte = Number(current & 0x7fn);
+        current >>= 7n;
+        if (current > 0n) byte |= 0x80;
+        bytes.push(byte);
+    } while (current > 0n);
+    return Buffer.from(bytes);
+}
+
+function decodeVarint(buffer, offset = 0) {
+    let value = 0n;
+    let shift = 0n;
+    let index = offset;
+    for (; index < buffer.length; ++index) {
+        const byte = BigInt(buffer[index]);
+        value |= (byte & 0x7fn) << shift;
+        if ((byte & 0x80n) === 0n) {
+            return { value: Number(value), size: index - offset + 1 };
+        }
+        shift += 7n;
+    }
+    throw new Error("Invalid Monero varint encoding");
+}
+
+function moneroBase58Decode(value) {
+    const alphabetMap = new Map(Array.from(MONERO_BASE58_ALPHABET).map((character, index) => [character, BigInt(index)]));
+    const chunks = [];
+
+    for (let offset = 0; offset < value.length; ) {
+        const encodedSize = Math.min(MONERO_FULL_BLOCK_ENCODED_SIZE, value.length - offset);
+        const decodedSize = MONERO_DECODED_BLOCK_SIZES[encodedSize];
+        if (!decodedSize) throw new Error(`Unsupported Monero base58 block size: ${encodedSize}`);
+
+        let numericValue = 0n;
+        for (const character of value.slice(offset, offset + encodedSize)) {
+            const digit = alphabetMap.get(character);
+            if (typeof digit === "undefined") throw new Error(`Invalid Monero base58 character: ${character}`);
+            numericValue = numericValue * 58n + digit;
+        }
+
+        const limit = 1n << BigInt(decodedSize * 8);
+        if (numericValue >= limit) throw new Error(`Monero base58 block overflow for ${encodedSize}-char chunk`);
+
+        const block = Buffer.alloc(decodedSize);
+        for (let index = decodedSize - 1; index >= 0; --index) {
+            block[index] = Number(numericValue & 0xffn);
+            numericValue >>= 8n;
+        }
+        chunks.push(block);
+        offset += encodedSize;
+    }
+
+    return Buffer.concat(chunks);
+}
+
+function moneroBase58Encode(buffer) {
+    let encoded = "";
+
+    for (let offset = 0; offset < buffer.length; offset += MONERO_FULL_BLOCK_DECODED_SIZE) {
+        const decodedSize = Math.min(MONERO_FULL_BLOCK_DECODED_SIZE, buffer.length - offset);
+        const encodedSize = MONERO_ENCODED_BLOCK_SIZES[decodedSize];
+        if (!encodedSize) throw new Error(`Unsupported Monero decoded block size: ${decodedSize}`);
+
+        let numericValue = 0n;
+        for (const byte of buffer.subarray(offset, offset + decodedSize)) {
+            numericValue = (numericValue << 8n) + BigInt(byte);
+        }
+
+        let blockEncoded = "";
+        while (numericValue > 0n) {
+            const remainder = Number(numericValue % 58n);
+            numericValue /= 58n;
+            blockEncoded = MONERO_BASE58_ALPHABET[remainder] + blockEncoded;
+        }
+
+        encoded += blockEncoded.padStart(encodedSize, "1");
+    }
+
+    return encoded;
+}
+
+function decodeMoneroSeedAddress(seedAddress) {
+    const decoded = moneroBase58Decode(seedAddress);
+    if (decoded.length < 1 + 32 + 32 + 4) throw new Error("Seed address is too short");
+
+    const payload = decoded.subarray(0, decoded.length - 4);
+    const checksum = decoded.subarray(decoded.length - 4);
+    const expectedChecksum = keccak256(payload).subarray(0, 4);
+    if (!checksum.equals(expectedChecksum)) throw new Error("Seed address checksum mismatch");
+
+    const prefix = decodeVarint(decoded);
+    const spendKeyOffset = prefix.size;
+    const viewKeyOffset = spendKeyOffset + 32;
+    const checksumOffset = decoded.length - 4;
+    if (viewKeyOffset + 32 !== checksumOffset) throw new Error("Seed address does not look like a standard XMR address");
+
+    return {
+        plainPrefix: prefix.value,
+        integratedPrefix: prefix.value + 1,
+        spendKey: decoded.subarray(spendKeyOffset, spendKeyOffset + 32),
+        viewKey: decoded.subarray(viewKeyOffset, viewKeyOffset + 32)
+    };
+}
+
+function createRandomWalletAllocator(seedAddress, logger) {
+    const decodedSeed = decodeMoneroSeedAddress(seedAddress);
+
+    return function allocateWallet(label) {
+        const paymentId = crypto.randomBytes(8);
+        const payload = Buffer.concat([
+            encodeVarint(decodedSeed.integratedPrefix),
+            decodedSeed.spendKey,
+            decodedSeed.viewKey,
+            paymentId
+        ]);
+        const address = moneroBase58Encode(Buffer.concat([payload, keccak256(payload).subarray(0, 4)]));
+        if (logger) {
+            logger.event("wallet.generated", {
+                label,
+                address,
+                paymentId: paymentId.toString("hex")
+            });
+        }
+        return address;
+    };
 }
 
 async function isTcpReachable(host, port, timeoutMs = 750) {
@@ -230,6 +388,25 @@ async function fetchJson(url, headers) {
     })).json();
 }
 
+async function postJson(url, body, headers) {
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "User-Agent": USER_AGENT,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            ...headers
+        },
+        body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+        throw new Error(`Request failed for ${url}: ${response.status} ${response.statusText}`);
+    }
+
+    return await response.json();
+}
+
 async function downloadToFile(url, destination, headers) {
     const response = await request(url, headers);
     if (!response.body) throw new Error(`Download body missing for ${url}`);
@@ -272,6 +449,47 @@ async function runCommand(command, args, options = {}) {
             resolve({ stdout, stderr });
         });
     });
+}
+
+async function readFileBytesFromOffset(filePath, offset = 0) {
+    const data = await fsp.readFile(filePath).catch(() => Buffer.alloc(0));
+    return data.subarray(Math.max(0, offset));
+}
+
+async function getFileSize(filePath) {
+    try {
+        return (await fsp.stat(filePath)).size;
+    } catch (_error) {
+        return 0;
+    }
+}
+
+async function resolvePm2PoolProcess() {
+    const output = await runCommand("pm2", ["jlist"], { cwd: ROOT_DIR });
+    let processes;
+    try {
+        processes = JSON.parse(output.stdout);
+    } catch (error) {
+        throw new Error(`Failed to parse pm2 jlist output: ${error.message}`);
+    }
+
+    const poolProcess = Array.isArray(processes) ? processes.find((entry) => entry && entry.name === "pool") : null;
+    if (!poolProcess) throw new Error("Could not find pm2 process named 'pool'.");
+
+    const errLogPath = poolProcess.pm2_env && poolProcess.pm2_env.pm_err_log_path;
+    if (typeof errLogPath !== "string" || !errLogPath) {
+        throw new Error("pm2 'pool' process did not expose pm_err_log_path.");
+    }
+    const outLogPath = poolProcess.pm2_env && poolProcess.pm2_env.pm_out_log_path;
+    if (typeof outLogPath !== "string" || !outLogPath) {
+        throw new Error("pm2 'pool' process did not expose pm_out_log_path.");
+    }
+
+    return {
+        errLogPath,
+        outLogPath,
+        cwd: poolProcess.pm2_env && poolProcess.pm2_env.pm_cwd ? poolProcess.pm2_env.pm_cwd : ROOT_DIR
+    };
 }
 
 function ensureArchiveTools(includeUnzipOnWindows) {
@@ -998,6 +1216,123 @@ function parseProtocolLines(buffer, chunk) {
     return { lines: lines.slice(0, -1).filter(Boolean), buffer: lines[lines.length - 1] || "" };
 }
 
+class JsonLineSocketClient {
+    constructor(config, target, logStream, errorStream) {
+        this.config = config;
+        this.target = target;
+        this.logStream = logStream;
+        this.errorStream = errorStream;
+        this.socket = null;
+        this.lineBuffer = "";
+        this.messages = [];
+        this.waiters = [];
+    }
+
+    async connect(timeoutMs) {
+        this.socket = createProbeSocket(this.config, this.target);
+        this.socket.setEncoding("utf8");
+        this.socket.setTimeout(timeoutMs);
+
+        await new Promise((resolve, reject) => {
+            const onReady = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = (error) => {
+                cleanup();
+                reject(error);
+            };
+            const onTimeout = () => {
+                cleanup();
+                reject(new Error("Socket timeout before connect"));
+            };
+            const cleanup = () => {
+                this.socket.off(this.config.tls ? "secureConnect" : "connect", onReady);
+                this.socket.off("error", onError);
+                this.socket.off("timeout", onTimeout);
+            };
+
+            this.socket.once(this.config.tls ? "secureConnect" : "connect", onReady);
+            this.socket.once("error", onError);
+            this.socket.once("timeout", onTimeout);
+        });
+
+        this.socket.on("data", (chunk) => {
+            const parsed = parseProtocolLines(this.lineBuffer, chunk);
+            this.lineBuffer = parsed.buffer;
+            for (const line of parsed.lines) {
+                if (this.logStream) writeProtocolLine(this.logStream, "<", line);
+                try {
+                    this.messages.push(JSON.parse(line));
+                    this.flushWaiters();
+                } catch (error) {
+                    if (this.errorStream) this.errorStream.write(`${error.stack || error.message}\n`);
+                }
+            }
+        });
+        this.socket.on("error", (error) => {
+            if (this.errorStream) this.errorStream.write(`${error.stack || error.message}\n`);
+        });
+    }
+
+    flushWaiters() {
+        for (let index = 0; index < this.waiters.length; ) {
+            const waiter = this.waiters[index];
+            const messageIndex = this.messages.findIndex(waiter.predicate);
+            if (messageIndex === -1) {
+                index += 1;
+                continue;
+            }
+            const [message] = this.messages.splice(messageIndex, 1);
+            clearTimeout(waiter.timer);
+            this.waiters.splice(index, 1);
+            waiter.resolve(message);
+        }
+    }
+
+    async request(payload, timeoutMs, predicate) {
+        const matcher = predicate || ((message) => message && message.id === payload.id);
+        const responsePromise = this.waitFor(matcher, timeoutMs);
+        sendProtocolJson(this.socket, this.logStream, payload);
+        return await responsePromise;
+    }
+
+    waitFor(predicate, timeoutMs) {
+        const existingIndex = this.messages.findIndex(predicate);
+        if (existingIndex !== -1) {
+            const [message] = this.messages.splice(existingIndex, 1);
+            return Promise.resolve(message);
+        }
+
+        return awaitableWait(predicate, timeoutMs, this);
+    }
+
+    async close() {
+        if (!this.socket) return;
+        const socket = this.socket;
+        this.socket = null;
+        if (socket.destroyed) return;
+        await new Promise((resolve) => {
+            socket.once("close", resolve);
+            socket.end();
+        }).catch(() => {});
+    }
+}
+
+function awaitableWait(predicate, timeoutMs, client) {
+    return new Promise((resolve, reject) => {
+        const waiter = {
+            predicate,
+            resolve,
+            timer: setTimeout(() => {
+                client.waiters = client.waiters.filter((entry) => entry !== waiter);
+                reject(new Error(`Timed out waiting for protocol message from ${client.target.host}:${client.target.port}`));
+            }, timeoutMs)
+        };
+        client.waiters.push(waiter);
+    });
+}
+
 function buildBadEthSubmitParams(user, jobId) {
     return [
         user,
@@ -1059,6 +1394,230 @@ async function isPoolEndpointReachable(host, port, useTls, timeoutMs = 1500) {
 }
 
 const hasGpuProtocolProbe = (plan) => !plan.miner && !!plan.protocolProbe;
+const BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES = Object.freeze([null, 10, 100, 1000, 10000, 100000, 1000000]);
+const BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS = 15000;
+const BLOCK_SUBMIT_LIVE_CASES = Object.freeze([
+    {
+        name: "xmr-main-xmr-only",
+        protocol: "default-standard",
+        algo: "rx/0",
+        expectation: { exactFailureCount: 1, includeChains: ["XMR/"], excludeChains: ["XTM/"] },
+        buildCandidates(context) {
+            return buildCandidateMatrix(buildXmrOnlyResultHexes(context.xmrTemplate), BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES);
+        }
+    },
+    {
+        name: "xmr-main-dual",
+        protocol: "default-standard",
+        algo: "rx/0",
+        expectation: { exactFailureCount: 2, includeChains: ["XMR/", "XTM/"] },
+        buildCandidates() {
+            return buildCandidateMatrix(["00".repeat(32)], BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES);
+        }
+    },
+    {
+        name: "xmr-main-low-diff",
+        protocol: "default-standard",
+        algo: "rx/0",
+        expectation: { exactFailureCount: 2, includeChains: ["XMR/", "XTM/"] },
+        skipReason(context) {
+            if (!context || !context.xmrMainDifficulty) return "missing main difficulty";
+            if (context.xmrMainDifficulty >= context.xmrTemplate.primaryDiff) return "current template has no low-diff fallback window";
+            return "";
+        },
+        buildCandidates(context) {
+            return buildCandidateMatrix(buildLowDiffResultHexes(context.xmrTemplate), BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES);
+        }
+    },
+    {
+        name: "cryptonote-submitblock",
+        protocol: "default-standard",
+        algo: "rx/arq",
+        expectation: { exactFailureCount: 1, includeAnyChains: ["ARQ/", "SAL/", "ZEPH/", "RYO/", "XLA/"] },
+        buildCandidates() {
+            return buildCandidateMatrix(["00".repeat(32)], [null]);
+        }
+    },
+    {
+        name: "btc-submitblock",
+        protocol: "raven",
+        algo: "kawpow",
+        expectation: { exactFailureCount: 1, includeAnyChains: ["RVN/", "XNA/"] },
+        buildCandidates() {
+            return buildCandidateMatrix(["00".repeat(32)], [null]);
+        }
+    },
+    {
+        name: "xtm-c-submitblock",
+        protocol: "default-c29",
+        algo: "c29",
+        expectation: { exactFailureCount: 1, includeChains: ["XTM-C/"] },
+        buildCandidates() {
+            return buildCandidateMatrix(["00".repeat(32)], [null]);
+        }
+    },
+    {
+        name: "eth-submitwork",
+        protocol: "eth",
+        algo: "etchash",
+        expectation: { exactFailureCount: 1, includeChains: ["ETC/"] },
+        buildCandidates() {
+            return buildCandidateMatrix(["00".repeat(32)], [null]);
+        }
+    },
+    {
+        name: "erg-submitblock",
+        protocol: "eth",
+        algo: "autolykos2",
+        expectation: { exactFailureCount: 1, includeChains: ["ERG/"] },
+        buildCandidates() {
+            return buildCandidateMatrix(["00".repeat(32)], [null]);
+        }
+    }
+]);
+
+function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function bigIntToLittleHex(value, size = 32) {
+    let hex = BigInt(value).toString(16);
+    if (hex.length % 2) hex = `0${hex}`;
+    hex = hex.padStart(size * 2, "0").slice(-size * 2);
+    return Buffer.from(hex, "hex").reverse().toString("hex");
+}
+
+function buildResultHexForDifficulty(diff) {
+    const normalized = BigInt(diff);
+    if (normalized <= 0n) return "00".repeat(32);
+    const target = BASE_DIFF / normalized;
+    return bigIntToLittleHex(target);
+}
+
+function parseLatestTemplateSnapshot(logText, chainPrefix) {
+    const matcher = new RegExp(`Template: [^\\n]*chain=(${escapeRegExp(chainPrefix)}[^\\s]*)[^\\n]*diff=([0-9]+)(?:/([0-9]+))?`, "g");
+    let match;
+    let lastMatch = null;
+    while ((match = matcher.exec(logText)) !== null) lastMatch = match;
+    if (!lastMatch) return null;
+    return {
+        chain: lastMatch[1],
+        primaryDiff: BigInt(lastMatch[2]),
+        secondaryDiff: lastMatch[3] ? BigInt(lastMatch[3]) : null
+    };
+}
+
+function buildCandidateMatrix(resultHexes, loginDiffs) {
+    const candidates = [];
+    for (const resultHex of resultHexes) {
+        for (const loginDiff of loginDiffs) candidates.push({ loginDiff, resultHex });
+    }
+    return candidates;
+}
+
+function buildXmrOnlyResultHexes(xmrTemplate) {
+    if (!xmrTemplate || !xmrTemplate.secondaryDiff || xmrTemplate.secondaryDiff <= 1n) {
+        throw new Error("Could not determine XTM difficulty from the pool stderr template log.");
+    }
+    const candidates = [
+        xmrTemplate.secondaryDiff - 1n,
+        xmrTemplate.secondaryDiff / 2n,
+        xmrTemplate.secondaryDiff / 4n,
+        xmrTemplate.secondaryDiff / 8n,
+        xmrTemplate.secondaryDiff / 16n
+    ].filter((value) => value > 0n);
+    return Array.from(new Set(candidates.map((value) => buildResultHexForDifficulty(value))));
+}
+
+function buildLowDiffResultHexes(xmrTemplate) {
+    if (!xmrTemplate || !xmrTemplate.primaryDiff || xmrTemplate.primaryDiff <= 1n) {
+        throw new Error("Could not determine XMR difficulty from the pool template log.");
+    }
+    const candidates = [
+        xmrTemplate.primaryDiff - 1n,
+        xmrTemplate.primaryDiff / 2n,
+        xmrTemplate.primaryDiff / 4n,
+        xmrTemplate.primaryDiff / 8n
+    ].filter((value) => value > 0n);
+    return Array.from(new Set(candidates.map((value) => buildResultHexForDifficulty(value))));
+}
+
+async function readLocalXmrTemplateMetadata() {
+    const body = await postJson("http://127.0.0.1:18081/json_rpc", {
+        jsonrpc: "2.0",
+        id: "0",
+        method: "getblocktemplate",
+        params: {
+            reserve_size: 17,
+            wallet_address: DEFAULT_WALLET
+        }
+    });
+    if (!body || !body.result) throw new Error(`Invalid getblocktemplate response: ${JSON.stringify(body)}`);
+    return {
+        mainDifficulty: BigInt(body.result.mbl_difficulty || body.result.difficulty || 0)
+    };
+}
+
+function getBlockSubmitOutcomeEntries(text, worker) {
+    const entries = [];
+    const lines = String(text || "").split(/\r?\n/);
+    for (const line of lines) {
+        if (!line.includes("Block submit failed:") && !line.includes("Block submit unknown:") && !line.includes("Block found:")) continue;
+
+        const chainMatch = /chain=([^\s,]+)/.exec(line);
+        const minerMatch = /miner="([^"]+)"/.exec(line);
+        if (!chainMatch || !minerMatch) continue;
+
+        const miner = minerMatch[1];
+        if (worker && !miner.includes(`:${worker} `) && !miner.includes(`:${worker}(`) && !miner.includes(worker)) continue;
+
+        if (line.includes("Block submit failed:")) {
+            entries.push({ kind: "failed", chain: chainMatch[1], miner });
+            continue;
+        }
+        if (line.includes("Block submit unknown:")) {
+            entries.push({ kind: "unknown", chain: chainMatch[1], miner });
+            continue;
+        }
+        if (
+            line.includes("Block found:")
+            && (
+                line.includes('"result":false')
+                || line.includes('"result":"invalid"')
+                || line.includes('"result":"high-hash"')
+                || line.includes('"response":"rejected"')
+                || line.includes('"error":')
+            )
+        ) {
+            entries.push({ kind: "rejected", chain: chainMatch[1], miner });
+        }
+    }
+    return entries;
+}
+
+function matchesBlockSubmitExpectation(logText, expectation, worker) {
+    const outcomes = getBlockSubmitOutcomeEntries(logText, worker);
+    if (expectation.exactFailureCount && outcomes.length !== expectation.exactFailureCount) return false;
+    if (!expectation.exactFailureCount && expectation.minFailureCount && outcomes.length < expectation.minFailureCount) return false;
+
+    const chains = outcomes.map((entry) => entry.chain);
+    if (expectation.includeChains && expectation.includeChains.some((prefix) => !chains.some((chain) => chain.startsWith(prefix)))) return false;
+    if (expectation.includeAnyChains && !expectation.includeAnyChains.some((prefix) => chains.some((chain) => chain.startsWith(prefix)))) return false;
+    if (expectation.excludeChains && expectation.excludeChains.some((prefix) => chains.some((chain) => chain.startsWith(prefix)))) return false;
+    return true;
+}
+
+function summarizeBlockSubmitLog(logText, worker) {
+    const outcomes = getBlockSubmitOutcomeEntries(logText, worker);
+    return {
+        outcomeCount: outcomes.length,
+        failureCount: outcomes.filter((entry) => entry.kind === "failed").length,
+        unknownCount: outcomes.filter((entry) => entry.kind === "unknown").length,
+        rejectedCount: outcomes.filter((entry) => entry.kind === "rejected").length,
+        chains: outcomes.map((entry) => entry.chain)
+    };
+}
+
 function createDeferred() {
     let resolve;
     return { promise: new Promise((innerResolve) => { resolve = innerResolve; }), resolve };
@@ -1070,11 +1629,28 @@ function createAttemptFiles(run, plan, target, attempt, protocolProbe) {
         : `${shortAlgoName(plan.algorithm)}-${sanitizeName(plan.miner.name)}-${target.name}-attempt-${attempt}`;
 
     return {
+        attemptId,
         attemptDir: path.join(run.runDir, "attempts", attemptId),
         rawStdoutPath: path.join(run.runDir, "attempts", attemptId, "stdout.log"),
         rawStderrPath: path.join(run.runDir, "attempts", attemptId, "stderr.log"),
+        wallet: run.allocateWallet(attemptId),
         worker: makeWorkerName(run.config, plan.algorithm, target.name, attempt),
         password: `x~${plan.algorithm}`,
+        startedAtMs: Date.now()
+    };
+}
+
+function createBlockSubmitAttemptFiles(run, caseName) {
+    const attemptId = `block-submit-${sanitizeName(caseName)}`;
+    return {
+        attemptId,
+        attemptDir: path.join(run.runDir, "attempts", attemptId),
+        rawStdoutPath: path.join(run.runDir, "attempts", attemptId, "stdout.log"),
+        rawStderrPath: path.join(run.runDir, "attempts", attemptId, "stderr.log"),
+        poolStderrPath: path.join(run.runDir, "attempts", attemptId, "pool-stderr.log"),
+        poolStdoutPath: path.join(run.runDir, "attempts", attemptId, "pool-stdout.log"),
+        wallet: run.allocateWallet(attemptId),
+        worker: makeWorkerName(run.config, attemptId, "block", 1),
         startedAtMs: Date.now()
     };
 }
@@ -1154,8 +1730,8 @@ function createProtocolProbeSession(config, run, plan, target, attempt) {
     const readyDeferred = createDeferred();
     const doneDeferred = createDeferred();
     const context = {
-        config,
-        user: `${config.wallet}.${files.worker}`,
+        wallet: files.wallet,
+        user: `${files.wallet}.${files.worker}`,
         password: files.password,
         worker: files.worker
     };
@@ -1260,7 +1836,7 @@ function createProtocolProbeSession(config, run, plan, target, attempt) {
             socket.setTimeout(config.timeoutMs);
 
             if (config.emitStartLines) {
-                emitProgress(`[${formatReadableTime(new Date())}] start ${plan.algorithm} protocol probe on ${target.host}:${target.port}`);
+                emitLiveStatus("start", `probe ${plan.algorithm}`);
             }
 
             run.logger.event("probe.start", {
@@ -1376,8 +1952,8 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         configPath: path.join(files.attemptDir, "xmrig-config.json"),
         host: target.host,
         port: target.port,
-        wallet: config.wallet,
-        walletWithDifficulty: config.wallet,
+        wallet: files.wallet,
+        walletWithDifficulty: files.wallet,
         password: files.password,
         worker: files.worker,
         algorithm: plan.algorithm,
@@ -1401,7 +1977,7 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
     }
 
     if (config.emitStartLines) {
-        emitProgress(`[${formatReadableTime(new Date())}] start ${plan.algorithm} algo on ${target.host}:${target.port}`);
+        emitLiveStatus("start", `algo ${plan.algorithm}`);
     }
 
     run.logger.event("attempt.start", {
@@ -1521,6 +2097,407 @@ async function executeProtocolProbeBatch(run, plans, target) {
     });
 }
 
+function isSuccessfulSubmitResponse(message) {
+    return !!message && !message.error && (message.result === true || message.result?.status === "OK");
+}
+
+function buildC29SubmitNonce(job) {
+    const prefix = typeof job?.xn === "string" ? job.xn.toLowerCase() : "";
+    return `${prefix}${"0".repeat(Math.max(0, 15 - prefix.length))}1`;
+}
+
+function withFixedDifficulty(wallet, loginDiff) {
+    return loginDiff ? `${wallet}+${loginDiff}` : wallet;
+}
+
+function buildDefaultBlockSubmitPayload(loginReply, resultHex) {
+    const loginId = loginReply.result?.id || "";
+    const job = loginReply.result?.job;
+    if (!job || !job.job_id) throw new Error("Default login did not return a job for the block-submit attempt.");
+
+    return {
+        id: loginId,
+        job_id: job.job_id,
+        nonce: "00000001",
+        result: resultHex
+    };
+}
+
+function buildC29BlockSubmitPayload(loginReply, resultHex) {
+    const loginId = loginReply.result?.id || "";
+    const job = loginReply.result?.job;
+    if (!job || !job.job_id) throw new Error("C29 login did not return a job for the block-submit attempt.");
+
+    return {
+        id: loginId,
+        job_id: job.job_id,
+        nonce: buildC29SubmitNonce(job),
+        pow: Array.from({ length: 42 }, (_value, index) => index),
+        result: resultHex,
+        block_submit_test_result: resultHex
+    };
+}
+
+function buildEthBlockSubmitParams(user, jobId, resultHex) {
+    return [
+        user,
+        jobId,
+        `0x${crypto.randomBytes(8).toString("hex")}`,
+        `0x${"11".repeat(32)}`,
+        `0x${"00".repeat(32)}`,
+        `0x${resultHex}`
+    ];
+}
+
+function buildRavenBlockSubmitParams(user, jobId, headerHash, resultHex) {
+    if (!jobId || !headerHash) throw new Error("Kawpow notify payload did not include a job id and header hash.");
+    return [
+        user,
+        jobId,
+        "0x0000000000000001",
+        `0x${headerHash}`,
+        `0x${"ab".repeat(32)}`,
+        `0x${resultHex}`
+    ];
+}
+
+async function waitForPoolErrorLog(logPath, startOffset, predicate, timeoutMs, description) {
+    const deadline = Date.now() + timeoutMs;
+    let lastText = "";
+
+    while (Date.now() < deadline) {
+        lastText = (await readFileBytesFromOffset(logPath, startOffset)).toString("utf8");
+        if (predicate(lastText)) return lastText;
+        await sleep(250);
+    }
+
+    throw new Error(`${description}\n${lastText.slice(-4000)}`);
+}
+
+async function readPm2LogBundle(logPaths, startOffsets) {
+    const [stderrText, stdoutText] = await Promise.all([
+        logPaths.err ? readFileBytesFromOffset(logPaths.err, startOffsets.err || 0).then((buffer) => buffer.toString("utf8")) : "",
+        logPaths.out ? readFileBytesFromOffset(logPaths.out, startOffsets.out || 0).then((buffer) => buffer.toString("utf8")) : ""
+    ]);
+    return {
+        stderrText,
+        stdoutText,
+        text: [stderrText, stdoutText].filter(Boolean).join("\n")
+    };
+}
+
+async function waitForBlockSubmitAttemptLog(logPaths, startOffsets, expectation, timeoutMs, caseName, worker) {
+    const deadline = Date.now() + timeoutMs;
+    let lastBundle = { stderrText: "", stdoutText: "", text: "" };
+
+    while (Date.now() < deadline) {
+        lastBundle = await readPm2LogBundle(logPaths, startOffsets);
+        if (matchesBlockSubmitExpectation(lastBundle.text, expectation, worker)) {
+            await sleep(500);
+            return await readPm2LogBundle(logPaths, startOffsets);
+        }
+        await sleep(250);
+    }
+
+    throw new Error(`Timed out waiting for pool pm2 confirmation for ${caseName}.\n${lastBundle.text.slice(-4000)}`);
+}
+
+async function writeBlockSubmitPm2Logs(files, bundle) {
+    if (bundle.stderrText) await fsp.writeFile(files.poolStderrPath, bundle.stderrText);
+    if (bundle.stdoutText) await fsp.writeFile(files.poolStdoutPath, bundle.stdoutText);
+}
+
+async function waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffsets, testCase) {
+    const bundle = await waitForBlockSubmitAttemptLog(
+        logPaths,
+        startOffsets,
+        testCase.expectation,
+        Math.min(run.config.timeoutMs, BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS),
+        testCase.name,
+        files.worker
+    );
+    await writeBlockSubmitPm2Logs(files, bundle);
+    return { logText: bundle.text, worker: files.worker, summary: summarizeBlockSubmitLog(bundle.text, files.worker) };
+}
+
+async function withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, fn) {
+    const files = createBlockSubmitAttemptFiles(run, `${testCase.name}-${candidate.loginDiff || "auto"}-${candidate.resultHex.slice(0, 8)}`);
+    await ensureDir(files.attemptDir);
+    const streams = openLogStreams(files.rawStdoutPath, files.rawStderrPath);
+    const startOffsets = {
+        err: logPaths.err ? await getFileSize(logPaths.err) : 0,
+        out: logPaths.out ? await getFileSize(logPaths.out) : 0
+    };
+    const client = new JsonLineSocketClient(run.config, target, streams.stdout, streams.stderr);
+    const user = withFixedDifficulty(files.wallet, candidate.loginDiff);
+
+    try {
+        await client.connect(run.config.timeoutMs);
+        return await fn({ client, files, startOffsets, user });
+    } finally {
+        await client.close();
+        await closeStreams(streams.stdout, streams.stderr);
+    }
+}
+
+async function requestDefaultBlockSubmitLogin(run, testCase, client, files, user) {
+    const loginReply = await client.request({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "login",
+        params: {
+            login: user,
+            pass: `${files.worker}~${testCase.algo}`,
+            agent: "nodejs-pool-live-block-submit/1.0",
+            rigid: files.worker
+        }
+    }, run.config.timeoutMs);
+
+    if (loginReply.error || loginReply.result?.status !== "OK") {
+        throw new Error(`Default login failed: ${JSON.stringify(loginReply.error || loginReply.result)}`);
+    }
+    return loginReply;
+}
+
+async function authorizeStratumBlockSubmit(run, testCase, client, files, user) {
+    const subscribeReply = await client.request({ id: 1, method: "mining.subscribe", params: [] }, run.config.timeoutMs);
+    if (subscribeReply.error) {
+        throw new Error(`mining.subscribe failed for ${testCase.name}: ${JSON.stringify(subscribeReply.error)}`);
+    }
+
+    const authorizeReply = await client.request({
+        id: 2,
+        method: "mining.authorize",
+        params: [user, `${files.worker}~${testCase.algo}`]
+    }, run.config.timeoutMs);
+    if (authorizeReply.error || authorizeReply.result !== true) {
+        throw new Error(`mining.authorize failed: ${JSON.stringify(authorizeReply.error || authorizeReply.result)}`);
+    }
+}
+
+async function runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, candidate) {
+    return withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, async ({ client, files, startOffsets, user }) => {
+        const loginReply = await requestDefaultBlockSubmitLogin(run, testCase, client, files, user);
+        const submitReply = await client.request({
+            id: 2,
+            jsonrpc: "2.0",
+            method: "submit",
+            params: testCase.protocol === "default-c29"
+                ? buildC29BlockSubmitPayload(loginReply, candidate.resultHex)
+                : buildDefaultBlockSubmitPayload(loginReply, candidate.resultHex)
+        }, run.config.timeoutMs);
+
+        if (!isSuccessfulSubmitResponse(submitReply)) throw new Error(`Submit was not accepted: ${JSON.stringify(submitReply)}`);
+        return waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffsets, testCase);
+    });
+}
+
+async function runEthBlockSubmitAttempt(run, target, logPaths, testCase, candidate) {
+    return withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, async ({ client, files, startOffsets, user }) => {
+        await authorizeStratumBlockSubmit(run, testCase, client, files, user);
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify", run.config.timeoutMs);
+        const submitReply = await client.request({
+            id: 3,
+            method: "mining.submit",
+            params: buildEthBlockSubmitParams(user, Array.isArray(notifyPush.params) ? String(notifyPush.params[0] || "") : "", candidate.resultHex)
+        }, run.config.timeoutMs);
+
+        if (!isSuccessfulSubmitResponse(submitReply)) throw new Error(`Submit was not accepted: ${JSON.stringify(submitReply)}`);
+        return waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffsets, testCase);
+    });
+}
+
+async function runRavenBlockSubmitAttempt(run, target, logPaths, testCase, candidate) {
+    return withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, async ({ client, files, startOffsets, user }) => {
+        await authorizeStratumBlockSubmit(run, testCase, client, files, user);
+        await client.waitFor((message) => message.method === "mining.set_target", run.config.timeoutMs);
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify", run.config.timeoutMs);
+        const notifyParams = Array.isArray(notifyPush.params) ? notifyPush.params : [];
+        const submitReply = await client.request({
+            id: 3,
+            method: "mining.submit",
+            params: buildRavenBlockSubmitParams(user, String(notifyParams[0] || ""), String(notifyParams[1] || ""), candidate.resultHex)
+        }, run.config.timeoutMs);
+
+        if (!isSuccessfulSubmitResponse(submitReply)) throw new Error(`Submit was not accepted: ${JSON.stringify(submitReply)}`);
+        return waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffsets, testCase);
+    });
+}
+
+async function runLiveBlockSubmitCase(run, target, logPaths, testCase, context) {
+    const candidates = testCase.buildCandidates(context);
+    let lastFailure = null;
+
+    for (const candidate of candidates) {
+        if (run.config.emitStartLines) {
+            emitLiveStatus("try", `block submit ${testCase.name}`, `diff=${candidate.loginDiff || "auto"} result=${candidate.resultHex.slice(0, 8)}`);
+        }
+        run.logger.event("block-submit-coverage.case.candidate", {
+            name: testCase.name,
+            loginDiff: candidate.loginDiff,
+            resultHex: candidate.resultHex
+        });
+
+        try {
+            const attempt = testCase.protocol === "eth"
+                ? await runEthBlockSubmitAttempt(run, target, logPaths, testCase, candidate)
+                : testCase.protocol === "raven"
+                    ? await runRavenBlockSubmitAttempt(run, target, logPaths, testCase, candidate)
+                    : await runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, candidate);
+            if (matchesBlockSubmitExpectation(attempt.logText, testCase.expectation, attempt.worker)) return attempt.logText;
+            lastFailure = `unexpected-log ${JSON.stringify(attempt.summary)}\n${attempt.logText.trimEnd()}`;
+        } catch (error) {
+            lastFailure = error.stack || error.message;
+        }
+    }
+
+    throw new Error(`No candidate matched ${testCase.name}.\n${lastFailure || "No attempts were executed."}`);
+}
+
+async function verifyBlockSubmitTestModeDisabled(run, target, logPath, disableOffset) {
+    if (fileExistsSync(BLOCK_SUBMIT_TEST_MARKER_PATH)) {
+        throw new Error(`Block-submit marker file still exists after cleanup: ${BLOCK_SUBMIT_TEST_MARKER_PATH}`);
+    }
+
+    const disableLog = await waitForPoolErrorLog(
+        logPath,
+        disableOffset,
+        (text) => text.includes("Block submit test mode: enabled=0"),
+        run.config.timeoutMs,
+        "Timed out waiting for the pool to log block-submit test mode disable."
+    );
+
+    await withBlockSubmitAttemptClient(run, target, { err: logPath }, { name: "marker-removed-check" }, { loginDiff: null, resultHex: "00".repeat(32) }, async ({ client, files, startOffsets, user }) => {
+        const loginReply = await client.request({
+            id: 1,
+            jsonrpc: "2.0",
+            method: "login",
+            params: {
+                login: user,
+                pass: `${files.worker}~rx/0`,
+                agent: "nodejs-pool-live-block-submit/1.0",
+                rigid: files.worker
+            }
+        }, run.config.timeoutMs);
+        if (loginReply.error || loginReply.result?.status !== "OK") {
+            throw new Error(`Post-marker login failed: ${JSON.stringify(loginReply.error || loginReply.result)}`);
+        }
+        const submitReply = await client.request({
+            id: 2,
+            jsonrpc: "2.0",
+            method: "submit",
+            params: buildDefaultBlockSubmitPayload(loginReply, "00".repeat(32))
+        }, run.config.timeoutMs);
+
+        if (isSuccessfulSubmitResponse(submitReply)) {
+            throw new Error(`Post-marker submit unexpectedly succeeded: ${JSON.stringify(submitReply)}`);
+        }
+        await sleep(500);
+        const logText = (await readFileBytesFromOffset(logPath, startOffsets.err)).toString("utf8");
+        if (logText.includes("Block submit failed:")) {
+            throw new Error(`Pool still attempted block submission after marker removal:\n${logText.trimEnd()}`);
+        }
+        await fsp.writeFile(files.poolStderrPath, `${disableLog}${logText}`);
+    });
+}
+
+async function runPostBlockSubmitCoverageLoginSanityCheck(run, target) {
+    await withBlockSubmitAttemptClient(run, target, {}, { name: "post-block-submit-coverage-login" }, { loginDiff: null, resultHex: "00".repeat(32) }, async ({ client, files, user }) => {
+        const loginReply = await client.request({
+            id: 1,
+            jsonrpc: "2.0",
+            method: "login",
+            params: {
+                login: user,
+                pass: `${files.worker}~rx/0`,
+                agent: "nodejs-pool-live-sanity/1.0",
+                rigid: files.worker
+            }
+        }, run.config.timeoutMs);
+
+        if (loginReply.error || loginReply.result?.status !== "OK") {
+            throw new Error(`Post-block-submit coverage sanity login failed: ${JSON.stringify(loginReply.error || loginReply.result)}`);
+        }
+    });
+}
+
+async function setupLiveBlockSubmitCoverage(run) {
+    if (run.config.targetHost !== DEFAULT_TARGET_HOST || run.config.targetPort !== DEFAULT_TARGET_PORT) return null;
+    const pm2Pool = await resolvePm2PoolProcess();
+    if (path.resolve(pm2Pool.cwd) !== ROOT_DIR) {
+        throw new Error(`pm2 'pool' process cwd did not match ${ROOT_DIR}: ${pm2Pool.cwd}`);
+    }
+    const xmrTemplate =
+        parseLatestTemplateSnapshot(await readTextFileIfExists(pm2Pool.outLogPath), "XMR/") ||
+        parseLatestTemplateSnapshot(await readTextFileIfExists(pm2Pool.errLogPath), "XMR/");
+    if (!xmrTemplate) {
+        throw new Error(`Could not find an XMR template line in the pool pm2 logs: stdout=${pm2Pool.outLogPath} stderr=${pm2Pool.errLogPath}`);
+    }
+    const xmrTemplateMetadata = await readLocalXmrTemplateMetadata();
+    const context = {
+        xmrTemplate,
+        xmrMainDifficulty: xmrTemplateMetadata.mainDifficulty
+    };
+
+    if (run.config.emitStartLines) emitLiveStatus("start", "block submit coverage");
+    run.logger.event("block-submit-coverage.start", {
+        markerPath: BLOCK_SUBMIT_TEST_MARKER_PATH,
+        templateLogPath: pm2Pool.outLogPath,
+        rejectLogPath: pm2Pool.errLogPath
+    });
+    await fsp.writeFile(BLOCK_SUBMIT_TEST_MARKER_PATH, `${new Date().toISOString()}\n`);
+    await sleep(BLOCK_SUBMIT_TEST_MODE_WAIT_MS);
+
+    return {
+        context,
+        pm2Pool,
+        logPaths: { err: pm2Pool.errLogPath, out: pm2Pool.outLogPath },
+        cleanedUp: false
+    };
+}
+
+async function executeLiveBlockSubmitCoverageCase(run, target, coverage, testCase) {
+    const skipReason = typeof testCase.skipReason === "function" ? testCase.skipReason(coverage.context) : "";
+    if (skipReason) {
+        if (run.config.emitStartLines) emitLiveStatus("skip", `block submit ${testCase.name}`, skipReason);
+        run.logger.event("block-submit-coverage.case.skip", { name: testCase.name, protocol: testCase.protocol, algo: testCase.algo, reason: skipReason });
+        return { skipped: true, skipReason };
+    }
+
+    if (run.config.emitStartLines) {
+        emitLiveStatus("start", `block submit ${testCase.name}`, `algo=${testCase.algo}`);
+    }
+    run.logger.event("block-submit-coverage.case.start", { name: testCase.name, protocol: testCase.protocol, algo: testCase.algo });
+    try {
+        const logText = await runLiveBlockSubmitCase(run, target, coverage.logPaths, testCase, coverage.context);
+        if (run.config.emitStartLines) emitLiveStatus("pass", `block submit ${testCase.name}`);
+        run.logger.event("block-submit-coverage.case.finish", { name: testCase.name });
+        return { skipped: false, logText };
+    } catch (error) {
+        if (run.config.emitStartLines) emitLiveStatus("fail", `block submit ${testCase.name}`, firstLine(error.message || error.stack));
+        throw error;
+    }
+}
+
+async function cleanupLiveBlockSubmitCoverage(run, target, coverage) {
+    if (!coverage || coverage.cleanedUp) return;
+
+    try {
+        const disableOffset = await getFileSize(coverage.pm2Pool.errLogPath);
+        await fsp.rm(BLOCK_SUBMIT_TEST_MARKER_PATH, { force: true });
+        if (fileExistsSync(BLOCK_SUBMIT_TEST_MARKER_PATH)) {
+            throw new Error(`Failed to delete block-submit marker file: ${BLOCK_SUBMIT_TEST_MARKER_PATH}`);
+        }
+        await sleep(BLOCK_SUBMIT_TEST_MODE_WAIT_MS);
+        await verifyBlockSubmitTestModeDisabled(run, target, coverage.pm2Pool.errLogPath, disableOffset);
+        await runPostBlockSubmitCoverageLoginSanityCheck(run, target);
+        if (run.config.emitStartLines) emitLiveStatus("pass", "block submit coverage");
+        run.logger.event("block-submit-coverage.finish", {});
+    } finally {
+        coverage.cleanedUp = true;
+    }
+}
+
 function buildSummary(run, coveredResults) {
     const failures = coveredResults.filter((entry) => !entry.target.success);
     return {
@@ -1557,29 +2534,32 @@ function buildSummary(run, coveredResults) {
 }
 
 function formatSummary(summary) {
-    const algorithms = Array.isArray(summary.algorithms) ? summary.algorithms : [];
-    const unsupportedAlgorithms = Array.isArray(summary.unsupportedAlgorithms) ? summary.unsupportedAlgorithms : [];
+    const failureCount = summary.failureCount || 0;
+    const unsupportedCount = summary.unsupportedAlgorithmCount || 0;
+    if ((summary.exitCode || 0) === 0) return "live suite passed";
+
+    const parts = [];
+    if (failureCount) parts.push(`${failureCount} ${failureCount === 1 ? "failure" : "failures"}`);
+    if (unsupportedCount) parts.push(`${unsupportedCount} unsupported ${unsupportedCount === 1 ? "algorithm" : "algorithms"}`);
     return [
-        `runId: ${summary.runId}`,
-        `active algorithms (${algorithms.length}): ${algorithms.join(", ") || "none"}`,
-        `unsupported algorithms (${summary.unsupportedAlgorithmCount || 0}): ${unsupportedAlgorithms.map((entry) => entry.algorithm).join(", ") || "none"}`,
-        `target failures: ${summary.failureCount}`,
-        `logs: ${summary.logDir || "see summary.json"}`,
-        summary.error ? `error: ${summary.error}` : ""
+        `live suite failed: ${parts.join(", ") || "unknown error"}`,
+        summary.error ? `reason: ${summary.error}` : ""
     ].filter(Boolean).join("\n");
 }
 
 async function formatFailureDetails(summary) {
-    if (!summary || !Array.isArray(summary.results)) return "";
+    if (!summary) return "";
     const sections = [];
+    if (summary.errorDetail) sections.push(tailText(summary.errorDetail, 8000));
+    if (!Array.isArray(summary.results)) return sections.join("\n\n");
     for (const result of summary.results) {
         if (result.target?.success) continue;
         const stdoutText = await readTextFileIfExists(result.target.rawStdoutPath);
         const stderrText = await readTextFileIfExists(result.target.rawStderrPath);
         sections.push([
-            `[${result.algorithm}]`,
-            stdoutText ? stdoutText.trimEnd() : "<stdout empty>",
-            stderrText ? `stderr:\n${stderrText.trimEnd()}` : ""
+            `[${result.algorithm}] ${result.target.failureReason || result.target.error || "failed"}`,
+            stdoutText ? tailText(stdoutText, 4000) : "<stdout empty>",
+            stderrText ? `stderr:\n${tailText(stderrText, 4000)}` : ""
         ].filter(Boolean).join("\n"));
     }
     return sections.join("\n\n");
@@ -1613,6 +2593,7 @@ async function createLivePoolRun(input) {
         const algorithms = getActiveAlgorithms(logger);
         const activeAlgorithmSet = new Set(algorithms.map((entry) => entry.algorithm));
         const miners = [];
+        const allocateWallet = createRandomWalletAllocator(config.wallet, logger);
 
         logger.event("hardware.intel-gpu.detect", { detected: intelGpuDetected });
 
@@ -1646,6 +2627,7 @@ async function createLivePoolRun(input) {
             hardware: { intelGpuDetected },
             miners,
             algorithms,
+            allocateWallet,
             coveragePlan,
             unsupportedAlgorithms,
             coveredPlans: coveragePlan.filter((entry) => entry.miner || entry.protocolProbe)
@@ -1665,7 +2647,11 @@ async function finalizeLivePoolRun(run, coveredResults, error) {
                 runId: config.runId,
                 generatedAt: new Date().toISOString(),
                 logDir: runDir,
-                error: error.message,
+                algorithms: run.algorithms.map((entry) => entry.algorithm),
+                unsupportedAlgorithms,
+                results: coveredResults,
+                error: firstLine(error.message || error.stack),
+                errorDetail: error.stack || error.message,
                 failureCount: 1,
                 unsupportedAlgorithmCount: unsupportedAlgorithms.length,
                 exitCode: 1
@@ -1709,7 +2695,7 @@ function buildConfig(input) {
         srbMinerApiPort: DEFAULT_SRBMINER_API_PORT,
         moMinerC29Device: DEFAULT_MOMINER_C29_DEVICE,
         targetName: "target",
-        emitStartLines: true
+        emitStartLines: typeof options.emitStartLines === "boolean" ? options.emitStartLines : true
     };
 }
 
@@ -1742,7 +2728,8 @@ async function writeStandaloneFailureSummary(input, error) {
         runId: config.runId,
         generatedAt: new Date().toISOString(),
         logDir: runDir,
-        error: error.message,
+        error: firstLine(error.message || error.stack),
+        errorDetail: error.stack || error.message,
         failureCount: 1,
         unsupportedAlgorithmCount: 0,
         exitCode: 1
@@ -1760,15 +2747,34 @@ async function runLivePoolSuite(input) {
     try {
         run = await createLivePoolRun(input);
         const target = buildTarget(run.config);
+        const blockSubmitCoverage = await setupLiveBlockSubmitCoverage(run);
+        if (blockSubmitCoverage) {
+            try {
+                for (const testCase of BLOCK_SUBMIT_LIVE_CASES) {
+                    await executeLiveBlockSubmitCoverageCase(run, target, blockSubmitCoverage, testCase);
+                }
+            } finally {
+                await cleanupLiveBlockSubmitCoverage(run, target, blockSubmitCoverage);
+            }
+        }
+        if (run.config.emitStartLines) {
+            emitLiveStatus("start", "coverage");
+        }
 
         for (const plan of run.coveredPlans.filter((entry) => !hasGpuProtocolProbe(entry))) {
             const result = await executeScenario(run, plan, target);
+            if (run.config.emitStartLines) {
+                emitLiveStatus(result.success ? "pass" : "fail", `algo ${plan.algorithm}`, result.success ? "" : (result.failureReason || result.error || "failed"));
+            }
             pushCoveredResult(coveredResults, plan.algorithm, plan.miner ? plan.miner.name : "protocol-probe", result);
         }
 
         const protocolPlans = run.coveredPlans.filter(hasGpuProtocolProbe);
         if (protocolPlans.length) {
             for (const result of await executeProtocolProbeBatch(run, protocolPlans, target)) {
+                if (run.config.emitStartLines) {
+                    emitLiveStatus(result.success ? "pass" : "fail", `probe ${result.algorithm}`, result.success ? "" : (result.failureReason || result.error || "failed"));
+                }
                 pushCoveredResult(coveredResults, result.algorithm, result.miner, result);
             }
         }
@@ -1811,6 +2817,10 @@ module.exports = {
     isTcpReachable,
     renderCliHelp,
     runFromCli,
+    BLOCK_SUBMIT_LIVE_CASES,
+    cleanupLiveBlockSubmitCoverage,
+    executeLiveBlockSubmitCoverageCase,
+    setupLiveBlockSubmitCoverage,
     runLivePoolSuite
 };
 

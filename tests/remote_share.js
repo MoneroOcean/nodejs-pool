@@ -210,6 +210,7 @@ function createPendingJobDatabase() {
     return { database, resets, stores };
 }
 
+test.describe("remote share", { concurrency: false }, () => {
 test("remote_share accepts valid share frames and flushes queued shares", async () => {
     const restore = installRemoteShareGlobals();
     const shareStore = {
@@ -882,4 +883,5 @@ test("remote_share logs periodic pending block summaries with coin labels", asyn
         await runtime.stop();
         restore();
     }
+});
 });

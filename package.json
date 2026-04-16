@@ -9,9 +9,8 @@
   },
   "scripts": {
     "test": "node --require ./tests/test_output_buffer.js --test --test-reporter=spec --test-concurrency=1 tests/all.js",
-    "test:long_runner": "node --test tests/long_runner.js",
-    "test:live": "node ./tests/pool_live.js",
-    "test:live:jp": "node ./tests/pool_live.js --target-host jp.moneroocean.stream"
+    "test:live": "node --require ./tests/test_output_buffer.js --test --test-reporter=spec --test-concurrency=1 tests/live.js",
+    "test:live:jp": "NODEJS_POOL_LIVE_TARGET_HOST=jp.moneroocean.stream node --require ./tests/test_output_buffer.js --test --test-reporter=spec --test-concurrency=1 tests/live.js"
   },
   "repository": {
     "type": "git",
