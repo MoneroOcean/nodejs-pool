@@ -19,7 +19,6 @@
   "author": "Multiple",
   "license": "MIT",
   "dependencies": {
-    "apicache": "1.2.1",
     "async": "3.2.2",
     "crypto-js": "4.2.0",
     "cryptoforknote-util": "git+https://github.com/MoneroOcean/node-cryptoforknote-util.git#v15.8.9",
