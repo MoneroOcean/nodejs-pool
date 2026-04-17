@@ -11,5 +11,6 @@ require("./pool_remote_uplink.js");
 require("./pool_validation.js");
 require("./pool_runtime.js");
 require("./remote_share.js");
+require("./api.js");
 require("./support.js");
 require("./live.js");
