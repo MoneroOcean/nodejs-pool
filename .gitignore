@@ -60,6 +60,7 @@ node_modules
 jspm_packages
 .cache/live-miners
 test-artifacts/live-pool
+test-artifacts/deploy
 
 # Optional npm cache directory
 .npm

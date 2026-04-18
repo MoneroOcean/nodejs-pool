@@ -1,30 +1,32 @@
-#!/bin/bash -x
+#!/bin/bash -ex
 
-NODEJS_VERSION=v20.12.2
+NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 
-WWW_DNS=$1
-API_DNS=$2
-CF_DNS_API_TOKEN=$3
-CERTBOT_EMAIL=$4
+WWW_DNS="${1:-moneroocean.stream}"
+API_DNS="${2:-api.moneroocean.stream}"
+CF_DNS_API_TOKEN="${3:-n/a}"
+CERTBOT_EMAIL="${4:-support@moneroocean.stream}"
 
-test -z $WWW_DNS && WWW_DNS="moneroocean.stream"
-test -z $API_DNS && API_DNS="api.moneroocean.stream"
-test -z $CF_DNS_API_TOKEN && CF_DNS_API_TOKEN="n/a"
-test -z $CERTBOT_EMAIL && CERTBOT_EMAIL="support@moneroocean.stream"
-
-if [[ $(whoami) != "root" ]]; then
+if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
   exit 1
 fi
 
-DEBIAN_FRONTEND=noninteractive apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
-DEBIAN_FRONTEND=noninteractive apt-get install ufw -y
+export DEBIAN_FRONTEND=noninteractive
+retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
+
+retry_command apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update
+if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+  echo "Skipping apt full-upgrade in test mode"
+else
+  retry_command apt-get -o Acquire::Retries=3 full-upgrade -y
+fi
+retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl openssl sudo ufw nginx git vim g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev mysql-server chromium-browser
 timedatectl set-timezone Etc/UTC
 
-adduser --disabled-password --gecos "" user
+id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
 grep -q "user ALL=(ALL) NOPASSWD:ALL" /etc/sudoers || echo "user ALL=(ALL) NOPASSWD:ALL" >>/etc/sudoers
-su user -c "mkdir /home/user/.ssh"
+install -d -m 700 -o user -g user /home/user/.ssh
 if [ -f "/root/.ssh/authorized_keys" ]; then
   mv /root/.ssh/authorized_keys /home/user/.ssh/authorized_keys
   chown user:user /home/user/.ssh/authorized_keys
@@ -37,30 +39,30 @@ fi
 
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow ssh
-ufw allow 443
+for rule in ssh 443; do
+  ufw allow "$rule"
+done
 ufw --force enable
 
-cat >/root/.vimrc <<'EOF'
-colorscheme desert
-set fo-=ro
+printf 'colorscheme desert\nset fo-=ro\n' >/root/.vimrc
+install -m 644 -o user -g user /root/.vimrc /home/user/.vimrc
+mkdir -p /etc/letsencrypt
+if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+  cat >/etc/letsencrypt/options-ssl-nginx.conf <<'EOF'
+ssl_session_cache shared:le_nginx_SSL:10m;
+ssl_session_timeout 1440m;
 EOF
-
-cat >/home/user/.vimrc <<'EOF'
-colorscheme desert
-set fo-=ro
-EOF
-chown user:user /home/user/.vimrc
-
-DEBIAN_FRONTEND=noninteractive apt-get install -y nginx ntp sudo
-snap install --classic certbot
-snap set certbot trust-plugin-with-root=ok
-snap install certbot-dns-cloudflare
-find /snap/certbot -name options-ssl-nginx.conf | xargs -I{} cp {} /etc/letsencrypt/options-ssl-nginx.conf
+else
+  snap install --classic certbot
+  snap set certbot trust-plugin-with-root=ok
+  snap install certbot-dns-cloudflare
+  find /snap/certbot -name options-ssl-nginx.conf | xargs -I{} cp {} /etc/letsencrypt/options-ssl-nginx.conf
+fi
 echo "dns_cloudflare_api_token=$CF_DNS_API_TOKEN" >/root/dns_cloudflare_api_token.ini
 chmod 600 /root/dns_cloudflare_api_token.ini
-certbot certonly --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --dns-cloudflare --dns-cloudflare-propagation-seconds 30 --dns-cloudflare-credentials /root/dns_cloudflare_api_token.ini -d $WWW_DNS
-certbot certonly --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --dns-cloudflare --dns-cloudflare-propagation-seconds 30 --dns-cloudflare-credentials /root/dns_cloudflare_api_token.ini -d $API_DNS
+for dns in "$WWW_DNS" "$API_DNS"; do
+  certbot certonly --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --dns-cloudflare --dns-cloudflare-propagation-seconds 30 --dns-cloudflare-credentials /root/dns_cloudflare_api_token.ini -d "$dns"
+done
 cat >/etc/nginx/sites-enabled/default <<EOF
 server {
 	listen 80;
@@ -115,18 +117,15 @@ chown -R www-data:www-data /var/www
 chmod g+s /var/www
 systemctl daemon-reload
 systemctl restart nginx
-
-DEBIAN_FRONTEND=noninteractive apt-get install -y git make g++ cmake libssl-dev libunbound-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-dev libboost-system-dev libboost-date-time-dev libboost-filesystem-dev libboost-thread-dev libboost-chrono-dev libboost-locale-dev libboost-regex-dev libboost-regex-dev libboost-program-options-dev libzmq3-dev
-cd /usr/local/src
-git clone https://github.com/monero-project/monero.git
-cd monero
+retry_command git clone https://github.com/monero-project/monero.git /usr/local/src/monero
+cd /usr/local/src/monero
 git checkout v0.18.4.5
-git submodule update --init
+retry_command git submodule update --init
 USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
 
 (cat <<EOF
-set -x
-mkdir ~/wallets
+set -ex
+mkdir -p ~/wallets
 cd ~/wallets
 echo pass >~/wallets/wallet_pass
 echo 1 | /usr/local/src/monero/build/release/bin/monero-wallet-cli --offline --create-address-file --generate-new-wallet ~/wallets/wallet --password-file ~/wallets/wallet_pass --command address
@@ -152,7 +151,7 @@ CPUQuota=400%
 WantedBy=multi-user.target
 EOF
 
-useradd -m monerodaemon -d /home/monerodaemon
+id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
 systemctl daemon-reload
 systemctl enable monero
 systemctl start monero
@@ -160,17 +159,43 @@ systemctl start monero
 sleep 30
 echo "Please wait until Monero daemon is fully synced"
 tail -f /home/monerodaemon/.bitmonero/bitmonero.log 2>/dev/null | grep Synced &
-( tail -F -n0 /home/monerodaemon/.bitmonero/bitmonero.log & ) | egrep -q "You are now synchronized with the network"
-killall tail 2>/dev/null
+( tail -F -n0 /home/monerodaemon/.bitmonero/bitmonero.log & ) | grep -Eq "You are now synchronized with the network"
+pkill -x tail 2>/dev/null || true
 echo "Monero daemon is synced"
-
-DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server
+rm -f /etc/mysql/conf.d/mysql-native-password.cnf
+if mysqld --verbose --help 2>/dev/null | grep -Fq -- "--mysql-native-password[=name]"; then
+  cat >/etc/mysql/conf.d/mysql-native-password.cnf <<'EOF'
+[mysqld]
+mysql-native-password=ON
+EOF
+fi
+systemctl restart mysql
+for i in $(seq 1 30); do
+  mysqladmin ping >/dev/null 2>&1 && break
+  sleep 1
+done
+mysqladmin ping >/dev/null 2>&1
 ROOT_SQL_PASS=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+if mysql -Nse "SHOW PLUGINS" | awk '$1=="mysql_native_password" && $2=="ACTIVE" { found=1 } END { exit !found }'; then
+  ROOT_SQL_AUTH="ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$ROOT_SQL_PASS';"
+  USER_SQL_CMD="sudo mysql -u root --password='$ROOT_SQL_PASS'"
+else
+  ROOT_SQL_AUTH="ALTER USER 'root'@'localhost' IDENTIFIED BY '$ROOT_SQL_PASS';"
+  USER_SQL_CMD="sudo mysql --protocol=socket -u root"
+fi
 (cat <<EOF
-ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$ROOT_SQL_PASS';
+$ROOT_SQL_AUTH
 FLUSH PRIVILEGES;
 EOF
-) | (test -f /root/mysql_pass && mysql -u root --password=$(cat /root/mysql_pass) || mysql -u root)
+) | {
+  if mysql --protocol=socket -u root -e "SELECT 1" >/dev/null 2>&1; then
+    mysql --protocol=socket -u root
+  elif test -f /root/mysql_pass; then
+    mysql -u root --password="$(cat /root/mysql_pass)"
+  else
+    mysql -u root
+  fi
+}
 echo $ROOT_SQL_PASS >/root/mysql_pass
 chmod 600 /root/mysql_pass
 grep max_connections /etc/mysql/my.cnf || cat >>/etc/mysql/my.cnf <<'EOF'
@@ -180,38 +205,40 @@ EOF
 systemctl restart mysql
 
 (cat <<EOF
-curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash
+set -ex
+$(declare -f retry_command)
+retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
 source /home/user/.nvm/nvm.sh
-nvm install $NODEJS_VERSION
-nvm alias default $NODEJS_VERSION
-test -f /usr/bin/node || sudo ln -s \$(which node) /usr/bin/node
-set -x
-git clone https://github.com/MoneroOcean/nodejs-pool.git
+retry_command nvm install $NODEJS_VERSION
+NODEJS_VERSION="\$(nvm version "$NODEJS_VERSION")"
+nvm alias default "\$NODEJS_VERSION"
+test -x /usr/bin/node || sudo ln -s "\$(command -v node)" /usr/bin/node
+retry_command git clone https://github.com/MoneroOcean/nodejs-pool.git
 cd /home/user/nodejs-pool
-JOBS=$(nproc) npm install
+JOBS=$(nproc) retry_command npm install
+command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2
+retry_command pm2 install pm2-logrotate
+openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
 # install lmdb tools
 ( cd /home/user
   rm -rf node-lmdb
-  git clone https://github.com/Venemo/node-lmdb.git
+  retry_command git clone https://github.com/Venemo/node-lmdb.git
   cd node-lmdb
   git checkout c3135a3809da1d64ce1f0956b37b618711e33519
   cd dependencies/lmdb/libraries/liblmdb
   make -j $(nproc)
-  mkdir /home/user/.bin
+  mkdir -p /home/user/.bin
   echo >>/home/user/.bashrc
   echo 'export PATH=/home/user/.bin:$PATH' >>/home/user/.bashrc
   for i in mdb_copy mdb_dump mdb_load mdb_stat; do cp \$i /home/user/.bin/; done
 )
-npm install -g pm2
-pm2 install pm2-logrotate
-openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
-mkdir /home/user/pool_db
+mkdir -p /home/user/pool_db
 sed -r 's#("db_storage_path": ).*#\1"/home/user/pool_db/",#' config_example.json >config.json
-mysql -u root --password=$ROOT_SQL_PASS <deployment/base.sql
-mysql -u root --password=$ROOT_SQL_PASS -e "INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'authKey', '`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1`', 'string', 'Auth key sent with all Websocket frames for validation.')"
-mysql -u root --password=$ROOT_SQL_PASS -e "INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'secKey', '`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1`', 'string', 'HMAC key for Passwords.  JWT Secret Key.  Changing this will invalidate all current logins.')"
-mysql -u root --password=$ROOT_SQL_PASS -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet.address.txt)' WHERE module = 'pool' and item = 'address';"
-mysql -u root --password=$ROOT_SQL_PASS -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet_fee.address.txt)' WHERE module = 'payout' and item = 'feeAddress';"
+$USER_SQL_CMD <deployment/base.sql
+$USER_SQL_CMD -e "INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'authKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Auth key sent with all Websocket frames for validation.')"
+$USER_SQL_CMD -e "INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'secKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'HMAC key for Passwords.  JWT Secret Key.  Changing this will invalidate all current logins.')"
+$USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet.address.txt)' WHERE module = 'pool' and item = 'address';"
+$USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet_fee.address.txt)' WHERE module = 'payout' and item = 'feeAddress';"
 pm2 start init.js --name=api --log-date-format="YYYY-MM-DD HH:mm Z" -- --module=api
 pm2 start /usr/local/src/monero/build/release/bin/monero-wallet-rpc -- --rpc-bind-port 18082 --password-file /home/user/wallets/wallet_pass --wallet-file /home/user/wallets/wallet --trusted-daemon --disable-rpc-login
 sleep 30
@@ -224,13 +251,12 @@ pm2 start init.js --name=long_runner --log-date-format="YYYY-MM-DD HH:mm:ss:SSS 
 sleep 20
 pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
 pm2 save
-sudo env PATH=$PATH:/home/user/.nvm/versions/node/$NODEJS_VERSION/bin /home/user/.nvm/versions/node/$NODEJS_VERSION/lib/node_modules/pm2/bin/pm2 startup systemd -u user --hp /home/user
+sudo env PATH=\$PATH:/home/user/.nvm/versions/node/\$NODEJS_VERSION/bin /home/user/.nvm/versions/node/\$NODEJS_VERSION/lib/node_modules/pm2/bin/pm2 startup systemd -u user --hp /home/user
 cd /home/user
-git clone https://github.com/MoneroOcean/moneroocean-gui.git
+retry_command git clone https://github.com/MoneroOcean/moneroocean-gui.git
 cd moneroocean-gui
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y chromium-browser
-npm install -g uglifycss uglify-js html-minifier
-npm install -D critical@latest
+retry_command npm install -g uglifycss uglify-js html-minifier
+retry_command npm install -D critical@latest
 EOF
 ) | su user -l
 
