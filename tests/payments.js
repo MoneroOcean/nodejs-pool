@@ -904,13 +904,20 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.runtime.inspectState().isFailStop, false);
     });
 
-    test("retryable wallet failures pin the exact batch and do not advance lastPaymentCycle", async () => {
+    test("not enough unlocked money checks wallet history before pinning the exact batch for retry", async () => {
         const harness = createHarness({
             balances: [
                 { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
             ],
             walletScript: {
-                transfer: [{ error: { message: "not enough unlocked money" } }]
+                transfer: [{ error: { message: "not enough unlocked money" } }],
+                get_transfers: [
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } }
+                ]
             }
         });
 
@@ -919,7 +926,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retrying");
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.equal(harness.mysql.state.store.transactions.length, 0);
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
         assert.equal(harness.database.getCache("lastPaymentCycle"), undefined);
     });
 
@@ -970,6 +977,11 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                     { result: { fee: 300000000, tx_hash: integratedTxHash, tx_key: integratedTxKey } }
                 ],
                 get_transfers: [
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
                     function replyTransfers() {
                         return {
                             result: {
@@ -1023,6 +1035,44 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.transactions.length, 2);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
         assert.equal(harness.mysql.state.store.balances[1].pending_batch_id, null);
+    });
+
+    test("not enough money fail-stops for manual review when wallet history already contains one exact matching transfer", async () => {
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ],
+            walletScript: {
+                transfer: [{ error: { message: "not enough money" } }],
+                get_transfers: [function replyTransfer() {
+                    return {
+                        result: {
+                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                                fee: 300000000,
+                                txid: "7".repeat(64)
+                            })],
+                            pending: [],
+                            pool: []
+                        }
+                    };
+                }],
+                get_tx_key: [{ result: { tx_key: "8".repeat(64) } }]
+            }
+        });
+        const plannedBatches = await harness.runtime.planBatches();
+        const transferItemAmount = plannedBatches[0].items[0].netAmount;
+
+        await harness.runtime.runCycle();
+        assert.equal(harness.runtime.inspectState().isFailStop, true);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "manual_review");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, "7".repeat(64));
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, "8".repeat(64));
+        assert.equal(harness.mysql.state.store.transactions.length, 0);
+        assert.equal(harness.mysql.state.store.payments.length, 0);
+        assert.equal(harness.mysql.state.store.balances[0].amount, Math.round(0.2 * COIN));
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 1);
     });
 
     test("daemon rejection fail-stops for manual review when wallet history already contains one exact matching transfer", async () => {
@@ -1562,11 +1612,11 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
     });
 
     test("conditional submit claim prevents two runtimes from transferring the same retrying batch", async () => {
-        // This overlap is realistic whenever exclusivity breaks at the process level:
-        // a restart can leave the old payments runtime alive while a new one starts,
-        // two hosts/containers can accidentally run the payments module at once, or
-        // the dedicated MySQL advisory-lock connection can die before the process
-        // stops and another runtime takes over. In all of those cases the same
+        // This test models split-brain around retry submission after exclusivity
+        // has already broken down, for example if the dedicated MySQL advisory-lock
+        // connection dies before the original runtime stops and a replacement
+        // runtime takes over. The separate advisory lock names below are only a
+        // test harness shortcut to force that overlap. Once that happens, the same
         // retrying batch must still be claimable by only one runtime before wallet
         // transfer starts.
         const grossAmount = Math.round(0.2 * COIN);
