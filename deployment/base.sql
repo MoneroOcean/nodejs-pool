@@ -15,10 +15,12 @@ CREATE TABLE `balance` (
   `payment_id` varchar(128) DEFAULT NULL,
   `pool_type` varchar(64) DEFAULT NULL,
   `amount` bigint(26) DEFAULT '0',
+  `pending_batch_id` bigint(20) unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `balance_id_uindex` (`id`),
   UNIQUE KEY `balance_payment_address_pool_type_payment_id_uindex` (`payment_address`,`pool_type`,`payment_id`),
-  KEY `balance_payment_address_payment_id_index` (`payment_address`,`payment_id`)
+  KEY `balance_payment_address_payment_id_index` (`payment_address`,`payment_id`),
+  KEY `balance_pending_batch_id_index` (`pending_batch_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `paid_blocks` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -85,6 +87,49 @@ CREATE TABLE `payments` (
   UNIQUE KEY `payments_id_uindex` (`id`),
   KEY `payments_transactions_id_fk` (`transaction_id`),
   KEY `payments_payment_address_payment_id_index` (`payment_address`,`payment_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+CREATE TABLE `payment_batches` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `status` varchar(32) NOT NULL,
+  `batch_type` varchar(32) NOT NULL,
+  `total_gross` bigint(26) NOT NULL DEFAULT '0',
+  `total_net` bigint(26) NOT NULL DEFAULT '0',
+  `total_fee` bigint(26) NOT NULL DEFAULT '0',
+  `destination_count` int(11) NOT NULL DEFAULT '0',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `submit_started_at` timestamp NULL DEFAULT NULL,
+  `submitted_at` timestamp NULL DEFAULT NULL,
+  `finalized_at` timestamp NULL DEFAULT NULL,
+  `released_at` timestamp NULL DEFAULT NULL,
+  `last_reconciled_at` timestamp NULL DEFAULT NULL,
+  `reconcile_attempts` int(11) NOT NULL DEFAULT '0',
+  `reconcile_clean_passes` int(11) NOT NULL DEFAULT '0',
+  `tx_hash` varchar(128) DEFAULT NULL,
+  `tx_key` varchar(256) DEFAULT NULL,
+  `transaction_id` int(11) DEFAULT NULL,
+  `last_error_text` text,
+  PRIMARY KEY (`id`),
+  KEY `payment_batches_status_created_at_index` (`status`,`created_at`),
+  KEY `payment_batches_transaction_id_index` (`transaction_id`),
+  KEY `payment_batches_tx_hash_index` (`tx_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+CREATE TABLE `payment_batch_items` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `batch_id` bigint(20) unsigned NOT NULL,
+  `balance_id` int(11) NOT NULL,
+  `destination_order` int(11) NOT NULL,
+  `pool_type` varchar(64) DEFAULT NULL,
+  `payment_address` varchar(128) DEFAULT NULL,
+  `gross_amount` bigint(26) NOT NULL DEFAULT '0',
+  `net_amount` bigint(26) NOT NULL DEFAULT '0',
+  `fee_amount` bigint(26) NOT NULL DEFAULT '0',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `payment_batch_items_batch_destination_order_uindex` (`batch_id`,`destination_order`),
+  UNIQUE KEY `payment_batch_items_batch_balance_id_uindex` (`batch_id`,`balance_id`),
+  KEY `payment_batch_items_batch_id_index` (`batch_id`),
+  KEY `payment_batch_items_balance_id_index` (`balance_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `pools` (
   `id` int(11) NOT NULL,
