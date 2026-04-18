@@ -651,6 +651,67 @@ function createHarness(options = {}) {
     };
 }
 
+function createBatchRow(overrides = {}) {
+    const grossAmount = Object.prototype.hasOwnProperty.call(overrides, "total_gross")
+        ? overrides.total_gross
+        : Math.round(0.2 * COIN);
+    const totalFee = Object.prototype.hasOwnProperty.call(overrides, "total_fee")
+        ? overrides.total_fee
+        : Math.round(0.0001 * COIN);
+    const totalNet = Object.prototype.hasOwnProperty.call(overrides, "total_net")
+        ? overrides.total_net
+        : grossAmount - totalFee;
+    return {
+        id: 1,
+        status: "submitting",
+        batch_type: "bulk",
+        total_gross: grossAmount,
+        total_net: totalNet,
+        total_fee: totalFee,
+        destination_count: 1,
+        created_at: "2026-04-17 11:00:00",
+        updated_at: "2026-04-17 11:00:00",
+        submit_started_at: "2026-04-17 11:10:00",
+        submitted_at: null,
+        finalized_at: null,
+        released_at: null,
+        last_reconciled_at: null,
+        reconcile_attempts: 0,
+        reconcile_clean_passes: 0,
+        tx_hash: null,
+        tx_key: null,
+        transaction_id: null,
+        last_error_text: null,
+        ...overrides
+    };
+}
+
+function createBatchItemRow(overrides = {}) {
+    const grossAmount = Object.prototype.hasOwnProperty.call(overrides, "gross_amount")
+        ? overrides.gross_amount
+        : Math.round(0.2 * COIN);
+    const feeAmount = Object.prototype.hasOwnProperty.call(overrides, "fee_amount")
+        ? overrides.fee_amount
+        : Math.round(0.0001 * COIN);
+    const netAmount = Object.prototype.hasOwnProperty.call(overrides, "net_amount")
+        ? overrides.net_amount
+        : grossAmount - feeAmount;
+    return {
+        id: 1,
+        batch_id: 1,
+        balance_id: 1,
+        destination_order: 0,
+        pool_type: "pplns",
+        payment_address: STANDARD_A,
+        payment_id: null,
+        gross_amount: grossAmount,
+        net_amount: netAmount,
+        fee_amount: feeAmount,
+        created_at: "2026-04-17 11:00:00",
+        ...overrides
+    };
+}
+
 test.describe("payments runtime", { concurrency: false }, function paymentsSuite() {
     test("planBatches preserves threshold rules, fee address trimming, denom rounding, integrated singles, bulk sizing, and skips explicit payment-id balances", async () => {
         const harness = createHarness({
@@ -2065,6 +2126,391 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(sharedMysql.state.store.balances[0].pending_batch_id, null);
         await runtimeA.stop();
         await runtimeB.stop();
+    });
+
+    test("preflight requires unlocked balance to cover the planned payout plus a conservative wallet fee buffer", async () => {
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ]
+        });
+        const plannedBatches = await harness.runtime.planBatches();
+        const unlockedBalance = plannedBatches[0].totalNet + Math.round(0.0005 * COIN);
+
+        harness.support.rpcWallet = function scriptedWallet(method, params, callback) {
+            harness.wallet.calls.push({ method, params });
+            setImmediate(function replyAsync() {
+                if (method === "getbalance") {
+                    callback({ result: { balance: 10 * COIN, unlocked_balance: unlockedBalance } });
+                    return;
+                }
+                callback({ result: {} });
+            });
+        };
+
+        await harness.runtime.runCycle();
+
+        assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 0);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retrying");
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet preflight insufficient balance/);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /required_total=/);
+    });
+
+    test("history-checked submit errors hold the claimed batch when wallet history is unavailable", async () => {
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ],
+            walletScript: {
+                transfer: [{ error: { message: "not enough unlocked money" } }],
+                get_transfers: Array.from({ length: 5 }, function () { return new Error("wallet offline"); })
+            }
+        });
+
+        await harness.runtime.runCycle();
+
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitting");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].submitted_at, null);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, null);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet submit failed but history check is unavailable: Error: wallet offline/);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
+        assert.equal(harness.sentEmails.some(function hasFyi(entry) { return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation"; }), true);
+    });
+
+    test("submitted batches hold during recovery when wallet history for the known tx is unavailable", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const txHash = "1".repeat(64);
+        const txKey = "2".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({
+                    status: "submitted",
+                    submitted_at: "2026-04-17 11:10:05",
+                    tx_hash: txHash,
+                    tx_key: txKey,
+                    total_fee: 300000000
+                })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ],
+            walletScript: {
+                get_transfers: [new Error("wallet offline")]
+            }
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_attempts, 1);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_clean_passes, 0);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet reconcile unavailable while waiting for submitted tx/);
+    });
+
+    test("submitted batches keep the reservation when the known tx is still not visible", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const txHash = "3".repeat(64);
+        const txKey = "4".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({
+                    status: "submitted",
+                    submitted_at: "2026-04-17 11:10:05",
+                    tx_hash: txHash,
+                    tx_key: txKey,
+                    total_fee: 300000000
+                })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ],
+            walletScript: {
+                get_transfers: [{ result: { out: [], pending: [], pool: [] } }]
+            }
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_attempts, 1);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_clean_passes, 1);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /is not visible in wallet history yet/);
+    });
+
+    test("ambiguous submitting batches hold during recovery when wallet history is unavailable", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({ total_gross: grossAmount, total_net: netAmount, total_fee: feeAmount })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ],
+            walletScript: {
+                get_transfers: [new Error("wallet offline")]
+            }
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitting");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_attempts, 1);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_clean_passes, 0);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet reconcile unavailable: Error: wallet offline/);
+    });
+
+    test("recovery persists a matched tx hash and holds when tx_key lookup is only temporarily unavailable", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const txHash = "5".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({ total_gross: grossAmount, total_net: netAmount, total_fee: feeAmount })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ],
+            walletScript: {
+                get_transfers: [function replyTransfers() {
+                    return {
+                        result: {
+                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                                fee: 300000000,
+                                txid: txHash
+                            })],
+                            pending: [],
+                            pool: []
+                        }
+                    };
+                }],
+                get_tx_key: [new Error("tx key temporarily unavailable")]
+            }
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, txHash);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, null);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].total_fee, 300000000);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet match found but waiting for tx_key/);
+        assert.equal(harness.runtime.inspectState().isFailStop, false);
+    });
+
+    test("submitted batches with a visible tx hold when tx_key retrieval is temporarily unavailable during finalize", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const txHash = "6".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({
+                    status: "submitted",
+                    submitted_at: "2026-04-17 11:10:05",
+                    tx_hash: txHash,
+                    tx_key: null,
+                    total_fee: 300000000,
+                    total_gross: grossAmount,
+                    total_net: netAmount
+                })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ],
+            walletScript: {
+                get_transfers: [function replyTransfers() {
+                    return {
+                        result: {
+                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                                fee: 300000000,
+                                txid: txHash
+                            })],
+                            pending: [],
+                            pool: []
+                        }
+                    };
+                }],
+                get_tx_key: [new Error("wallet busy")]
+            }
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, null);
+        assert.equal(harness.mysql.state.store.transactions.length, 0);
+        assert.equal(harness.mysql.state.store.payments.length, 0);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /waiting for tx_key: Error: wallet busy/);
+    });
+
+    test("submitted batches with a visible tx fail-stop when tx_key is permanently unavailable during finalize", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const txHash = "7".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({
+                    status: "submitted",
+                    submitted_at: "2026-04-17 11:10:05",
+                    tx_hash: txHash,
+                    tx_key: null,
+                    total_fee: 300000000,
+                    total_gross: grossAmount,
+                    total_net: netAmount
+                })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ],
+            walletScript: {
+                get_transfers: [function replyTransfers() {
+                    return {
+                        result: {
+                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                                fee: 300000000,
+                                txid: txHash
+                            })],
+                            pending: [],
+                            pool: []
+                        }
+                    };
+                }],
+                get_tx_key: [{ error: { message: "key not found" } }]
+            }
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.runtime.inspectState().isFailStop, true);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "manual_review");
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet send proven for batch 1 but tx_key is unavailable/);
+    });
+
+    test("successful submits without an immediate tx_key persist submitted state and wait for wallet visibility", async () => {
+        const txHash = "8".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ],
+            walletScript: {
+                transfer: [{
+                    result: {
+                        fee: 300000000,
+                        tx_hash: txHash
+                    }
+                }],
+                get_tx_key: [new Error("wallet busy")],
+                get_transfers: Array.from({ length: 5 }, function () {
+                    return { result: { out: [], pending: [], pool: [] } };
+                })
+            }
+        });
+
+        await harness.runtime.runCycle();
+
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, txHash);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, null);
+        assert.equal(harness.mysql.state.store.transactions.length, 0);
+        assert.equal(harness.mysql.state.store.payments.length, 0);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, new RegExp("wallet transfer succeeded but tx " + txHash + " is not visible in wallet history yet"));
+    });
+
+    test("successful submits hold the submitted batch when post-submit wallet history lookup is unavailable", async () => {
+        const txHash = "9".repeat(64);
+        const txKey = "a".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ],
+            walletScript: {
+                transfer: [{
+                    result: {
+                        fee: 300000000,
+                        tx_hash: txHash,
+                        tx_key: txKey
+                    }
+                }],
+                get_transfers: Array.from({ length: 5 }, function () { return new Error("wallet offline"); })
+            }
+        });
+
+        await harness.runtime.runCycle();
+
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, txHash);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, txKey);
+        assert.equal(harness.mysql.state.store.transactions.length, 0);
+        assert.equal(harness.mysql.state.store.payments.length, 0);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet transfer succeeded but tx search is unavailable: Error: wallet offline/);
+    });
+
+    test("startup recovery fail-stops immediately when a manual-review batch already exists", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({
+                    status: "manual_review",
+                    submitted_at: "2026-04-17 11:10:05",
+                    tx_hash: "b".repeat(64),
+                    tx_key: "c".repeat(64),
+                    total_fee: 300000000,
+                    total_gross: grossAmount,
+                    total_net: netAmount
+                })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ]
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.runtime.inspectState().isFailStop, true);
+        assert.match(harness.runtime.inspectState().failStopReason, /manual-review batch 1 blocks new payouts/);
     });
 
     test("start schedules the cycle and wallet-store heartbeat and stop waits for the active cycle", async () => {
