@@ -224,6 +224,63 @@ function txTransferRecord(clock, items, options = {}) {
     };
 }
 
+function applyPaymentBatchUpdate(store, sql, params) {
+    const prefix = "UPDATE payment_batches SET ";
+    if (!sql.startsWith(prefix)) return null;
+    const whereIndex = sql.indexOf(" WHERE id = ?");
+    if (whereIndex === -1) return null;
+
+    const assignments = sql.slice(prefix.length, whereIndex).split(", ");
+    const updates = {};
+    let paramIndex = 0;
+    assignments.forEach(function readAssignment(assignment) {
+        const field = assignment.split(" = ")[0];
+        if (assignment.endsWith(" = NULL")) {
+            updates[field] = null;
+            return;
+        }
+        updates[field] = params[paramIndex++];
+    });
+
+    const batchId = params[paramIndex++];
+    const row = store.paymentBatches.find(function findBatch(entry) {
+        return entry.id === batchId;
+    });
+    if (!row) return { affectedRows: 0 };
+
+    let whereClause = sql.slice(whereIndex + " WHERE id = ?".length);
+    let allowed = true;
+    while (whereClause) {
+        if (whereClause.startsWith(" AND status = ?")) {
+            allowed = allowed && row.status === params[paramIndex++];
+            whereClause = whereClause.slice(" AND status = ?".length);
+            continue;
+        }
+        if (whereClause.startsWith(" AND status IN (")) {
+            const endIndex = whereClause.indexOf(")");
+            const count = whereClause.slice(" AND status IN (".length, endIndex).split(",").length;
+            const allowedStatuses = params.slice(paramIndex, paramIndex + count);
+            paramIndex += count;
+            allowed = allowed && allowedStatuses.includes(row.status);
+            whereClause = whereClause.slice(endIndex + 1);
+            continue;
+        }
+        if (whereClause.startsWith(" AND ")) {
+            const nullIndex = whereClause.indexOf(" IS NULL");
+            const field = whereClause.slice(" AND ".length, nullIndex);
+            allowed = allowed && row[field] === null;
+            whereClause = whereClause.slice(nullIndex + " IS NULL".length);
+            continue;
+        }
+        if (!whereClause.trim()) break;
+        throw new Error("Unhandled payment_batches WHERE clause: " + whereClause);
+    }
+
+    if (!allowed) return { affectedRows: 0 };
+    Object.assign(row, updates);
+    return { affectedRows: 1 };
+}
+
 function createFakeMysql(options = {}) {
     const liveStore = {
         balances: cloneRows(options.balances || []).map(function normalizeBalance(row) {
@@ -443,19 +500,7 @@ function createFakeMysql(options = {}) {
             row.last_error_text = params[3];
             return { affectedRows: 1 };
         }
-        if (sql.indexOf("UPDATE payment_batches SET ") === 0) {
-            const batchId = params[params.length - 1];
-            const row = store.paymentBatches.find(function findBatch(entry) {
-                return entry.id === batchId;
-            });
-            if (!row) return { affectedRows: 0 };
-            const assignments = sql.slice("UPDATE payment_batches SET ".length, sql.lastIndexOf(" WHERE id = ?")).split(", ");
-            assignments.forEach(function applyAssignment(assignment, index) {
-                const field = assignment.split(" = ")[0];
-                row[field] = params[index];
-            });
-            return { affectedRows: 1 };
-        }
+        if (sql.indexOf("UPDATE payment_batches SET ") === 0) return applyPaymentBatchUpdate(store, sql, params);
         if (sql === "INSERT INTO transactions (address, payment_id, xmr_amt, transaction_hash, mixin, fees, payees) VALUES (?, ?, ?, ?, ?, ?, ?)") {
             const row = {
                 id: nextTransactionId++,
@@ -955,6 +1000,80 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.transactions.length, 0);
     });
 
+    test("guarded retry hold does not reopen a batch another runtime already finalized", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const finalizedAt = "2026-04-17 12:00:30";
+        const txHash = "c".repeat(64);
+        const txKey = "d".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount }
+            ],
+            failures: [{
+                once: true,
+                match(sql) {
+                    if (!sql.startsWith("UPDATE payment_batches SET status = ?, submit_started_at = ?, submitted_at = ?, updated_at = ?, last_reconciled_at = ?, last_error_text = ?, tx_hash = ?, tx_key = ? WHERE id = ? AND status = ?")) return false;
+                    const batch = harness.mysql.state.store.paymentBatches[0];
+                    Object.assign(batch, {
+                        status: "finalized",
+                        submitted_at: finalizedAt,
+                        finalized_at: finalizedAt,
+                        updated_at: finalizedAt,
+                        transaction_id: 99,
+                        tx_hash: txHash,
+                        tx_key: txKey,
+                        total_fee: feeAmount,
+                        last_error_text: null
+                    });
+                    harness.mysql.state.store.transactions.push({
+                        id: 99,
+                        address: STANDARD_A,
+                        payment_id: null,
+                        xmr_amt: grossAmount,
+                        transaction_hash: txHash,
+                        mixin: 10,
+                        fees: feeAmount,
+                        payees: 1
+                    });
+                    harness.mysql.state.store.payments.push({
+                        id: 1,
+                        unlocked_time: finalizedAt,
+                        paid_time: finalizedAt,
+                        pool_type: "pplns",
+                        payment_address: STANDARD_A,
+                        transaction_id: 99,
+                        amount: netAmount,
+                        payment_id: null,
+                        transfer_fee: feeAmount
+                    });
+                    harness.mysql.state.store.balances[0].amount = 0;
+                    harness.mysql.state.store.balances[0].pending_batch_id = null;
+                    return false;
+                }
+            }],
+            walletScript: {
+                transfer: [{ error: { message: "not enough unlocked money" } }],
+                get_transfers: [
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } }
+                ]
+            }
+        });
+
+        await harness.runtime.runCycle();
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].transaction_id, 99);
+        assert.equal(harness.mysql.state.store.transactions.length, 1);
+        assert.equal(harness.mysql.state.store.payments.length, 1);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
+        assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
+    });
+
     test("a pinned retrying batch blocks later payouts until the same batch clears", async () => {
         const bulkTxHash = "a".repeat(64);
         const integratedTxHash = "b".repeat(64);
@@ -1073,6 +1192,89 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
         assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 1);
+    });
+
+    test("guarded manual-review escalation does not regress a batch another runtime already finalized", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const transferFee = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - transferFee;
+        const walletFee = 300000000;
+        const finalizedAt = "2026-04-17 12:01:00";
+        const txHash = "7".repeat(64);
+        const txKey = "8".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount }
+            ],
+            failures: [{
+                once: true,
+                match(sql) {
+                    if (!sql.startsWith("UPDATE payment_batches SET status = ?, updated_at = ?, last_error_text = ?, tx_hash = ?, tx_key = ?, total_fee = ? WHERE id = ? AND status = ?")) return false;
+                    const batch = harness.mysql.state.store.paymentBatches[0];
+                    Object.assign(batch, {
+                        status: "finalized",
+                        submitted_at: finalizedAt,
+                        finalized_at: finalizedAt,
+                        updated_at: finalizedAt,
+                        transaction_id: 1,
+                        tx_hash: txHash,
+                        tx_key: txKey,
+                        total_fee: walletFee,
+                        last_error_text: null
+                    });
+                    harness.mysql.state.store.transactions.push({
+                        id: 1,
+                        address: STANDARD_A,
+                        payment_id: null,
+                        xmr_amt: grossAmount,
+                        transaction_hash: txHash,
+                        mixin: 10,
+                        fees: walletFee,
+                        payees: 1
+                    });
+                    harness.mysql.state.store.payments.push({
+                        id: 1,
+                        unlocked_time: finalizedAt,
+                        paid_time: finalizedAt,
+                        pool_type: "pplns",
+                        payment_address: STANDARD_A,
+                        transaction_id: 1,
+                        amount: netAmount,
+                        payment_id: null,
+                        transfer_fee: transferFee
+                    });
+                    harness.mysql.state.store.balances[0].amount = 0;
+                    harness.mysql.state.store.balances[0].pending_batch_id = null;
+                    return false;
+                }
+            }],
+            walletScript: {
+                transfer: [{ error: { message: "not enough money" } }],
+                get_transfers: [function replyTransfer() {
+                    return {
+                        result: {
+                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                                fee: walletFee,
+                                txid: txHash
+                            })],
+                            pending: [],
+                            pool: []
+                        }
+                    };
+                }],
+                get_tx_key: [{ result: { tx_key: txKey } }]
+            }
+        });
+        const plannedBatches = await harness.runtime.planBatches();
+        const transferItemAmount = plannedBatches[0].items[0].netAmount;
+
+        await harness.runtime.runCycle();
+        assert.equal(harness.runtime.inspectState().isFailStop, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].transaction_id, 1);
+        assert.equal(harness.mysql.state.store.transactions.length, 1);
+        assert.equal(harness.mysql.state.store.payments.length, 1);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
     });
 
     test("daemon rejection fail-stops for manual review when wallet history already contains one exact matching transfer", async () => {
@@ -1211,6 +1413,75 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.balances[0].amount, 0);
     });
 
+    test("guarded submitted persist does not regress a batch another runtime already finalized", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = 200000000;
+        const transferFee = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - transferFee;
+        const finalizedAt = "2026-04-17 12:00:45";
+        const txHash = "e".repeat(64);
+        const txKey = "f".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount }
+            ],
+            failures: [{
+                once: true,
+                match(sql) {
+                    if (!sql.startsWith("UPDATE payment_batches SET status = ?, submitted_at = ?, updated_at = ?, tx_hash = ?, tx_key = ?, total_fee = ?, last_error_text = ? WHERE id = ? AND status = ?")) return false;
+                    const batch = harness.mysql.state.store.paymentBatches[0];
+                    Object.assign(batch, {
+                        status: "finalized",
+                        submitted_at: finalizedAt,
+                        finalized_at: finalizedAt,
+                        updated_at: finalizedAt,
+                        transaction_id: 1,
+                        tx_hash: txHash,
+                        tx_key: txKey,
+                        total_fee: feeAmount,
+                        last_error_text: null
+                    });
+                    harness.mysql.state.store.transactions.push({
+                        id: 1,
+                        address: STANDARD_A,
+                        payment_id: null,
+                        xmr_amt: grossAmount,
+                        transaction_hash: txHash,
+                        mixin: 10,
+                        fees: feeAmount,
+                        payees: 1
+                    });
+                    harness.mysql.state.store.payments.push({
+                        id: 1,
+                        unlocked_time: finalizedAt,
+                        paid_time: finalizedAt,
+                        pool_type: "pplns",
+                        payment_address: STANDARD_A,
+                        transaction_id: 1,
+                        amount: netAmount,
+                        payment_id: null,
+                        transfer_fee: transferFee
+                    });
+                    harness.mysql.state.store.balances[0].amount = 0;
+                    harness.mysql.state.store.balances[0].pending_batch_id = null;
+                    return false;
+                }
+            }],
+            walletScript: {
+                transfer: [{ result: { fee: feeAmount, tx_hash: txHash, tx_key: txKey } }]
+            }
+        });
+
+        await harness.runtime.runCycle();
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].transaction_id, 1);
+        assert.equal(harness.mysql.state.store.transactions.length, 1);
+        assert.equal(harness.mysql.state.store.payments.length, 1);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
+        assert.equal(harness.database.getCache("lastPaymentCycle"), Math.floor(harness.clock.now() / 1000));
+    });
+
     test("startup recovery releases a stale reserved batch before new planning", async () => {
         const harness = createHarness({
             balances: [
@@ -1260,6 +1531,75 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         await harness.runtime.recoverPendingBatches("startup");
         assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retryable");
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
+    });
+
+    test("startup recovery does not release a reserved batch after another runtime already advanced it", async () => {
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN), pending_batch_id: 7 }
+            ],
+            failures: [{
+                once: true,
+                match(sql, _params, context) {
+                    if (!sql.startsWith("UPDATE payment_batches SET status = ?, released_at = ?, updated_at = ?, last_error_text = ? WHERE id = ? AND status = ?")) return false;
+                    if (!context.store) return false;
+                    Object.assign(context.store.paymentBatches[0], {
+                        status: "submitted",
+                        submit_started_at: "2026-04-17 11:10:00",
+                        submitted_at: "2026-04-17 11:10:05",
+                        tx_hash: "a".repeat(64),
+                        tx_key: "b".repeat(64),
+                        total_fee: 200000000
+                    });
+                    return false;
+                }
+            }],
+            paymentBatches: [
+                {
+                    id: 7,
+                    status: "reserved",
+                    batch_type: "bulk",
+                    total_gross: Math.round(0.2 * COIN),
+                    total_net: Math.round(0.1999 * COIN),
+                    total_fee: Math.round(0.0001 * COIN),
+                    destination_count: 1,
+                    created_at: "2026-04-17 11:00:00",
+                    updated_at: "2026-04-17 11:00:00",
+                    submit_started_at: null,
+                    submitted_at: null,
+                    finalized_at: null,
+                    released_at: null,
+                    last_reconciled_at: null,
+                    reconcile_attempts: 0,
+                    reconcile_clean_passes: 0,
+                    tx_hash: null,
+                    tx_key: null,
+                    transaction_id: null,
+                    last_error_text: null
+                }
+            ],
+            paymentBatchItems: [
+                {
+                    id: 1,
+                    batch_id: 7,
+                    balance_id: 1,
+                    destination_order: 0,
+                    pool_type: "pplns",
+                    payment_address: STANDARD_A,
+                    payment_id: null,
+                    gross_amount: Math.round(0.2 * COIN),
+                    net_amount: Math.round(0.1999 * COIN),
+                    fee_amount: Math.round(0.0001 * COIN),
+                    created_at: "2026-04-17 11:00:00"
+                }
+            ]
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+        assert.equal(recovered, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].released_at, null);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 7);
     });
 
     test("wallet timeout during submit reconciles to one exact match without resubmission", async () => {
