@@ -145,10 +145,16 @@ function createWallet(script) {
     const calls = [];
     const plan = {
         getbalance: [{ result: { balance: 1000 * COIN, unlocked_balance: 1000 * COIN } }],
+        get_height() {
+            return { result: { height: 3655400 } };
+        },
         store() {
             return { result: { stored: true } };
         },
         transfer: [],
+        get_transfer_by_txid() {
+            return { error: { message: "Transaction not found" } };
+        },
         get_transfers: [{ result: { out: [], pending: [], pool: [] } }],
         get_tx_key: [{ result: { tx_key: "f".repeat(64) } }]
     };
@@ -212,9 +218,11 @@ function createConfig() {
 function txTransferRecord(clock, items, options = {}) {
     return {
         fee: options.fee,
+        locked: options.locked === true,
         payment_id: options.paymentId || null,
         timestamp: Math.floor(clock.now() / 1000),
         txid: options.txid || "a".repeat(64),
+        type: options.type || "out",
         destinations: items.map(function toDestination(item) {
             return {
                 address: item.address,
@@ -825,15 +833,17 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                     ? { result: { fee: transferFee, tx_hash: "a".repeat(64), tx_key: longTxKey } }
                     : method === "getbalance"
                         ? { result: { balance: 10 * COIN, unlocked_balance: 10 * COIN } }
-                        : method === "get_transfers"
+                        : method === "get_transfer_by_txid"
                             ? {
                                 result: {
-                                    out: [txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: transferItemAmount }], {
+                                    transfer: txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: transferItemAmount }], {
                                         fee: transferFee,
                                         txid: "a".repeat(64)
-                                    })],
-                                    pending: [],
-                                    pool: []
+                                    }),
+                                    transfers: [txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: transferItemAmount }], {
+                                        fee: transferFee,
+                                        txid: "a".repeat(64)
+                                    })]
                                 }
                             }
                         : method === "get_tx_key"
@@ -882,17 +892,19 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                         tx_key: txKey
                     }
                 }],
-                get_transfers: [
-                    { result: { out: [], pending: [], pool: [] } },
+                get_transfer_by_txid: [
+                    { error: { message: "Transaction not found" } },
                     function replyTransfer() {
                         return {
                             result: {
-                                out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                                transfer: txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
                                     fee: transferFee,
                                     txid: txHash
-                                })],
-                                pending: [],
-                                pool: []
+                                }),
+                                transfers: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                                    fee: transferFee,
+                                    txid: txHash
+                                })]
                             }
                         };
                     }
@@ -913,7 +925,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.database.getCache("lastPaymentCycle"), Math.floor(harness.clock.now() / 1000));
         assert.equal(harness.sentEmails.some(function hasFyi(entry) { return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation"; }), false);
         assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 2);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 2);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
         assert.equal(harness.mysql.state.store.transactions[0].transaction_hash, txHash);
     });
 
@@ -964,15 +977,18 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 created_at: "2026-04-18 05:10:19"
             }],
             walletScript: {
-                get_transfers: [{
+                get_transfer_by_txid: [{
                     result: {
-                        out: [txTransferRecord(clock, [{ address: INTEGRATED, amount: netAmount }], {
+                        transfer: txTransferRecord(clock, [{ address: INTEGRATED, amount: netAmount }], {
                             fee: totalFee,
                             paymentId: "004258d2bfdd764c",
                             txid: txHash
-                        })],
-                        pending: [],
-                        pool: []
+                        }),
+                        transfers: [txTransferRecord(clock, [{ address: INTEGRATED, amount: netAmount }], {
+                            fee: totalFee,
+                            paymentId: "004258d2bfdd764c",
+                            txid: txHash
+                        })]
                     }
                 }]
             }
@@ -1033,7 +1049,17 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.notEqual(harness.mysql.state.store.paymentBatches[0].submit_started_at, null);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.equal(harness.mysql.state.store.transactions.length, 0);
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
+        const historyCalls = harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; });
+        assert.equal(historyCalls.length, 5);
+        assert.equal(harness.wallet.calls.filter(function isHeights(call) { return call.method === "get_height"; }).length, 5);
+        assert.deepEqual(historyCalls[0].params, {
+            out: true,
+            pending: true,
+            pool: true,
+            filter_by_height: true,
+            min_height: 3655400 - 31 * 24 * 30,
+            max_height: 3655400
+        });
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet submit failed after claim with no wallet match yet: not enough unlocked money/);
         assert.equal(harness.database.getCache("lastPaymentCycle"), undefined);
     });
@@ -1190,6 +1216,21 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                             ],
                             pending: [],
                             pool: []
+                        }
+                    };
+                },
+                get_transfer_by_txid(params) {
+                    if (params.txid !== integratedTxHash) return { error: { message: "Unknown txid " + params.txid } };
+                    return {
+                        result: {
+                            transfer: txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: integratedTransferAmount }], {
+                                fee: 300000000,
+                                txid: integratedTxHash
+                            }),
+                            transfers: [txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: integratedTransferAmount }], {
+                                fee: 300000000,
+                                txid: integratedTxHash
+                            })]
                         }
                     };
                 }
@@ -1441,15 +1482,17 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                         tx_key: "d".repeat(64)
                     }
                 }],
-                get_transfers() {
+                get_transfer_by_txid() {
                     return {
                         result: {
-                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                            transfer: txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
                                 fee: 200000000,
                                 txid: "c".repeat(64)
-                            })],
-                            pending: [],
-                            pool: []
+                            }),
+                            transfers: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                                fee: 200000000,
+                                txid: "c".repeat(64)
+                            })]
                         }
                     };
                 }
@@ -2075,14 +2118,15 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 transferResolved = true;
                 return { result: { fee: 300000000, tx_hash: "a".repeat(64), tx_key: "b".repeat(64) } };
             })],
-            get_transfers() {
+            get_transfer_by_txid() {
                 return {
                     result: {
-                        out: transferResolved
+                        transfer: transferResolved
+                            ? txTransferRecord(clock, [{ address: STANDARD_A, amount: netAmount }], { fee: 300000000, txid: "a".repeat(64) })
+                            : null,
+                        transfers: transferResolved
                             ? [txTransferRecord(clock, [{ address: STANDARD_A, amount: netAmount }], { fee: 300000000, txid: "a".repeat(64) })]
-                            : [],
-                        pending: [],
-                        pool: []
+                            : []
                     }
                 };
             }
@@ -2202,7 +2246,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
             ],
             walletScript: {
-                get_transfers: [new Error("wallet offline")]
+                get_transfer_by_txid: [new Error("wallet offline")]
             }
         });
 
@@ -2214,6 +2258,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_clean_passes, 0);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet reconcile unavailable while waiting for submitted tx/);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
     });
 
     test("submitted batches keep the reservation when the known tx is still not visible", async () => {
@@ -2239,7 +2285,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
             ],
             walletScript: {
-                get_transfers: [{ result: { out: [], pending: [], pool: [] } }]
+                get_transfer_by_txid: [{ error: { message: "Transaction not found" } }]
             }
         });
 
@@ -2251,6 +2297,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_clean_passes, 1);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /is not visible in wallet history yet/);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
     });
 
     test("ambiguous submitting batches hold during recovery when wallet history is unavailable", async () => {
@@ -2349,15 +2397,17 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
             ],
             walletScript: {
-                get_transfers: [function replyTransfers() {
+                get_transfer_by_txid: [function replyTransfers() {
                     return {
                         result: {
-                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                            transfer: txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
                                 fee: 300000000,
                                 txid: txHash
-                            })],
-                            pending: [],
-                            pool: []
+                            }),
+                            transfers: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                                fee: 300000000,
+                                txid: txHash
+                            })]
                         }
                     };
                 }],
@@ -2399,15 +2449,17 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
             ],
             walletScript: {
-                get_transfers: [function replyTransfers() {
+                get_transfer_by_txid: [function replyTransfers() {
                     return {
                         result: {
-                            out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                            transfer: txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
                                 fee: 300000000,
                                 txid: txHash
-                            })],
-                            pending: [],
-                            pool: []
+                            }),
+                            transfers: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                                fee: 300000000,
+                                txid: txHash
+                            })]
                         }
                     };
                 }],
@@ -2437,8 +2489,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                     }
                 }],
                 get_tx_key: [new Error("wallet busy")],
-                get_transfers: Array.from({ length: 5 }, function () {
-                    return { result: { out: [], pending: [], pool: [] } };
+                get_transfer_by_txid: Array.from({ length: 5 }, function () {
+                    return { error: { message: "Transaction not found" } };
                 })
             }
         });
@@ -2451,6 +2503,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.transactions.length, 0);
         assert.equal(harness.mysql.state.store.payments.length, 0);
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, new RegExp("wallet transfer succeeded but tx " + txHash + " is not visible in wallet history yet"));
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 5);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
     });
 
     test("successful submits hold the submitted batch when post-submit wallet history lookup is unavailable", async () => {
@@ -2468,7 +2522,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                         tx_key: txKey
                     }
                 }],
-                get_transfers: Array.from({ length: 5 }, function () { return new Error("wallet offline"); })
+                get_transfer_by_txid: Array.from({ length: 5 }, function () { return new Error("wallet offline"); })
             }
         });
 
@@ -2480,6 +2534,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.transactions.length, 0);
         assert.equal(harness.mysql.state.store.payments.length, 0);
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet transfer succeeded but tx search is unavailable: Error: wallet offline/);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 5);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
     });
 
     test("startup recovery fail-stops immediately when a manual-review batch already exists", async () => {
