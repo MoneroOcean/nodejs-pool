@@ -15,3 +15,4 @@ require("./api.js");
 require("./support.js");
 require("./live.js");
 require("./payments.js");
+require("./payment_unlock_batch.js");
