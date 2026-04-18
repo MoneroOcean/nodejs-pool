@@ -296,6 +296,16 @@ test("eth-style hash lookups preserve hex block heights when deriving canonical 
     assert.equal(callbackArgs.body.result.number, "0x1403059");
 });
 
+test("eth-style block submit acceptance requires an explicit true result", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const etcPool = coinFuncs.getPoolSettings("ETC");
+
+    assert.equal(etcPool.acceptSubmittedBlock({ rpcResult: { result: true } }), true);
+    assert.equal(etcPool.acceptSubmittedBlock({ rpcResult: { result: false } }), false);
+    assert.equal(etcPool.acceptSubmittedBlock({ rpcResult: { result: "true" } }), false);
+    assert.equal(etcPool.acceptSubmittedBlock({ rpcResult: {} }), false);
+});
+
 test("eth-style hash lookups propagate nested callback stalls as errors", async () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const etcRpc = coinFuncs.getRpcSettings("ETC");
