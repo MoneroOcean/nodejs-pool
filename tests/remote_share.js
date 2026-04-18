@@ -385,7 +385,7 @@ test("remote_share logs ingress summaries for accepted and rejected frames", asy
             processDueJobs() {},
             close() {}
         },
-        requestSummaryIntervalMs: 20,
+        requestSummaryIntervalMs: 100,
         shareFlushIntervalMs: 5,
         shareStore: {
             storeShares() {}
