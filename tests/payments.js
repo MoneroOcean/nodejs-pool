@@ -1010,7 +1010,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.runtime.inspectState().isFailStop, false);
     });
 
-    test("not enough unlocked money checks wallet history before pinning the exact batch for retry", async () => {
+    test("not enough unlocked money checks wallet history before holding the claimed batch", async () => {
         const harness = createHarness({
             balances: [
                 { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
@@ -1029,14 +1029,16 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
 
         await harness.runtime.runCycle();
         assert.equal(harness.mysql.state.store.paymentBatches.length, 1);
-        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retrying");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitting");
+        assert.notEqual(harness.mysql.state.store.paymentBatches[0].submit_started_at, null);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.equal(harness.mysql.state.store.transactions.length, 0);
         assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet submit failed after claim with no wallet match yet: not enough unlocked money/);
         assert.equal(harness.database.getCache("lastPaymentCycle"), undefined);
     });
 
-    test("daemon rejection with no wallet match pins the batch for retry", async () => {
+    test("daemon rejection with no wallet match holds the claimed batch for later reconcile", async () => {
         const harness = createHarness({
             balances: [
                 { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
@@ -1055,13 +1057,15 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
 
         await harness.runtime.runCycle();
         assert.equal(harness.mysql.state.store.paymentBatches.length, 1);
-        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retrying");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitting");
+        assert.notEqual(harness.mysql.state.store.paymentBatches[0].submit_started_at, null);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet submit failed after claim with no wallet match yet: transaction was rejected by daemon/);
         assert.equal(harness.mysql.state.store.transactions.length, 0);
     });
 
-    test("guarded retry hold does not reopen a batch another runtime already finalized", async () => {
+    test("guarded post-claim hold does not regress a batch another runtime already finalized", async () => {
         const grossAmount = Math.round(0.2 * COIN);
         const feeAmount = Math.round(0.0001 * COIN);
         const netAmount = grossAmount - feeAmount;
@@ -1075,7 +1079,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
             failures: [{
                 once: true,
                 match(sql) {
-                    if (!sql.startsWith("UPDATE payment_batches SET status = ?, submit_started_at = ?, submitted_at = ?, updated_at = ?, last_reconciled_at = ?, last_error_text = ?, tx_hash = ?, tx_key = ? WHERE id = ? AND status = ?")) return false;
+                    if (!sql.startsWith("UPDATE payment_batches SET last_reconciled_at = ?, updated_at = ?, last_error_text = ? WHERE id = ? AND status = ?")) return false;
                     const batch = harness.mysql.state.store.paymentBatches[0];
                     Object.assign(batch, {
                         status: "finalized",
@@ -1135,7 +1139,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
     });
 
-    test("a pinned retrying batch blocks later payouts until the same batch clears", async () => {
+    test("a held submitting batch clears through reconcile before the next payout submits", async () => {
         const bulkTxHash = "a".repeat(64);
         const integratedTxHash = "b".repeat(64);
         const bulkTxKey = "c".repeat(64);
@@ -1156,13 +1160,11 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                     { result: { fee: 300000000, tx_hash: bulkTxHash, tx_key: bulkTxKey } },
                     { result: { fee: 300000000, tx_hash: integratedTxHash, tx_key: integratedTxKey } }
                 ],
-                get_transfers: [
-                    { result: { out: [], pending: [], pool: [] } },
-                    { result: { out: [], pending: [], pool: [] } },
-                    { result: { out: [], pending: [], pool: [] } },
-                    { result: { out: [], pending: [], pool: [] } },
-                    { result: { out: [], pending: [], pool: [] } },
-                    function replyTransfers() {
+                get_transfers: function replyTransfers(_params, calls) {
+                    const transferCalls = calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length;
+                    const historyChecks = calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length;
+                    if (transferCalls === 1 && historyChecks <= 5) return { result: { out: [], pending: [], pool: [] } };
+                    if (transferCalls === 1) {
                         return {
                             result: {
                                 out: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: bulkTransferAmount }], {
@@ -1173,26 +1175,24 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                                 pool: []
                             }
                         };
-                    },
-                    function replyTransfers() {
-                        return {
-                            result: {
-                                out: [
-                                    txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: bulkTransferAmount }], {
-                                        fee: 300000000,
-                                        txid: bulkTxHash
-                                    }),
-                                    txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: integratedTransferAmount }], {
-                                        fee: 300000000,
-                                        txid: integratedTxHash
-                                    })
-                                ],
-                                pending: [],
-                                pool: []
-                            }
-                        };
                     }
-                ]
+                    return {
+                        result: {
+                            out: [
+                                txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: bulkTransferAmount }], {
+                                    fee: 300000000,
+                                    txid: bulkTxHash
+                                }),
+                                txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: integratedTransferAmount }], {
+                                    fee: 300000000,
+                                    txid: integratedTxHash
+                                })
+                            ],
+                            pending: [],
+                            pool: []
+                        }
+                    };
+                }
             }
         });
         const plannedBatches = await harness.runtime.planBatches();
@@ -1201,20 +1201,20 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
 
         await harness.runtime.runCycle();
         assert.equal(harness.mysql.state.store.paymentBatches.length, 1);
-        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retrying");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitting");
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.equal(harness.mysql.state.store.balances[1].pending_batch_id, null);
         assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
 
         harness.clock.advance(10 * 60 * 1000 + 1000);
         await harness.runtime.runCycle();
-        assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 3);
+        assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 2);
         assert.equal(harness.mysql.state.store.paymentBatches.length, 2);
         assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
-        assert.equal(harness.mysql.state.store.paymentBatches[1].status, "finalized");
-        assert.equal(harness.mysql.state.store.transactions.length, 2);
+        assert.equal(harness.mysql.state.store.paymentBatches[1].status, "submitted");
+        assert.equal(harness.mysql.state.store.transactions.length, 1);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
-        assert.equal(harness.mysql.state.store.balances[1].pending_batch_id, null);
+        assert.equal(harness.mysql.state.store.balances[1].pending_batch_id, 2);
     });
 
     test("not enough money fail-stops for manual review when wallet history already contains one exact matching transfer", async () => {

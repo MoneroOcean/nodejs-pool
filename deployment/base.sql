@@ -112,7 +112,7 @@ CREATE TABLE `payment_batches` (
   PRIMARY KEY (`id`),
   KEY `payment_batches_status_created_at_index` (`status`,`created_at`),
   KEY `payment_batches_transaction_id_index` (`transaction_id`),
-  KEY `payment_batches_tx_hash_index` (`tx_hash`)
+  UNIQUE KEY `payment_batches_tx_hash_uindex` (`tx_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `payment_batch_items` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -183,7 +183,8 @@ CREATE TABLE `transactions` (
   `fees` bigint(26) DEFAULT NULL,
   `payees` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `transactions_id_uindex` (`id`)
+  UNIQUE KEY `transactions_id_uindex` (`id`),
+  UNIQUE KEY `transactions_transaction_hash_uindex` (`transaction_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `users` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
@@ -197,6 +198,26 @@ CREATE TABLE `users` (
   UNIQUE KEY `users_id_uindex` (`id`),
   UNIQUE KEY `users_username_uindex` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+ALTER TABLE `payment_batches`
+  ADD CONSTRAINT `payment_batches_transaction_id_fk`
+  FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`);
+
+ALTER TABLE `payments`
+  ADD CONSTRAINT `payments_transaction_id_fk`
+  FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`);
+
+ALTER TABLE `payment_batch_items`
+  ADD CONSTRAINT `payment_batch_items_batch_id_fk`
+  FOREIGN KEY (`batch_id`) REFERENCES `payment_batches` (`id`);
+
+ALTER TABLE `payment_batch_items`
+  ADD CONSTRAINT `payment_batch_items_balance_id_fk`
+  FOREIGN KEY (`balance_id`) REFERENCES `balance` (`id`);
+
+ALTER TABLE `balance`
+  ADD CONSTRAINT `balance_pending_batch_id_fk`
+  FOREIGN KEY (`pending_batch_id`) REFERENCES `payment_batches` (`id`);
 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'minerTimeout', '900', 'int', 'Length of time before a miner is flagged inactive.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'banEnabled', 'true', 'bool', 'Enables/disabled banning of "bad" miners.');
