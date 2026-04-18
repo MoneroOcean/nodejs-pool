@@ -276,7 +276,6 @@ function createCoinFuncsStub() {
         uniqueWorkerId: 0,
         uniqueWorkerIdBits: 0,
         blockedAddresses: [],
-        exchangeAddresses: [],
         niceHashDiff: 1000,
         baseDiff() {
             return BigInt("0x" + "f".repeat(64));

@@ -1562,7 +1562,13 @@ function getBlockSubmitOutcomeEntries(text, worker) {
     const entries = [];
     const lines = String(text || "").split(/\r?\n/);
     for (const line of lines) {
-        if (!line.includes("Block submit failed:") && !line.includes("Block submit unknown:") && !line.includes("Block found:")) continue;
+        if (
+            !line.includes("Block submit failed:")
+            && !line.includes("Block submit unknown:")
+            && !line.includes("Block submit rpc-error:")
+            && !line.includes("Block hash unresolved:")
+            && !line.includes("Block found:")
+        ) continue;
 
         const chainMatch = /chain=([^\s,]+)/.exec(line);
         const minerMatch = /miner="([^"]+)"/.exec(line);
@@ -1577,6 +1583,14 @@ function getBlockSubmitOutcomeEntries(text, worker) {
         }
         if (line.includes("Block submit unknown:")) {
             entries.push({ kind: "unknown", chain: chainMatch[1], miner });
+            continue;
+        }
+        if (line.includes("Block submit rpc-error:")) {
+            entries.push({ kind: "rpc-error", chain: chainMatch[1], miner });
+            continue;
+        }
+        if (line.includes("Block hash unresolved:")) {
+            entries.push({ kind: "unresolved-hash", chain: chainMatch[1], miner });
             continue;
         }
         if (
@@ -1613,6 +1627,8 @@ function summarizeBlockSubmitLog(logText, worker) {
         outcomeCount: outcomes.length,
         failureCount: outcomes.filter((entry) => entry.kind === "failed").length,
         unknownCount: outcomes.filter((entry) => entry.kind === "unknown").length,
+        rpcErrorCount: outcomes.filter((entry) => entry.kind === "rpc-error").length,
+        unresolvedHashCount: outcomes.filter((entry) => entry.kind === "unresolved-hash").length,
         rejectedCount: outcomes.filter((entry) => entry.kind === "rejected").length,
         chains: outcomes.map((entry) => entry.chain)
     };
@@ -2820,6 +2836,9 @@ module.exports = {
     BLOCK_SUBMIT_LIVE_CASES,
     cleanupLiveBlockSubmitCoverage,
     executeLiveBlockSubmitCoverageCase,
+    getBlockSubmitOutcomeEntries,
+    matchesBlockSubmitExpectation,
+    summarizeBlockSubmitLog,
     setupLiveBlockSubmitCoverage,
     runLivePoolSuite
 };

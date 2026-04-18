@@ -15,6 +15,21 @@ const {
     poolModule
 } = require("./pool_harness.js");
 
+async function expectLoginFinalError(params, error, options = {}) {
+    const { prepare, timeout } = options;
+    const { runtime } = await startHarness();
+
+    try {
+        if (prepare) await prepare(runtime);
+        const reply = invokePoolMethod({ method: "login", params });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error, timeout }]);
+    } finally {
+        await runtime.stop();
+    }
+}
+
 test.describe("pool validation", { concurrency: false }, () => {
 test("login fails cleanly when there is no active block template", async () => {
     const { runtime } = await startHarness({ templates: [] });
@@ -349,165 +364,69 @@ test("payment split logins reject percentages below the minimum", async () => {
 });
 
 test("login rejects malformed username formats with too many difficulty separators", async () => {
-    const { runtime } = await startHarness();
-
-    try {
-        const reply = invokePoolMethod({
-            method: "login",
-            params: {
-                login: `${MAIN_WALLET}+100+200`,
-                pass: "worker-bad-login-format"
-            }
-        });
-
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{
-            error: "Please use monero_address[.payment_id][(%N%monero_address_95char)+][+difficulty_number] login/user format",
-            timeout: undefined
-        }]);
-    } finally {
-        await runtime.stop();
-    }
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}+100+200`,
+        pass: "worker-bad-login-format"
+    }, "Please use monero_address[(%N%monero_address_95char)+][+difficulty_number] login/user format");
 });
 
 test("login rejects malformed username formats with unpaired payment split markers", async () => {
-    const { runtime } = await startHarness();
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}%1`,
+        pass: "worker-bad-split-format"
+    }, "Please use monero_address[(%N%monero_address_95char)+][+difficulty_number] login/user format");
+});
 
-    try {
-        const reply = invokePoolMethod({
-            method: "login",
-            params: {
-                login: `${MAIN_WALLET}%1`,
-                pass: "worker-bad-split-format"
-            }
-        });
+test("login rejects malformed username formats with too many payment split segments", async () => {
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}%1%${ALT_WALLET}%2%${THIRD_WALLET}%3%${MAIN_WALLET}`,
+        pass: "worker-too-many-splits"
+    }, "Please use monero_address[(%N%monero_address_95char)+][+difficulty_number] login/user format");
+});
 
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{
-            error: "Please use monero_address[.payment_id][(%N%monero_address_95char)+][+difficulty_number] login/user format",
-            timeout: undefined
-        }]);
-    } finally {
-        await runtime.stop();
-    }
+test("legacy Wallet.PaymentID logins are rejected", async () => {
+    const legacyPaymentId = "a".repeat(64);
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}.${legacyPaymentId}`,
+        pass: "x"
+    }, "Legacy Wallet.PaymentID logins are no longer supported. Please use a wallet address, subaddress, or integrated address directly.");
 });
 
 test("login rejects malformed password formats with too many separators", async () => {
-    const { runtime } = await startHarness();
-
-    try {
-        const reply = invokePoolMethod({
-            method: "login",
-            params: {
-                login: MAIN_WALLET,
-                pass: "worker:email@example.com:wallet:extra"
-            }
-        });
-
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{
-            error: "Please use worker_name[:email_or_pass[:monero_address]][~algo_name] password format",
-            timeout: undefined
-        }]);
-    } finally {
-        await runtime.stop();
-    }
+    await expectLoginFinalError({
+        login: MAIN_WALLET,
+        pass: "worker:email@example.com:wallet:extra"
+    }, "Please use worker_name[:email_or_pass[:monero_address]][~algo_name] password format");
 });
 
 test("payment split logins reject duplicate split addresses", async () => {
-    const { runtime } = await startHarness();
-
-    try {
-        const reply = invokePoolMethod({
-            method: "login",
-            params: {
-                login: `${MAIN_WALLET}%1%${ALT_WALLET}%2%${ALT_WALLET}`,
-                pass: "worker-split-duplicate"
-            }
-        });
-
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{
-            error: `You can't repeat payment split address ${ALT_WALLET}`,
-            timeout: undefined
-        }]);
-    } finally {
-        await runtime.stop();
-    }
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}%1%${ALT_WALLET}%2%${ALT_WALLET}`,
+        pass: "worker-split-duplicate"
+    }, `You can't repeat payment split address ${ALT_WALLET}`);
 });
 
 test("payment split logins reject temporarily banned payout targets", async () => {
-    const { runtime } = await startHarness();
-
-    try {
-        runtime.getState().bannedTmpWallets[ALT_WALLET] = 1;
-
-        const reply = invokePoolMethod({
-            method: "login",
-            params: {
-                login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
-                pass: "worker-split-banned"
-            }
-        });
-
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{
-            error: `Temporary (10 minutes max) banned payment address ${ALT_WALLET}`,
-            timeout: undefined
-        }]);
-    } finally {
-        await runtime.stop();
-    }
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
+        pass: "worker-split-banned"
+    }, `Temporary (10 minutes max) banned payment address ${ALT_WALLET}`, {
+        prepare(runtime) {
+            runtime.getState().bannedTmpWallets[ALT_WALLET] = 1;
+        }
+    });
 });
 
 test("payment split logins reject one-hour banned payout targets", async () => {
-    const { runtime } = await startHarness();
-
-    try {
-        runtime.getState().bannedBigTmpWallets[ALT_WALLET] = 1;
-
-        const reply = invokePoolMethod({
-            method: "login",
-            params: {
-                login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
-                pass: "worker-split-long-ban"
-            }
-        });
-
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{
-            error: "Temporary (one hour max) ban since you connected too many workers. Please use proxy (https://github.com/MoneroOcean/xmrig-proxy)",
-            timeout: 600
-        }]);
-    } finally {
-        await runtime.stop();
-    }
-});
-
-test("exchange addresses require a payment id", async () => {
-    const { runtime } = await startHarness();
-    const originalExchangeAddresses = global.coinFuncs.exchangeAddresses.slice();
-
-    try {
-        global.coinFuncs.exchangeAddresses = [MAIN_WALLET];
-
-        const reply = invokePoolMethod({
-            method: "login",
-            params: {
-                login: MAIN_WALLET,
-                pass: "worker-exchange"
-            }
-        });
-
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{
-            error: "Exchange addresses need 64 hex character long payment IDs. Please specify it after your wallet address as follows after dot: Wallet.PaymentID",
-            timeout: undefined
-        }]);
-    } finally {
-        global.coinFuncs.exchangeAddresses = originalExchangeAddresses;
-        await runtime.stop();
-    }
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
+        pass: "worker-split-long-ban"
+    }, "Temporary (one hour max) ban since you connected too many workers. Please use proxy (https://github.com/MoneroOcean/xmrig-proxy)", {
+        prepare(runtime) {
+            runtime.getState().bannedBigTmpWallets[ALT_WALLET] = 1;
+        },
+        timeout: 600
+    });
 });
 
 test("perf login suffixes set fixed and dynamic difficulty modes correctly", async () => {

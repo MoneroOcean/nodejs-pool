@@ -29,6 +29,29 @@ async function flushShareAccumulator(check, timeout = 200) {
     throw new Error("Timed out waiting for deferred share flush");
 }
 
+function assertLoginAccepted(reply) {
+    assert.equal(reply.replies[0].error, null);
+    assert.equal(reply.replies[0].result.status, "OK");
+}
+
+async function withLoggedInMiner(id, params, callback) {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const reply = invokePoolMethod({
+            socket,
+            id,
+            method: "login",
+            params
+        });
+        assertLoginAccepted(reply);
+        await callback(runtime.getState().activeMiners.get(socket.miner_id));
+    } finally {
+        await runtime.stop();
+    }
+}
+
 test.describe("pool protocol", { concurrency: false }, () => {
 test("default stratum miner can login, keepalive, and submit a valid share", async () => {
     const { runtime, database } = await startHarness();
@@ -1015,54 +1038,105 @@ test("login without a login field is rejected", async () => {
 });
 
 test("login without a pass falls back to the default x worker name", async () => {
-    const { runtime } = await startHarness();
-    const socket = {};
-
-    try {
-        const reply = invokePoolMethod({
-            socket,
-            id: 59,
-            method: "login",
-            params: {
-                login: MAIN_WALLET
-            }
-        });
-
-        assert.equal(reply.replies[0].error, null);
-        assert.equal(reply.replies[0].result.status, "OK");
-
-        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+    await withLoggedInMiner(59, { login: MAIN_WALLET }, async (miner) => {
         assert.equal(miner.identifier, "x");
         assert.equal(miner.email, "");
-    } finally {
-        await runtime.stop();
-    }
+    });
 });
 
 test("email-only passwords use the shorthand worker and store the email address", async () => {
-    const { runtime } = await startHarness();
-    const socket = {};
-
-    try {
-        const reply = invokePoolMethod({
-            socket,
-            id: 60,
-            method: "login",
-            params: {
-                login: MAIN_WALLET,
-                pass: "miner@example.com"
-            }
-        });
-
-        assert.equal(reply.replies[0].error, null);
-        assert.equal(reply.replies[0].result.status, "OK");
-
-        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+    await withLoggedInMiner(60, {
+        login: MAIN_WALLET,
+        pass: "miner@example.com"
+    }, async (miner) => {
         assert.equal(miner.identifier, "email");
         assert.equal(miner.email, "miner@example.com");
-    } finally {
-        await runtime.stop();
-    }
+    });
+});
+
+test("dotted login suffix becomes the worker name when the password defaults to x", async () => {
+    await withLoggedInMiner(61, {
+        login: `${MAIN_WALLET}.dot-worker`
+    }, async (miner) => {
+        assert.equal(miner.identifier, "dot-worker");
+        assert.equal(miner.email, "");
+        assert.equal(miner.address, MAIN_WALLET);
+        assert.equal(miner.payout, MAIN_WALLET);
+        assert.equal(miner.paymentID, null);
+    });
+});
+
+test("dotted login suffix is ignored when the password provides a worker name", async () => {
+    await withLoggedInMiner(62, {
+        login: `${MAIN_WALLET}.dot-worker`,
+        pass: "worker-pass"
+    }, async (miner) => {
+        assert.equal(miner.identifier, "worker-pass");
+        assert.equal(miner.address, MAIN_WALLET);
+        assert.equal(miner.payout, MAIN_WALLET);
+        assert.equal(miner.paymentID, null);
+    });
+});
+
+test("worker and email password segments are parsed directly", async () => {
+    await withLoggedInMiner(63, {
+        login: MAIN_WALLET,
+        pass: "worker-mail:miner@example.com"
+    }, async (miner) => {
+        assert.equal(miner.identifier, "worker-mail");
+        assert.equal(miner.email, "miner@example.com");
+        assert.equal(miner.address, MAIN_WALLET);
+        assert.equal(miner.payout, MAIN_WALLET);
+    });
+});
+
+test("password payout overrides replace the login wallet", async () => {
+    await withLoggedInMiner(64, {
+        login: MAIN_WALLET,
+        pass: `worker-override:miner@example.com:${ALT_WALLET}`
+    }, async (miner) => {
+        assert.equal(miner.identifier, "worker-override");
+        assert.equal(miner.email, "miner@example.com");
+        assert.equal(miner.address, ALT_WALLET);
+        assert.equal(miner.payout, ALT_WALLET);
+    });
+});
+
+test("rigid takes precedence over password and dotted login worker names", async () => {
+    await withLoggedInMiner(65, {
+        login: `${MAIN_WALLET}.dot-worker`,
+        pass: "worker-pass",
+        rigid: "rigid-worker"
+    }, async (miner) => {
+        assert.equal(miner.identifier, "rigid-worker");
+        assert.equal(miner.address, MAIN_WALLET);
+        assert.equal(miner.payout, MAIN_WALLET);
+    });
+});
+
+test("MinerGate agents force the MinerGate worker identifier", async () => {
+    await withLoggedInMiner(66, {
+        login: `${MAIN_WALLET}.dot-worker`,
+        pass: "worker-pass",
+        rigid: "rigid-worker",
+        agent: "MinerGate/1.0"
+    }, async (miner) => {
+        assert.equal(miner.identifier, "MinerGate");
+        assert.equal(miner.address, MAIN_WALLET);
+        assert.equal(miner.payout, MAIN_WALLET);
+    });
+});
+
+test("password algo suffix overrides the initial algo set", async () => {
+    await withLoggedInMiner(67, {
+        login: MAIN_WALLET,
+        pass: "worker-algo~rx/0"
+    }, async (miner) => {
+        assert.equal(miner.identifier, "worker-algo");
+        assert.equal(miner.algos["rx/0"], 1);
+        assert.equal(Object.keys(miner.algos).length, 1);
+        assert.equal(miner.algo_min_time, 60);
+    });
 });
 
 test("getjob without params is rejected", async () => {
