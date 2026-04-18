@@ -131,6 +131,10 @@ function createSupport(clock, sentEmails) {
                 return Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : "";
             });
         },
+        sleep(ms) {
+            clock.advance(ms);
+            return Promise.resolve();
+        },
         sendEmail(to, subject, body) {
             sentEmails.push({ to, subject, body });
         }
@@ -685,6 +689,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
 
     test("runCycle finalizes an integrated batch and logs the full intended and finalized batch details", async () => {
         const transferFee = 300000000;
+        const longTxKey = "b".repeat(1088);
         const harness = createHarness({
             balances: [
                 { id: 1, payment_address: INTEGRATED, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
@@ -697,7 +702,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                     result: {
                         fee: transferFee,
                         tx_hash: "a".repeat(64),
-                        tx_key: "b".repeat(64)
+                        tx_key: longTxKey
                     }
                 }]
             }
@@ -711,7 +716,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 harness.wallet.calls.push({ method, params });
                 if (method === "transfer") logCountAtTransfer = outputRef.log.length;
                 const reply = method === "transfer"
-                    ? { result: { fee: transferFee, tx_hash: "a".repeat(64), tx_key: "b".repeat(64) } }
+                    ? { result: { fee: transferFee, tx_hash: "a".repeat(64), tx_key: longTxKey } }
                     : method === "getbalance"
                         ? { result: { balance: 10 * COIN, unlocked_balance: 10 * COIN } }
                         : method === "get_transfers"
@@ -726,7 +731,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                                 }
                             }
                         : method === "get_tx_key"
-                            ? { result: { tx_key: "b".repeat(64) } }
+                            ? { result: { tx_key: longTxKey } }
                             : { result: { out: [], pending: [], pool: [] } };
                 setImmediate(function asyncReply() {
                     callback(reply);
@@ -738,6 +743,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
 
         const batch = harness.mysql.state.store.paymentBatches[0];
         assert.equal(batch.status, "finalized");
+        assert.equal(batch.tx_key, longTxKey);
         assert.equal(harness.mysql.state.store.transactions.length, 1);
         assert.equal(harness.mysql.state.store.payments.length, 1);
         assert.equal(Object.prototype.hasOwnProperty.call(harness.mysql.state.store.paymentBatchItems[0], "payment_id"), false);
@@ -754,7 +760,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.match(output.log.join("\n"), /https:\/\/xmrchain\.net\/prove\//);
     });
 
-    test("accepted wallet transfer waits for wallet-history visibility before finalizing and sends FYI email", async () => {
+    test("accepted wallet transfer retries wallet-history visibility during submit and finalizes in the same cycle", async () => {
         const transferFee = 300000000;
         const txHash = "1".repeat(64);
         const txKey = "2".repeat(64);
@@ -791,28 +797,89 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         const transferItemAmount = plannedBatches[0].items[0].netAmount;
 
         await harness.runtime.runCycle();
-        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
         assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, txHash);
         assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, txKey);
-        assert.equal(harness.mysql.state.store.transactions.length, 0);
-        assert.equal(harness.mysql.state.store.payments.length, 0);
-        assert.equal(harness.mysql.state.store.balances[0].amount, Math.round(0.2 * COIN));
-        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
-        assert.equal(harness.database.getCache("lastPaymentCycle"), undefined);
-        assert.equal(harness.sentEmails.some(function hasFyi(entry) { return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation"; }), true);
+        assert.equal(harness.mysql.state.store.transactions.length, 1);
+        assert.equal(harness.mysql.state.store.payments.length, 1);
+        assert.equal(harness.mysql.state.store.balances[0].amount, 0);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
+        assert.equal(harness.database.getCache("lastPaymentCycle"), Math.floor(harness.clock.now() / 1000));
+        assert.equal(harness.sentEmails.some(function hasFyi(entry) { return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation"; }), false);
         assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 2);
+        assert.equal(harness.mysql.state.store.transactions[0].transaction_hash, txHash);
+    });
 
-        harness.clock.advance(10 * 60 * 1000 + 1000);
-        await harness.runtime.runCycle();
+    test("startup recovery finalizes a submitted integrated batch even when wallet history exposes payment_id", async () => {
+        const txHash = "6".repeat(64);
+        const txKey = "7".repeat(64);
+        const grossAmount = Math.round(0.042052 * COIN);
+        const netAmount = 41655908132;
+        const totalFee = 30640000;
+        const clock = createClock(Date.UTC(2026, 3, 18, 5, 10, 34));
+        const harness = createHarness({
+            clock,
+            balances: [
+                { id: 1, payment_address: INTEGRATED, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 4 }
+            ],
+            paymentBatches: [{
+                id: 4,
+                status: "submitted",
+                batch_type: "integrated",
+                total_gross: grossAmount,
+                total_net: netAmount,
+                total_fee: totalFee,
+                destination_count: 1,
+                created_at: "2026-04-18 05:10:19",
+                updated_at: "2026-04-18 05:10:20",
+                submit_started_at: "2026-04-18 05:10:19",
+                submitted_at: "2026-04-18 05:10:20",
+                finalized_at: null,
+                released_at: null,
+                last_reconciled_at: null,
+                reconcile_attempts: 0,
+                reconcile_clean_passes: 0,
+                tx_hash: txHash,
+                tx_key: txKey,
+                transaction_id: null,
+                last_error_text: "wallet transfer succeeded but tx " + txHash + " is not visible in wallet history yet"
+            }],
+            paymentBatchItems: [{
+                id: 1,
+                batch_id: 4,
+                balance_id: 1,
+                destination_order: 0,
+                pool_type: "pplns",
+                payment_address: INTEGRATED,
+                gross_amount: grossAmount,
+                net_amount: netAmount,
+                fee_amount: grossAmount - netAmount,
+                created_at: "2026-04-18 05:10:19"
+            }],
+            walletScript: {
+                get_transfers: [{
+                    result: {
+                        out: [txTransferRecord(clock, [{ address: INTEGRATED, amount: netAmount }], {
+                            fee: totalFee,
+                            paymentId: "004258d2bfdd764c",
+                            txid: txHash
+                        })],
+                        pending: [],
+                        pool: []
+                    }
+                }]
+            }
+        });
+
+        await harness.runtime.recoverPendingBatches("startup");
         assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].transaction_id, 1);
         assert.equal(harness.mysql.state.store.transactions.length, 1);
         assert.equal(harness.mysql.state.store.transactions[0].transaction_hash, txHash);
         assert.equal(harness.mysql.state.store.payments.length, 1);
         assert.equal(harness.mysql.state.store.balances[0].amount, 0);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, null);
-        assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 2);
     });
 
     test("reserve transaction failure rolls back cleanly and does not update lastPaymentCycle", async () => {
@@ -863,7 +930,13 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
             ],
             walletScript: {
                 transfer: [{ error: { message: "transaction was rejected by daemon" } }],
-                get_transfers: [{ result: { out: [], pending: [], pool: [] } }]
+                get_transfers: [
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } }
+                ]
             }
         });
 
@@ -871,7 +944,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.paymentBatches.length, 1);
         assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retrying");
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
         assert.equal(harness.mysql.state.store.transactions.length, 0);
     });
 
@@ -1179,6 +1252,10 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
                 transfer: [{ error: { message: "daemon busy" } }],
                 get_transfers: [
                     { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
+                    { result: { out: [], pending: [], pool: [] } },
                     { result: { out: [], pending: [], pool: [] } }
                 ]
             }
@@ -1189,17 +1266,17 @@ test.describe("payments runtime", { concurrency: false }, function paymentsSuite
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.equal(harness.database.getCache("lastPaymentCycle"), undefined);
         assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 1);
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
         assert.equal(harness.sentEmails.some(function hasFyi(entry) { return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation"; }), true);
 
         harness.clock.advance(5 * 60 * 1000);
         await harness.runtime.recoverPendingBatches("pass-2");
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 5);
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
 
         harness.clock.advance(5 * 60 * 1000 + 1000);
         await harness.runtime.recoverPendingBatches("pass-3");
-        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 2);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 6);
         assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitting");
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
     });

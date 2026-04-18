@@ -106,7 +106,7 @@ CREATE TABLE `payment_batches` (
   `reconcile_attempts` int(11) NOT NULL DEFAULT '0',
   `reconcile_clean_passes` int(11) NOT NULL DEFAULT '0',
   `tx_hash` varchar(128) DEFAULT NULL,
-  `tx_key` varchar(256) DEFAULT NULL,
+  `tx_key` text,
   `transaction_id` int(11) DEFAULT NULL,
   `last_error_text` text,
   PRIMARY KEY (`id`),
