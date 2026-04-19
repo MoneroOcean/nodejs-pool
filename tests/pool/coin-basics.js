@@ -266,7 +266,6 @@ test("eth-style hash lookups preserve hex block heights when deriving canonical 
             noErrorReport: true,
             port: REAL_ETH_STYLE_PORT,
             runtime: {
-                async: require("async"),
                 coinFuncs: {
                     getPortBlockHeaderByID(_port, blockHeight, callback) {
                         seenHeights.push(blockHeight);
@@ -326,7 +325,6 @@ test("eth-style hash lookups propagate nested callback stalls as errors", async 
                 noErrorReport: true,
                 port: REAL_ETH_STYLE_PORT,
                 runtime: {
-                    async: require("async"),
                     coinFuncs: {
                         getPortBlockHeaderByID() {}
                     },
