@@ -14,7 +14,7 @@ const {
     finalizeLivePoolRun,
     formatFailureDetails,
     setupLiveBlockSubmitCoverage
-} = require("./pool_live.js");
+} = require("./pool/live.js");
 
 const LIVE_TARGET_HOST = process.env.NODEJS_POOL_LIVE_TARGET_HOST || "";
 const liveReachable = async () => LIVE_TARGET_HOST ? true : await isDefaultTargetReachable();
