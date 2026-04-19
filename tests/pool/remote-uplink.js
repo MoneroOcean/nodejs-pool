@@ -6,7 +6,7 @@ const test = require("node:test");
 
 test.describe("pool remote uplink", { concurrency: false }, () => {
 test("posts raw share payloads as application/octet-stream", async () => {
-    const Database = require("../lib/pool/remote_uplink.js");
+    const Database = require("../../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const handles = [];
     let server;
@@ -74,7 +74,7 @@ test("posts raw share payloads as application/octet-stream", async () => {
 });
 
 test("queue monitor emits FYI backlog email once threshold is reached", async () => {
-    const Database = require("../lib/pool/remote_uplink.js");
+    const Database = require("../../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const intervals = [];
 
@@ -130,7 +130,7 @@ test("queue monitor emits FYI backlog email once threshold is reached", async ()
 });
 
 test("queue monitor reports failed response statuses", async () => {
-    const Database = require("../lib/pool/remote_uplink.js");
+    const Database = require("../../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const originalConsoleLog = console.log;
     const intervals = [];
@@ -181,6 +181,143 @@ test("queue monitor reports failed response statuses", async () => {
 
         assert.equal(requestCount, 2);
         assert.ok(logs.some((line) => /failed=1/.test(line) && /statuses=403:1/.test(line) && /ok=1/.test(line)));
+        database.close();
+    } finally {
+        console.log = originalConsoleLog;
+        global.setInterval = originalSetInterval;
+        delete global.config;
+        delete global.database;
+        if (server) {
+            await new Promise((resolve) => server.close(resolve));
+        }
+    }
+});
+
+test("store methods frame remote messages with the configured auth key and message type", () => {
+    const Database = require("../../lib/pool/remote_uplink.js");
+    const originalSetInterval = global.setInterval;
+    const originalProcessSend = process.send;
+    const encodedFrames = [];
+    const sentMessages = [];
+
+    global.setInterval = function captureSetInterval() {
+        return {
+            unref() {},
+            hasRef() { return false; }
+        };
+    };
+
+    try {
+        process.send = function captureSend(message) {
+            sentMessages.push(message);
+        };
+        global.config = {
+            hostname: "pool-harness",
+            api: {
+                authKey: "uplink-auth-key"
+            },
+            general: {
+                adminEmail: "admin@example.com",
+                shareHost: "http://127.0.0.1:8000/leafApi"
+            }
+        };
+        global.database = {
+            thread_id: "[M] "
+        };
+        global.protos = {
+            MESSAGETYPE: {
+                SHARE: 1,
+                BLOCK: 2,
+                ALTBLOCK: 3,
+                INVALIDSHARE: 4
+            },
+            WSData: {
+                encode(frame) {
+                    encodedFrames.push(frame);
+                    return Buffer.from("c0de", "hex");
+                }
+            }
+        };
+
+        const database = new Database();
+        database.storeShare(101, Buffer.from("share"));
+        database.storeBlock(102, Buffer.from("block"));
+        database.storeAltBlock(103, Buffer.from("alt"));
+        database.storeInvalidShare(Buffer.from("invalid"));
+
+        assert.equal(sentMessages.length, 4);
+        assert.deepEqual(sentMessages.map((entry) => entry.type), ["sendRemote", "sendRemote", "sendRemote", "sendRemote"]);
+        assert.deepEqual(sentMessages.map((entry) => entry.body), ["c0de", "c0de", "c0de", "c0de"]);
+        assert.deepEqual(encodedFrames.map((entry) => entry.msgType), [1, 2, 3, 4]);
+        assert.deepEqual(encodedFrames.map((entry) => entry.exInt), [101, 102, 103, 1]);
+        assert.equal(encodedFrames.every((entry) => entry.key === "uplink-auth-key"), true);
+        database.close();
+    } finally {
+        global.setInterval = originalSetInterval;
+        process.send = originalProcessSend;
+        delete global.config;
+        delete global.database;
+        delete global.protos;
+    }
+});
+
+test("send queue retries transient network errors and the monitor logs the network failure summary", async () => {
+    const Database = require("../../lib/pool/remote_uplink.js");
+    const originalSetInterval = global.setInterval;
+    const originalConsoleLog = console.log;
+    const intervals = [];
+    const logs = [];
+    let server;
+    let requestCount = 0;
+
+    console.log = function captureLog(message) {
+        logs.push(message);
+    };
+    global.setInterval = function captureSetInterval(fn, ms, ...args) {
+        intervals.push({ fn, ms, args });
+        return {
+            unref() {},
+            hasRef() { return false; }
+        };
+    };
+
+    try {
+        server = http.createServer((req, res) => {
+            requestCount += 1;
+            if (requestCount === 1) {
+                req.socket.destroy();
+                return;
+            }
+            res.statusCode = 200;
+            res.end("ok");
+        });
+        await new Promise((resolve) => {
+            server.listen(0, "127.0.0.1", resolve);
+        });
+
+        global.config = {
+            hostname: "pool-harness",
+            general: {
+                adminEmail: "admin@example.com",
+                shareHost: `http://127.0.0.1:${server.address().port}/leafApi`
+            }
+        };
+        global.database = {
+            thread_id: "[M] "
+        };
+
+        const database = new Database();
+        await new Promise((resolve) => {
+            database.sendQueue.push({ body: Buffer.from([0xbb]) }, resolve);
+        });
+
+        const monitor = intervals.find((entry) => entry.ms === 30 * 1000);
+        assert.ok(monitor);
+        monitor.fn(...monitor.args);
+
+        assert.equal(requestCount, 2);
+        assert.ok(logs.some((line) => /failed=1/.test(line) && /network=1/.test(line) && /ok=1/.test(line)));
+        assert.ok(logs.some((line) => /errors=.*ECONNRESET:1|errors=.*socket hang up:1/.test(line)));
         database.close();
     } finally {
         console.log = originalConsoleLog;
