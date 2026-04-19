@@ -118,7 +118,7 @@ function createSupport() {
     };
 }
 
-function createCnUtil() {
+function createBlockTemplate() {
     return {
         address_decode(buffer) {
             const value = buffer.toString();
@@ -213,7 +213,7 @@ test.describe("api", { concurrency: false }, () => {
         });
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: database,
             mysql: createMysql(async () => []),
@@ -242,7 +242,7 @@ test.describe("api", { concurrency: false }, () => {
         const database = createDatabase({ caches: {} });
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: config,
             database: database,
             mysql: createMysql(async () => []),
@@ -270,7 +270,7 @@ test.describe("api", { concurrency: false }, () => {
 
     test("request parsers reject malformed and oversized JSON bodies", async () => {
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
             mysql: createMysql(async () => []),
@@ -329,7 +329,7 @@ test.describe("api", { concurrency: false }, () => {
         });
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: config,
             database: createDatabase({ caches: {} }),
             mysql: mysql,
@@ -365,7 +365,7 @@ test.describe("api", { concurrency: false }, () => {
         const attack = "wallet' OR 1=1 -- ";
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
             mysql: mysql,

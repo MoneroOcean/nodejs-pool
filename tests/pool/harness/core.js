@@ -4,8 +4,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const protobuf = require("protocol-buffers");
-const cnUtil = require("cryptoforknote-util");
-const multiHashing = require("cryptonight-hashing");
+const blockTemplate = require("node-blocktemplate");
+const powHash = require("node-powhash");
 
 const supportFactory = require("../../../lib/common/support.js");
 
@@ -396,7 +396,7 @@ function createCoinFuncsStub() {
                 const vectorNonce = Buffer.from(buffer.subarray(4, 8)).toString("hex");
                 if (vectorNonce in powVectorMap) {
                     const vector = powVectorMap[vectorNonce];
-                    return multiHashing.randomx(
+                    return powHash.randomx(
                         Buffer.from(vector.input, vector.inputEncoding || "utf8"),
                         Buffer.from(vector.seed, vector.seedEncoding || "utf8"),
                         0
@@ -427,7 +427,7 @@ function createCoinFuncsStub() {
 
 function createBaseTemplate({ coin, port, idHash, height }) {
     if (port === ETH_PORT) {
-        const template = cnUtil.RavenBlockTemplate({
+        const template = blockTemplate.RavenBlockTemplate({
             height,
             bits: "1d00ffff",
             curtime: 1234567890,

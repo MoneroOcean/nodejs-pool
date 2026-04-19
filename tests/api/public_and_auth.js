@@ -118,7 +118,7 @@ function createSupport() {
     };
 }
 
-function createCnUtil() {
+function createBlockTemplate() {
     return {
         address_decode(buffer) {
             const value = buffer.toString();
@@ -218,7 +218,7 @@ test.describe("api", { concurrency: false }, () => {
         });
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: config,
             database: createDatabase({ caches: {} }),
             jwt: jwt,
@@ -263,7 +263,7 @@ test.describe("api", { concurrency: false }, () => {
         });
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: { wallet: { seen: true } } }),
             mysql: mysql,
@@ -337,7 +337,7 @@ test.describe("api", { concurrency: false }, () => {
         });
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: database,
             mysql: mysql,
@@ -393,7 +393,7 @@ test.describe("api", { concurrency: false }, () => {
         });
 
         await withRuntime({
-            cnUtil: createCnUtil(),
+            blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: { wallet: { seen: true } } }),
             mysql: mysql,
@@ -422,7 +422,7 @@ test.describe("api", { concurrency: false }, () => {
     test("summary logging stays compact and only emits when there was activity", async () => {
         const captured = await captureConsole(async function run(output) {
             await withRuntime({
-                cnUtil: createCnUtil(),
+                blockTemplate: createBlockTemplate(),
                 config: createConfig(),
                 database: createDatabase({ caches: {} }),
                 mysql: createMysql(async () => []),

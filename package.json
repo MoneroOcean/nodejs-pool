@@ -1,9 +1,13 @@
 {
   "name": "nodejs-pool",
   "version": "0.0.1",
-  "description": "Improved version of Snipa22 nodejs-pool",
+  "description": "MoneroOcean multi-coin mining pool backend with automatic algo switching support",
   "private": true,
   "main": "init.js",
+  "homepage": "https://github.com/MoneroOcean/nodejs-pool#readme",
+  "bugs": {
+    "url": "https://github.com/MoneroOcean/nodejs-pool/issues"
+  },
   "engines": {
     "node": ">=18"
   },
@@ -17,17 +21,31 @@
     "type": "git",
     "url": "https://github.com/MoneroOcean/nodejs-pool.git"
   },
-  "author": "Multiple",
+  "author": "MoneroOcean contributors",
   "license": "MIT",
+  "keywords": [
+    "monero",
+    "moneroocean",
+    "mining",
+    "mining-pool",
+    "stratum",
+    "pool-backend",
+    "nodejs",
+    "node",
+    "lmdb",
+    "mysql",
+    "randomx",
+    "cryptonight"
+  ],
   "dependencies": {
     "async": "3.2.2",
     "crypto-js": "4.2.0",
-    "cryptoforknote-util": "git+https://github.com/MoneroOcean/node-cryptoforknote-util.git#v15.8.12",
-    "cryptonight-hashing": "git+https://github.com/MoneroOcean/node-cryptonight-hashing.git#v29.1.6",
     "debug": "2.6.9",
     "express": "4.22.1",
     "jsonwebtoken": "9.0.3",
     "node-lmdb": "0.10.1",
+    "node-blocktemplate": "git+https://github.com/MoneroOcean/node-blocktemplate.git#v15.8.16",
+    "node-powhash": "git+https://github.com/MoneroOcean/node-powhash.git#v29.1.8",
     "promise-mysql": "3.0.0",
     "protocol-buffers": "5.0.0",
     "utf8": "3.0.0"
