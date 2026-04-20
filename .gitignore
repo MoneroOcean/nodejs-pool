@@ -20,7 +20,7 @@ config.json
 
 # Generated local runtime outputs
 dump
-dump_*
+dump_[0-9]*
 wallet_trust_*
 miner_agents
 extra_verify_wallet_hashes_*
