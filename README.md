@@ -8,7 +8,7 @@ Node.js mining pool backend with LMDB share storage, MySQL-backed configuration,
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/node-%3E%3D18-111111.svg" alt="Node 18+">
   <img src="https://img.shields.io/badge/platform-Ubuntu%2024.04-111111.svg" alt="Ubuntu 24.04">
-  <img src="https://img.shields.io/badge/focus-MySQL%20%2B%20LMDB%20backend-111111.svg" alt="MySQL and LMDB backend">
+  <img src="https://img.shields.io/badge/focus-pool%20backend-111111.svg" alt="Pool backend">
 </p>
 
 </div>
