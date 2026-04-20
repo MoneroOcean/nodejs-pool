@@ -8,6 +8,7 @@ node_modules
 # Local editor / workstation artifacts
 .DS_Store
 .codex
+lib2/
 *~
 *.un~
 

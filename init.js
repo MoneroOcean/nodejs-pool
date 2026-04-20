@@ -144,6 +144,14 @@ function loadPoolModule() {
     });
 }
 
+function loadOptionalLib2Module(relativePath, moduleName) {
+    const absolutePath = path.join(__dirname, relativePath);
+    if (!fs.existsSync(absolutePath)) {
+        throw new Error("Optional module '" + moduleName + "' requires lib2 at " + absolutePath);
+    }
+    return require(relativePath);
+}
+
 const moduleLoaders = {
     pool: loadPoolModule,
     block_manager: function () {
@@ -151,8 +159,8 @@ const moduleLoaders = {
         runtime.start();
         return runtime;
     },
-    altblockManager: function () { return require('./lib2/altblockManager.js'); },
-    altblockExchange: function () { return require('./lib2/altblockExchange.js'); },
+    altblock_manager: function () { return loadOptionalLib2Module('./lib2/altblock_manager.js', 'altblock_manager'); },
+    altblockExchange: function () { return loadOptionalLib2Module('./lib2/altblockExchange.js', 'altblockExchange'); },
     payments: function () { return require('./lib/payments.js'); },
     api: function () { return require('./lib/api.js'); },
     remote_share: function () { return require('./lib/remote_share.js'); },
@@ -214,12 +222,17 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
             console.log("");
             logStartup("module", argv.module);
         }
-        return Promise.resolve(loader()).then(function(loadedModule) {
+        return Promise.resolve().then(function runLoader() {
+            return loader();
+        }).then(function(loadedModule) {
             activeModule = loadedModule;
+        }).catch(function onLoaderError(error) {
+            console.error("Failed to load module " + argv.module + ": " + shutdownErrorMessage(error));
+            process.exit(1);
         });
     } else {
         console.error("Invalid module/tool provided.  Please provide a valid module/tool");
-        console.error("Valid Modules: pool, block_manager, payments, api, remote_share, worker, long_runner");
+        console.error("Valid Modules: " + Object.keys(moduleLoaders).join(", "));
         let valid_tools = "Valid Tools: ";
         fs.readdirSync('./tools/').forEach(function(line){
             valid_tools += path.parse(line).name + ", ";
