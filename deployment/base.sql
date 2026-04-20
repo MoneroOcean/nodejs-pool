@@ -272,11 +272,9 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorLTHN',  '0', 'float', 'Lethean algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorGRFT',  '0', 'float', 'Graft algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorTRTL',  '0', 'float', 'Turtle algo hash price factor relative to coinHashFactor');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorIRD',  '0', 'float', 'Iridium algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorARQ',  '0', 'float', 'ArqMa algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorXMV',  '0', 'float', 'MoneroV algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorXWP',  '0', 'float', 'Swap algo hash price factor relative to coinHashFactor');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorXEQ',  '0', 'float', 'Equilibria algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorCCX',  '0', 'float', 'Conceal algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorXTA',  '0', 'float', 'Italocoin algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorDERO',  '0', 'float', 'Dero algo hash price factor relative to coinHashFactor');
@@ -291,7 +289,6 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorBTRM',  '0', 'float', 'BTRM algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorZEPH',  '0', 'float', 'ZEPH algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorXNA',  '0', 'float', 'XNA algo hash price factor relative to coinHashFactor');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorCLORE',  '0', 'float', 'CLORE algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorSAL',  '0', 'float', 'SAL algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorXTM-T',  '0', 'float', 'XTM-T algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorXTM-C',  '0', 'float', 'XTM-C algo hash price factor relative to coinHashFactor');
@@ -342,14 +339,12 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_31014', '', 'string', 'Address to mine to for 31014 (Saronite) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_33124', '', 'string', 'Address to mine to for 33124 (XtendCash) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_11898', '', 'string', 'Address to mine to for 11898 (Turtle) port.');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_13007', '', 'string', 'Address to mine to for 13007 (Iridium) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_19994', '', 'string', 'Address to mine to for 19994 (ArqMa) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_19950', '', 'string', 'Address to mine to for 19950 (Swap) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_13102', '', 'string', 'Address to mine to for 13102 (Italocoin) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_20206', '', 'string', 'Address to mine to for 20206 (Dero) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_18181', '', 'string', 'Address to mine to for 18181 (XMC) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_16000', '', 'string', 'Address to mine to for 16000 (CCX) port.');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_9231', '', 'string', 'Address to mine to for 9231 (Equilibria) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_8766', '', 'string', 'Address to mine to for 8766 (Ravencoin) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_8545', '', 'string', 'Address to mine to for 8545 (Ethereum) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_8645', '', 'string', 'Address to mine to for 8645 (Ethereum Classic) port.');
@@ -360,7 +355,6 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_17767', '', 'string', 'Address to mine to for 17767 (ZEPH) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_10225', '', 'string', 'Address to mine to for 10225 (BTRM) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_19001', '', 'string', 'Address to mine to for 19001 (Neurai) port.');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_9766', '', 'string', 'Address to mine to for 9766 (CLORE) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_19081', '', 'string', 'Address to mine to for 19081 (SAL) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'address_18146', '', 'string', 'Address to mine to for 18146 (XTM-T) port.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feeAddress', '', 'string', 'Address that pool fees are sent to.');

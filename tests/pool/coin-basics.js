@@ -170,10 +170,8 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
 
     assert.equal(perf[""], 100);
     assert.equal(perf["SAL"], 100);
-    assert.equal(perf["IRD"], 200);
     assert.equal(perf["XTM-C"], 300);
     assert.equal(perf["XNA"], 400);
-    assert.equal(perf["CLORE"], 400);
     assert.equal(perf["ETC"], 500);
 });
 
@@ -184,7 +182,7 @@ test("shared blob types no longer collapse to the last loaded coin profile", () 
     assert.equal(coinFuncs.getProfilesByBlobType(0).some((profile) => profile.coin === "XTM"), true);
     assert.deepEqual(
         coinFuncs.getProfilesByBlobType(101).map((profile) => profile.coin).sort(),
-        ["CLORE", "RVN", "XNA"]
+        ["RVN", "XNA"]
     );
     assert.equal(coinFuncs.getJobProfile({ coin: "SUMO", blob_type_num: 0 }).coin, "SUMO");
     assert.equal(coinFuncs.getJobProfile({ coin: "XTM", blob_type_num: 0 }).coin, "XTM");

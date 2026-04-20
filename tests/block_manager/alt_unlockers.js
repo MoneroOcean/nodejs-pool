@@ -458,12 +458,12 @@ test.describe("block_manager unlockers", { concurrency: false }, () => {
         const env = createUnlockerEnvironment({
             lastBlockHeight: 1000,
             portNames: {
-                9231: "ALPHA",
+                19081: "ALPHA",
                 16000: "BETA"
             },
             lockedAltBlocks: [
-                { id: 1, hash: "wait-a", anchor_height: 100, pay_ready: true, poolType: 0, value: 5, pay_value: 0, port: 9231, height: 1797336 },
-                { id: 2, hash: "wait-b", anchor_height: 100, pay_ready: true, poolType: 0, value: 6, pay_value: 0, port: 9231, height: 1798742 },
+                { id: 1, hash: "wait-a", anchor_height: 100, pay_ready: true, poolType: 0, value: 5, pay_value: 0, port: 19081, height: 1797336 },
+                { id: 2, hash: "wait-b", anchor_height: 100, pay_ready: true, poolType: 0, value: 6, pay_value: 0, port: 19081, height: 1798742 },
                 { id: 3, hash: "wait-c", anchor_height: 100, pay_ready: true, poolType: 0, value: 7, pay_value: 0, port: 16000, height: 2049299 }
             ]
         });
@@ -476,7 +476,7 @@ test.describe("block_manager unlockers", { concurrency: false }, () => {
             return line.indexOf("Altblock unlocker: waiting pay_value on ") === 0;
         });
 
-        assert.equal(waitLine, "Altblock unlocker: waiting pay_value on ALPHA/9231 x2, BETA/16000 x1");
+        assert.equal(waitLine, "Altblock unlocker: waiting pay_value on BETA/16000 x1, ALPHA/19081 x2");
         assert.equal(waitLine.indexOf("1797336"), -1);
         assert.equal(waitLine.indexOf("2049299"), -1);
     });
