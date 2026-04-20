@@ -77,4 +77,16 @@ test-artifacts/deploy
 # Yarn Integrity file
 .yarn-integrity
 
+# Local editor / workstation artifacts
+.DS_Store
+.codex
+*~
+*.un~
+
+# Untracked dependency locks
+package-lock.json
+
+# Generated local test outputs
+test-artifacts/
+
 config.json
