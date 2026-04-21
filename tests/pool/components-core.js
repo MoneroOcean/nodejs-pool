@@ -5,6 +5,7 @@ const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
 const createConstants = require("../../lib/coins/constants.js");
+const Coin = require("../../lib/coins/index.js");
 const helpers = require("../../lib/coins/helpers.js");
 const createPoolState = require("../../lib/pool/state.js");
 const createProtocolHandler = require("../../lib/pool/protocol.js");
@@ -109,6 +110,68 @@ test("pool state thread names use short master and worker prefixes", () => {
         global.config = originalConfig;
         global.database = originalDatabase;
         global.coinFuncs = originalCoinFuncs;
+    }
+});
+
+test("cryptonote block-header reward lookup preserves suppress flags and wallet error detail", (t, done) => {
+    const originalConfig = global.config;
+    const originalSupport = global.support;
+    const originalCoinFuncs = global.coinFuncs;
+    const originalDatabase = global.database;
+
+    try {
+        global.config = {
+            daemon: { port: 18081 },
+            general: { testnet: false },
+            pool: { address: "48A1PoolAddress" },
+            pool_id: 1
+        };
+        global.database = {};
+        global.support = {
+            rpcPortDaemon(port, method, params, callback, suppressErrorLog) {
+                assert.equal(port, 18081);
+                assert.equal(method, "getblock");
+                assert.equal(suppressErrorLog, true);
+                callback({
+                    result: {
+                        miner_tx_hash: "abcd",
+                        block_header: {
+                            hash: "feed",
+                            height: 100,
+                            difficulty: 10,
+                            reward: 0
+                        },
+                        json: JSON.stringify({
+                            miner_tx: {
+                                vout: [{ amount: 25 }]
+                            }
+                        })
+                    }
+                });
+            },
+            rpcPortWalletShort(port, method, params, callback, suppressErrorLog) {
+                assert.equal(port, 18082);
+                assert.equal(method, "get_transfer_by_txid");
+                assert.deepEqual(params, { txid: "abcd" });
+                assert.equal(suppressErrorLog, true);
+                callback({ error: { code: -8, message: "Transaction not found." } });
+            }
+        };
+
+        const coinFuncs = new Coin({});
+        global.coinFuncs = coinFuncs;
+
+        coinFuncs.getPortBlockHeaderByHash(18081, "deadbeef", function onHeader(err, header) {
+            assert.equal(err, true);
+            assert.equal(header.height, 100);
+            assert.deepEqual(header.error, { code: -8, message: "Transaction not found." });
+            done();
+        }, true);
+    } finally {
+        global.config = originalConfig;
+        global.support = originalSupport;
+        global.coinFuncs = originalCoinFuncs;
+        global.database = originalDatabase;
     }
 });
 
