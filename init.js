@@ -165,7 +165,7 @@ const moduleLoaders = {
         return runtime;
     },
     altblock_manager: function () { return loadOptionalLib2Module('./lib2/altblock_manager.js', 'altblock_manager'); },
-    altblockExchange: function () { return loadOptionalLib2Module('./lib2/altblockExchange.js', 'altblockExchange'); },
+    altblock_exchange: function () { return loadOptionalLib2Module('./lib2/altblock_exchange.js', 'altblock_exchange'); },
     payments: function () { return require('./lib/payments.js'); },
     api: function () { return require('./lib/api.js'); },
     remote_share: function () { return require('./lib/remote_share.js'); },

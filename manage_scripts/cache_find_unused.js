@@ -6,6 +6,7 @@ const argv = require("../parse_args")(process.argv.slice(2));
 
 const EXACT_ACTIVE_KEYS = new Set([
     "active_ports",
+    "altblock_exchange_trade",
     "base_balance",
     "btc_balance",
     "coin_comment",

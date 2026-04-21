@@ -31,7 +31,7 @@ The backend is typically paired with a separate website/frontend. The reference 
 | `worker` | Refreshes stats, health checks, and notifications |
 | `long_runner` | Cleans and compacts share data over time |
 | `pool_stats` | Aggregates pool statistics |
-| `altblock_manager` / `altblockExchange` | Optional multi-coin helpers under [`lib2/`](lib2/) |
+| `altblock_manager` / `altblock_exchange` | Optional multi-coin helpers under [`lib2/`](lib2/) |
 
 ## Quick Setup
 
