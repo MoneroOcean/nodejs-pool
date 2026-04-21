@@ -14,6 +14,7 @@ require("./support.js");
 require("./live.js");
 require("./payments.js");
 require("./payment_unlock_batch.js");
+require("./manage_scripts.js");
 
 const privateLib2Tests = path.join(__dirname, "..", "lib2", "tests", "all.js");
 if (fs.existsSync(privateLib2Tests)) require(privateLib2Tests);
