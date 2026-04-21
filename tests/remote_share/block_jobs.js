@@ -337,9 +337,10 @@ test("pending block jobs retry until a reward is available and then store the bl
     let headerCalls = 0;
 
     global.coinFuncs = {
-        getBlockHeaderByHash(_hash, callback) {
+        getBlockHeaderByHash(_hash, callback, suppressErrorLog) {
             headerCalls += 1;
-            if (headerCalls === 1) return callback(true, null);
+            assert.equal(suppressErrorLog, true);
+            if (headerCalls === 1) return callback({ message: "Core is busy" }, null);
             callback(null, { reward: 25 });
         },
         getPoolProfile() {
@@ -374,6 +375,12 @@ test("pending block jobs retry until a reward is available and then store the bl
 
         pendingJobs.processDueJobs();
         assert.equal(storage.jobs.size, 1);
+        assert.equal(logs.some((line) =>
+            line.includes("Pending block:") &&
+            line.includes("chain=XMR/18081") &&
+            line.includes('status=waiting-header-reward') &&
+            line.includes('detail=\"Core is busy\"')
+        ), true);
 
         const retryJob = Array.from(storage.jobs.values())[0];
         retryJob.nextAttemptAt = 0;
@@ -384,7 +391,70 @@ test("pending block jobs retry until a reward is available and then store the bl
         assert.equal(stores.blockDB.size, 1);
         const stored = PROTOS.Block.decode(Array.from(stores.blockDB.values())[0]);
         assert.equal(stored.value, 25);
-        assert.match(logs.join("\n"), /Block XMR\/18081 hash .* stored/);
+        assert.equal(logs.some((line) =>
+            line.includes("Pending block:") &&
+            line.includes("chain=XMR/18081") &&
+            line.includes("status=stored")
+        ), true);
+    } finally {
+        pendingJobs.close();
+        restore();
+    }
+});
+
+test("pending altblock jobs keep orphan detail in module logs and suppress raw daemon logs", () => {
+    const restore = installRemoteShareGlobals();
+    const { database } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    const logs = [];
+
+    global.coinFuncs = {
+        getPortBlockHeaderByHash(_port, _hash, callback, suppressErrorLog) {
+            assert.equal(suppressErrorLog, true);
+            callback(true, { error: { message: "Transaction not found." } });
+        },
+        getPoolProfile() {
+            return { rpc: { unlockConfirmationDepth: 5 } };
+        },
+        PORT2COIN() {
+            return "WOW";
+        },
+        PORT2COIN_FULL() {
+            return "WOW";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log(message) { logs.push(message); } },
+        retryDelayMs: 1,
+        storage
+    });
+
+    try {
+        const altBlock = {
+            hash: "ef".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true,
+            port: 19994,
+            height: 1000,
+            anchor_height: 999
+        };
+        pendingJobs.enqueueAltBlock(25, PROTOS.AltBlock.encode(altBlock), altBlock);
+        pendingJobs.processDueJobs();
+
+        assert.equal(storage.jobs.size, 1);
+        assert.equal(logs.some((line) =>
+            line.includes("Pending altblock:") &&
+            line.includes("chain=WOW/19994") &&
+            line.includes("height=1000") &&
+            line.includes("status=waiting-orphan-confirmation") &&
+            line.includes('detail=\"Transaction not found.\"')
+        ), true);
     } finally {
         pendingJobs.close();
         restore();

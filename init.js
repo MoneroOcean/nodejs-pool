@@ -16,6 +16,9 @@ global.argv = argv;
 let comms;
 let coinInc;
 let activeModule = null;
+const { formatLogEvent } = require("./lib/common/logging.js");
+
+function logEvent(label, fields) { console.log(formatLogEvent(label, fields)); }
 
 function logStartup(kind, name) {
     console.log("=== STARTING " + kind.toUpperCase() + ": " + name + " ===");
@@ -85,11 +88,12 @@ function closeDatabaseEnv() {
 
 function installGracefulShutdown(name) {
     let shuttingDown = false;
+    const kind = argv.hasOwnProperty('module') ? 'module' : 'tool';
 
     async function handleSignal(signal) {
         if (shuttingDown) return;
         shuttingDown = true;
-        console.log("Graceful shutdown requested for " + name + " via " + signal);
+        logEvent("Shutdown", { kind, name, signal, status: "stopping" });
 
         async function runStep(label, fn) {
             try {
@@ -104,6 +108,7 @@ function installGracefulShutdown(name) {
         await runStep("MySQL shutdown", closeMysql);
         await runStep("LMDB sync", syncDatabaseEnv);
         await runStep("LMDB close", closeDatabaseEnv);
+        logEvent("Shutdown", { kind, name, signal, status: "stopped" });
         process.exit(0);
     }
 

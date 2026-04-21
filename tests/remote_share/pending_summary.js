@@ -355,9 +355,9 @@ test("pending altblock jobs do not spam repeated waiting-for-depth logs", () => 
         assert.equal(storage.jobs.size, 1);
         assert.equal(retryJob.attempts, 2);
         assert.equal(retryJob.nextAttemptAt, 2001);
-        assert.equal(logs.filter((line) => line.includes("waiting for maturity")).length, 1);
-        assert.equal(logs.some((line) => line.includes("Altblock WOW/19994 height 1000")), true);
-        assert.equal(logs.some((line) => line.includes("waiting for maturity")), true);
+        assert.equal(logs.filter((line) => line.includes("status=waiting-maturity")).length, 1);
+        assert.equal(logs.some((line) => line.includes("Pending altblock:") && line.includes("chain=WOW/19994") && line.includes("height=1000")), true);
+        assert.equal(logs.some((line) => line.includes("status=waiting-maturity")), true);
         assert.equal(logs.some((line) => line.includes("1/5")), false);
         assert.equal(logs.some((line) => line.includes("Pausing altblock")), false);
     } finally {
