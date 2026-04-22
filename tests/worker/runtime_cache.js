@@ -364,17 +364,17 @@ test.describe("worker", { concurrency: false }, () => {
         await runUpdate(runtime, 1);
 
         const startLogs = logs.filter(function (message) {
-            return message.indexOf("Starting stats collection for ") === 0;
+            return message === "Worker cycle: height=1 status=start";
         });
         const layoutLogs = logs.filter(function (message) {
-            return message.indexOf("Worker history layout: tiers ") === 0;
+            return message.indexOf("Worker config: ") === 0;
         });
 
         assert.equal(startLogs.length, 2);
         assert.equal(startLogs.every(function (message) {
-            return message.indexOf("history tiers: ") === -1;
+            return message.indexOf("history_tiers=") === -1;
         }), true);
-        assert.deepEqual(layoutLogs, ["Worker history layout: tiers 7/7/7/6, intervals 2m/6m/18m/54m"]);
+        assert.deepEqual(layoutLogs, ["Worker config: history_tiers=7/7/7/6 history_intervals=2m/6m/18m/54m"]);
     });
 
     test("worker history tier layout honors both statsBufferLength and statsBufferHours", () => {

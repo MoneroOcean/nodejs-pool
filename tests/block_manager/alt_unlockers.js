@@ -473,10 +473,10 @@ test.describe("block_manager unlockers", { concurrency: false }, () => {
             await runtime.runAltblockUnlocker();
         });
         const waitLine = output.log.find(function (line) {
-            return line.indexOf("Altblock unlocker: waiting pay_value on ") === 0;
+            return line.indexOf("Altblock unlocker: status=\"waiting pay_value\"") === 0;
         });
 
-        assert.equal(waitLine, "Altblock unlocker: waiting pay_value on BETA/16000 x1, ALPHA/19081 x2");
+        assert.equal(waitLine, "Altblock unlocker: status=\"waiting pay_value\" coins=\"BETA/16000 x1, ALPHA/19081 x2\"");
         assert.equal(waitLine.indexOf("1797336"), -1);
         assert.equal(waitLine.indexOf("2049299"), -1);
     });

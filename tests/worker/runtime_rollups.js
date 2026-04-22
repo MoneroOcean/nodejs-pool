@@ -336,9 +336,9 @@ test.describe("worker", { concurrency: false }, () => {
         assert.equal(state.env.writeCommits, writeCommitsAfterFirstRun);
         assert.equal(state.env.commits.length, commitsAfterFirstRun);
         const processedLog = logs.filter(function (message) {
-            return message.indexOf("Processed ") === 0;
+            return message.indexOf("Worker cycle: ") === 0 && message.indexOf("status=done") !== -1;
         }).pop();
-        const skippedMatch = processedLog && processedLog.match(/, skip ([0-9.]+)\/([0-9.]+) MB\)\. Hashrate: /);
+        const skippedMatch = processedLog && processedLog.match(/skipped_mb=([0-9.]+) compared_mb=([0-9.]+) hashrate=/);
         assert.notEqual(skippedMatch, null);
         assert.ok(Number(skippedMatch[1]) >= 0);
         assert.ok(Number(skippedMatch[2]) >= Number(skippedMatch[1]));
