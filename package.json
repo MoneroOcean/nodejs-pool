@@ -38,7 +38,6 @@
     "cryptonight"
   ],
   "dependencies": {
-    "crypto-js": "4.2.0",
     "debug": "2.6.9",
     "express": "4.22.1",
     "jsonwebtoken": "9.0.3",
@@ -46,7 +45,9 @@
     "node-blocktemplate": "git+https://github.com/MoneroOcean/node-blocktemplate.git#v15.8.16",
     "node-powhash": "git+https://github.com/MoneroOcean/node-powhash.git#v29.1.8",
     "promise-mysql": "3.0.0",
-    "protocol-buffers": "5.0.0",
-    "utf8": "3.0.0"
+    "protocol-buffers": "5.0.0"
+  },
+  "devDependencies": {
+    "crypto-js": "4.2.0"
   }
 }
