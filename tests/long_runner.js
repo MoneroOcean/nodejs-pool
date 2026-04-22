@@ -380,7 +380,7 @@ test("runTask swallows task failures after logging them", async () => {
     });
 
     assert.equal(errors.length, 1);
-    assert.match(errors[0], /boom failed after /);
+    assert.match(errors[0], /boom: status=failed /);
     assert.match(errors[0], /fail/);
 });
 
@@ -410,7 +410,7 @@ test("scheduleTask skips overlapping runs and resumes after the active run finis
     intervalHandler();
     intervalHandler();
     assert.equal(runCount, 1);
-    assert.equal(errors.some(function (line) { return line.includes("Skipping this cycle."); }), true);
+    assert.equal(errors.some(function (line) { return line.includes("status=still-running") && line.includes("skipping cycle"); }), true);
 
     resolveRun();
     await new Promise(function (resolve) {

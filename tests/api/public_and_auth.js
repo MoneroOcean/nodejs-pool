@@ -198,6 +198,53 @@ async function captureConsole(run) {
     }
 }
 
+function createFakeCluster(options) {
+    const settings = options || {};
+    const listeners = new Map();
+    let nextWorkerId = 0;
+
+    function workerRecord(id, pid) {
+        return {
+            id: id,
+            process: { pid: pid },
+            on() {},
+            off() {},
+            removeListener() {}
+        };
+    }
+
+    return {
+        isPrimary: settings.isPrimary !== false,
+        worker: settings.isPrimary === false ? { id: settings.workerId || 1 } : null,
+        fork() {
+            nextWorkerId += 1;
+            return workerRecord(nextWorkerId, (settings.pidBase || 9000) + nextWorkerId);
+        },
+        on(eventName, listener) {
+            const entries = listeners.get(eventName) || [];
+            entries.push(listener);
+            listeners.set(eventName, entries);
+        },
+        off(eventName, listener) {
+            const entries = listeners.get(eventName) || [];
+            listeners.set(eventName, entries.filter(function keep(current) { return current !== listener; }));
+        },
+        removeListener(eventName, listener) {
+            this.off(eventName, listener);
+        },
+        disconnect(callback) {
+            if (typeof callback === "function") callback();
+        },
+        emit(eventName) {
+            const args = Array.prototype.slice.call(arguments, 1);
+            const entries = listeners.get(eventName) || [];
+            entries.forEach(function call(listener) {
+                listener.apply(null, args);
+            });
+        }
+    };
+}
+
 test.describe("api", { concurrency: false }, () => {
     test("authentication preserves legacy login behavior and authed routes still accept query, body, and header tokens", async () => {
         const config = createConfig();
@@ -445,6 +492,54 @@ test.describe("api", { concurrency: false }, () => {
         assert.match(summaryLine, /cache=1\/1/);
         assert.match(summaryLine, /db=0q\/0err/);
         assert.match(summaryLine, /avg=\d+ms/);
-        assert.ok(captured.logs.some((line) => line.includes("listening for API requests")));
+        assert.ok(captured.logs.some((line) => line.includes("Listen: service=api")));
+    });
+
+    test("cluster lifecycle logs use pool-style master prefixes", async () => {
+        const clusterApi = createFakeCluster({ isPrimary: true, pidBase: 9100 });
+        const captured = await captureConsole(async function run() {
+            const runtime = createApiRuntime({
+                blockTemplate: createBlockTemplate(),
+                cluster: clusterApi,
+                clusterEnabled: true,
+                config: createConfig(),
+                database: createDatabase({ caches: {} }),
+                jwt: jwt,
+                mysql: createMysql(async () => []),
+                os: { cpus() { return [{}, {}]; } },
+                support: createSupport()
+            });
+            runtime.start();
+            clusterApi.emit("online", { process: { pid: 9101 } });
+            clusterApi.emit("exit", { process: { pid: 9101 } }, 7, "SIGTERM");
+            await runtime.stop();
+        });
+
+        assert.ok(captured.logs.includes("[M] IMPORTANT: Cluster start: workers=2"));
+        assert.ok(captured.logs.includes("[M] Worker online: pid=9101"));
+        assert.ok(captured.errors.includes("[M] Worker exit: pid=9101 code=7 signal=SIGTERM"));
+    });
+
+    test("cluster worker listen logs use pool-style worker prefixes", async () => {
+        const clusterApi = createFakeCluster({ isPrimary: false, workerId: 7 });
+        const captured = await captureConsole(async function run() {
+            const runtime = createApiRuntime({
+                blockTemplate: createBlockTemplate(),
+                cluster: clusterApi,
+                clusterEnabled: true,
+                config: createConfig(),
+                database: createDatabase({ caches: {} }),
+                host: "127.0.0.1",
+                jwt: jwt,
+                mysql: createMysql(async () => []),
+                port: 0,
+                support: createSupport()
+            });
+            runtime.start();
+            await waitForListening(runtime);
+            await runtime.stop();
+        });
+
+        assert.ok(captured.logs.some((line) => line.startsWith("[S7:" + process.pid + "] Listen: service=api host=127.0.0.1 port=")));
     });
 });

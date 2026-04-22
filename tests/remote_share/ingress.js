@@ -59,6 +59,69 @@ async function waitForListening(runtime) {
     throw new Error("remote_share runtime did not start listening");
 }
 
+async function captureConsole(run) {
+    const originalLog = console.log;
+    const originalError = console.error;
+    const logs = [];
+    const errors = [];
+    console.log = function captureLog() { logs.push(Array.from(arguments).join(" ")); };
+    console.error = function captureError() { errors.push(Array.from(arguments).join(" ")); };
+    try {
+        await run({ logs: logs, errors: errors });
+        return { logs: logs, errors: errors };
+    } finally {
+        console.log = originalLog;
+        console.error = originalError;
+    }
+}
+
+function createFakeCluster(options) {
+    const settings = options || {};
+    const listeners = new Map();
+    let nextWorkerId = 0;
+
+    function workerRecord(id, pid) {
+        return {
+            id: id,
+            process: { pid: pid },
+            on() {},
+            off() {},
+            removeListener() {}
+        };
+    }
+
+    return {
+        isPrimary: settings.isPrimary !== false,
+        worker: settings.isPrimary === false ? { id: settings.workerId || 1 } : null,
+        fork() {
+            nextWorkerId += 1;
+            return workerRecord(nextWorkerId, (settings.pidBase || 9000) + nextWorkerId);
+        },
+        on(eventName, listener) {
+            const entries = listeners.get(eventName) || [];
+            entries.push(listener);
+            listeners.set(eventName, entries);
+        },
+        off(eventName, listener) {
+            const entries = listeners.get(eventName) || [];
+            listeners.set(eventName, entries.filter(function keep(current) { return current !== listener; }));
+        },
+        removeListener(eventName, listener) {
+            this.off(eventName, listener);
+        },
+        disconnect(callback) {
+            if (typeof callback === "function") callback();
+        },
+        emit(eventName) {
+            const args = Array.prototype.slice.call(arguments, 1);
+            const entries = listeners.get(eventName) || [];
+            entries.forEach(function call(listener) {
+                listener.apply(null, args);
+            });
+        }
+    };
+}
+
 function postFrame(port, body) {
     return new Promise((resolve, reject) => {
         const req = http.request({
@@ -438,12 +501,80 @@ test("remote_share logs ingress summaries for accepted and rejected frames", asy
             /req=4/.test(line) &&
             /ok=1/.test(line) &&
             /share=1/.test(line) &&
-            /fail=400:2,403:1/.test(line) &&
-            /reject=frame:1,auth:1,share:1/.test(line)
+            /fail="400:2,403:1"/.test(line) &&
+            /reject="frame:1,auth:1,share:1"/.test(line)
         )), 200);
     } finally {
         console.log = originalConsoleLog;
         await runtime.stop();
+        restore();
+    }
+});
+
+test("remote_share cluster lifecycle logs use pool-style master prefixes", async () => {
+    const restore = installRemoteShareGlobals();
+    const clusterApi = createFakeCluster({ isPrimary: true, pidBase: 9200 });
+
+    try {
+        const output = await captureConsole(async function run() {
+            const runtime = createRemoteShareRuntime({
+                cluster: clusterApi,
+                clusterEnabled: true,
+                os: { cpus() { return [{}, {}]; } },
+                pendingJobs: {
+                    enqueueBlock() {},
+                    enqueueAltBlock() {},
+                    processDueJobs() {},
+                    close() {}
+                },
+                shareStore: {
+                    storeShares() {}
+                }
+            });
+
+            runtime.start();
+            clusterApi.emit("online", { process: { pid: 9201 } });
+            clusterApi.emit("exit", { process: { pid: 9201 } }, 9, "SIGTERM");
+            await runtime.stop();
+        });
+
+        assert.ok(output.logs.includes("[M] IMPORTANT: Cluster start: workers=2"));
+        assert.ok(output.logs.includes("[M] Worker online: pid=9201"));
+        assert.ok(output.errors.includes("[M] Worker exit: pid=9201 code=9 signal=SIGTERM"));
+    } finally {
+        restore();
+    }
+});
+
+test("remote_share cluster worker listen logs use pool-style worker prefixes", async () => {
+    const restore = installRemoteShareGlobals();
+    const clusterApi = createFakeCluster({ isPrimary: false, workerId: 6 });
+
+    try {
+        const output = await captureConsole(async function run() {
+            const runtime = createRemoteShareRuntime({
+                cluster: clusterApi,
+                clusterEnabled: true,
+                host: "127.0.0.1",
+                port: 0,
+                pendingJobs: {
+                    enqueueBlock() {},
+                    enqueueAltBlock() {},
+                    processDueJobs() {},
+                    close() {}
+                },
+                shareStore: {
+                    storeShares() {}
+                }
+            });
+
+            runtime.start();
+            await waitForListening(runtime);
+            await runtime.stop();
+        });
+
+        assert.ok(output.logs.some((line) => line.startsWith("[S6:" + process.pid + "] Listen: service=remote-share host=127.0.0.1 port=")));
+    } finally {
         restore();
     }
 });
