@@ -17,6 +17,20 @@ function clearObject(target) {
     for (const key of Object.keys(target)) delete target[key];
 }
 
+async function captureConsole(run) {
+    const originalError = console.error;
+    const output = [];
+    console.error = function captureError() {
+        output.push(Array.from(arguments).join(" "));
+    };
+    try {
+        await run();
+    } finally {
+        console.error = originalError;
+    }
+    return output;
+}
+
 test.describe("pool components: core", { concurrency: false }, () => {
 test("xmr constants derive the expected coin and algo metadata", () => {
     const constants = createConstants({
@@ -167,6 +181,51 @@ test("cryptonote block-header reward lookup preserves suppress flags and wallet 
             assert.deepEqual(header.error, { code: -8, message: "Transaction not found." });
             done();
         }, true);
+    } finally {
+        global.config = originalConfig;
+        global.support = originalSupport;
+        global.coinFuncs = originalCoinFuncs;
+        global.database = originalDatabase;
+    }
+});
+
+test("invalid last block headers return errors without raw helper console noise", async () => {
+    const originalConfig = global.config;
+    const originalSupport = global.support;
+    const originalCoinFuncs = global.coinFuncs;
+    const originalDatabase = global.database;
+
+    try {
+        global.config = {
+            daemon: { port: 18081 },
+            general: { testnet: false },
+            pool: { address: "48A1PoolAddress" },
+            pool_id: 1
+        };
+        global.database = {};
+        global.support = {
+            rpcPortDaemon(port, method, params, callback, suppressErrorLog) {
+                assert.equal(port, 18081);
+                assert.equal(method, "getlastblockheader");
+                assert.equal(suppressErrorLog, undefined);
+                callback({ error: { message: "daemon still warming" } });
+            }
+        };
+
+        const coinFuncs = new Coin({});
+        global.coinFuncs = coinFuncs;
+
+        const output = await captureConsole(async function runLookup() {
+            await new Promise(function onDone(resolve) {
+                coinFuncs.getLastBlockHeader(function onHeader(err, header) {
+                    assert.equal(err, true);
+                    assert.deepEqual(header, { error: { message: "daemon still warming" } });
+                    resolve();
+                });
+            });
+        });
+
+        assert.equal(output.some(function match(line) { return line.includes("Last block header invalid"); }), false);
     } finally {
         global.config = originalConfig;
         global.support = originalSupport;
