@@ -12,7 +12,7 @@ module.exports = function parseArgv(args, options = {}) {
         tokens: true,
     });
 
-    const result = { _: [] };
+    const result = captureRemainder ? { _: [], "--": [] } : { _: [] };
     let afterTerminator = false;
 
     for (let i = 0; i < parsed.tokens.length; ++i) {
@@ -20,7 +20,6 @@ module.exports = function parseArgv(args, options = {}) {
 
         if (token.kind === "option-terminator") {
             afterTerminator = true;
-            if (captureRemainder) result["--"] = [];
             continue;
         }
 
@@ -42,10 +41,5 @@ module.exports = function parseArgv(args, options = {}) {
 
         (afterTerminator && captureRemainder ? result["--"] : result._).push(token.value);
     }
-
-    if (captureRemainder && !Object.prototype.hasOwnProperty.call(result, "--")) {
-        result["--"] = [];
-    }
-
     return result;
 };

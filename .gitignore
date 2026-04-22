@@ -30,3 +30,4 @@ block_share_dumps/*.cvs
 # Generated local test outputs
 .cache/live-miners
 test-artifacts/
+plan.txt

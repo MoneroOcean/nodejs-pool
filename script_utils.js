@@ -8,10 +8,6 @@ function exitWithError(message) {
     process.exit(1);
 }
 
-function init(callback) {
-    initMini.init(callback);
-}
-
 function forEachEntry(database, reader, iterator, reverse) {
     const txn = global.database.env.beginTxn({ readOnly: true });
     const cursor = new global.database.lmdb.Cursor(txn, database);
@@ -40,7 +36,7 @@ function createCli(options) {
     return {
         argv,
         arg,
-        init,
+        init: initMini.init,
         get(name, fallback = null) {
             return typeof argv[name] === "undefined" ? fallback : argv[name];
         },
@@ -61,6 +57,6 @@ function createCli(options) {
     };
 }
 
-createCli.init = init;
+createCli.init = initMini.init;
 
 module.exports = createCli;

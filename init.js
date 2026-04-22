@@ -7,6 +7,8 @@ let config = fs.readFileSync("./config.json");
 let coinConfig = fs.readFileSync("./coinConfig.json");
 let protobuf = require('protocol-buffers');
 let path = require('path');
+const applyConfigRows = require("./lib/common/config_rows.js");
+const isPrimaryProcess = require("./lib/common/is_primary_process.js");
 
 global.support = require("./lib/common/support.js")();
 global.config = JSON.parse(config);
@@ -22,12 +24,6 @@ function logEvent(label, fields) { console.log(formatLogEvent(label, fields)); }
 
 function logStartup(kind, name) {
     console.log("=== STARTING " + kind.toUpperCase() + ": " + name + " ===");
-}
-
-function isPrimaryProcess(clusterApi) {
-    if (!clusterApi) return false;
-    if (typeof clusterApi.isPrimary === "boolean") return clusterApi.isPrimary;
-    return clusterApi.isMaster === true;
 }
 
 function hasClusterWorkers(clusterApi) {
@@ -178,28 +174,7 @@ const moduleLoaders = {
 // <module>.<item>
 
 global.mysql.query("SELECT * FROM config").then(function (rows) {
-    rows.forEach(function (row){
-        if (!global.config.hasOwnProperty(row.module)){
-            global.config[row.module] = {};
-        }
-        if (global.config[row.module].hasOwnProperty(row.item)){
-            return;
-        }
-        switch(row.item_type){
-            case 'int':
-                global.config[row.module][row.item] = parseInt(row.item_value);
-                break;
-            case 'bool':
-                global.config[row.module][row.item] = (row.item_value === "true");
-                break;
-            case 'string':
-                global.config[row.module][row.item] = row.item_value;
-                break;
-            case 'float':
-                global.config[row.module][row.item] = parseFloat(row.item_value);
-                break;
-        }
-    });
+    applyConfigRows(global.config, rows);
 }).then(function(){
     global.config['coin'] = JSON.parse(coinConfig)[global.config.coin];
     coinInc = require(global.config.coin.funcFile);
@@ -238,12 +213,9 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
     } else {
         console.error("Invalid module/tool provided.  Please provide a valid module/tool");
         console.error("Valid Modules: " + Object.keys(moduleLoaders).join(", "));
-        let valid_tools = "Valid Tools: ";
-        fs.readdirSync('./tools/').forEach(function(line){
-            valid_tools += path.parse(line).name + ", ";
-        });
-        valid_tools = valid_tools.slice(0, -2);
-        console.error(valid_tools);
+        console.error("Valid Tools: " + fs.readdirSync("./tools/").map(function(line) {
+            return path.parse(line).name;
+        }).join(", "));
         process.exit(1);
     }
 });

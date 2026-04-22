@@ -1,5 +1,7 @@
 "use strict";
 
+const applyConfigRows = require("./lib/common/config_rows.js");
+
 function init(callback) {
 
 	let fs = require("fs");
@@ -15,17 +17,7 @@ function init(callback) {
 	global.protos = protobuf(fs.readFileSync('../lib/common/data.proto'));
 
 	global.mysql.query("SELECT * FROM config").then(function (rows) {
-		rows.forEach(function (row){
-			if (!global.config.hasOwnProperty(row.module)) global.config[row.module] = {};
-			if (global.config[row.module].hasOwnProperty(row.item)) return;
-			switch(row.item_type){
-				case 'int':    global.config[row.module][row.item] = parseInt(row.item_value); break;
-				case 'bool':   global.config[row.module][row.item] = (row.item_value === "true"); break;
-				case 'string': global.config[row.module][row.item] = row.item_value; break;
-				case 'float':  global.config[row.module][row.item] = parseFloat(row.item_value); break;
-			}
-		});
-
+		applyConfigRows(global.config, rows);
 	}).then(function(){
 		global.config['coin'] = JSON.parse(coinConfig)[global.config.coin];
 		let coinInc = require(global.config.coin.funcFile);
@@ -33,12 +25,8 @@ function init(callback) {
 			let comms = require('./lib/common/local_comms');
 		global.database = new comms();
 		global.database.initEnv();
-	
-	}).then(function(){
-	        callback();
-	});
+		
+	}).then(callback);
 }
-	
-module.exports = {
-	init: init
-};	
+		
+module.exports = { init };

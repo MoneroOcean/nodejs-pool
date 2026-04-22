@@ -265,7 +265,7 @@ function buildConfig(input) {
     };
 }
 
-const isDefaultTargetReachable = async () => await isPoolEndpointReachable(DEFAULT_TARGET_HOST, DEFAULT_TARGET_PORT, buildConfig().tls);
+const isDefaultTargetReachable = () => isPoolEndpointReachable(DEFAULT_TARGET_HOST, DEFAULT_TARGET_PORT, buildConfig().tls);
 
 function parseCliOptions(argv) {
     const parsed = parseArgv(argv, {});
@@ -283,9 +283,6 @@ function renderCliHelp() {
         "  --help                      Show this message"
     ].join("\n");
 }
-
-const buildTarget = (config) => ({ name: config.targetName, host: config.targetHost, port: config.targetPort });
-const pushCoveredResult = (coveredResults, algorithm, miner, target) => coveredResults.push({ algorithm, miner, target });
 
 async function writeStandaloneFailureSummary(input, error) {
     const config = buildConfig(input);
@@ -312,7 +309,7 @@ async function runLivePoolSuite(input) {
 
     try {
         run = await createLivePoolRun(input);
-        const target = buildTarget(run.config);
+        const target = { name: run.config.targetName, host: run.config.targetHost, port: run.config.targetPort };
         const blockSubmitCoverage = await setupLiveBlockSubmitCoverage(run);
         if (blockSubmitCoverage) {
             try {
@@ -332,7 +329,7 @@ async function runLivePoolSuite(input) {
             if (run.config.emitStartLines) {
                 emitLiveStatus(result.success ? "pass" : "fail", `algo ${plan.algorithm}`, result.success ? "" : (result.failureReason || result.error || "failed"));
             }
-            pushCoveredResult(coveredResults, plan.algorithm, plan.miner ? plan.miner.name : "protocol-probe", result);
+            coveredResults.push({ algorithm: plan.algorithm, miner: plan.miner ? plan.miner.name : "protocol-probe", target: result });
         }
 
         const protocolPlans = run.coveredPlans.filter(hasGpuProtocolProbe);
@@ -341,7 +338,7 @@ async function runLivePoolSuite(input) {
                 if (run.config.emitStartLines) {
                     emitLiveStatus(result.success ? "pass" : "fail", `probe ${result.algorithm}`, result.success ? "" : (result.failureReason || result.error || "failed"));
                 }
-                pushCoveredResult(coveredResults, result.algorithm, result.miner, result);
+                coveredResults.push({ algorithm: result.algorithm, miner: result.miner, target: result });
             }
         }
 
