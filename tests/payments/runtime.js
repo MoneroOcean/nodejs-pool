@@ -21,7 +21,7 @@ const {
     createWallet,
     loadPaymentsModule,
     txTransferRecord
-} = require("./fixtures");
+} = require("./common/fixtures");
 
 test.describe("payments runtime", { concurrency: false }, function paymentsRuntimeSuite() {
     test("planBatches preserves threshold rules, fee address trimming, denom rounding, integrated singles, bulk sizing, and skips explicit payment-id balances", async () => {

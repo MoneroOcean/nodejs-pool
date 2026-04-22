@@ -10,7 +10,7 @@ const {
     createBatchRow,
     createHarness,
     txTransferRecord
-} = require("./fixtures");
+} = require("./common/fixtures");
 
 test.describe("recovery submitted", { concurrency: false }, function recoverySubmittedSuite() {
     test("submitted batches with an implausibly low persisted fee fail-stop for manual review", async () => {

@@ -12,10 +12,10 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --require ./tests/test_output_buffer.js --test --test-reporter=./tests/spec_reporter.js --test-concurrency=1 tests/all.js",
-    "test:deploy": "node --require ./tests/test_output_buffer.js --test --test-reporter=./tests/spec_reporter.js --test-concurrency=1 tests/deploy_harness.js",
-    "test:live": "node --require ./tests/test_output_buffer.js --test --test-reporter=./tests/spec_reporter.js --test-concurrency=1 tests/live.js",
-    "test:live:jp": "NODEJS_POOL_LIVE_TARGET_HOST=jp.moneroocean.stream node --require ./tests/test_output_buffer.js --test --test-reporter=./tests/spec_reporter.js --test-concurrency=1 tests/live.js"
+    "test": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/all.js",
+    "test:deploy": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/deploy.js",
+    "test:live": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/live.js",
+    "test:live:jp": "NODEJS_POOL_LIVE_TARGET_HOST=jp.moneroocean.stream node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/live.js"
   },
   "repository": {
     "type": "git",

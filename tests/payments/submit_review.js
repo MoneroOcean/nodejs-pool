@@ -8,7 +8,7 @@ const {
     STANDARD_A,
     createHarness,
     txTransferRecord
-} = require("./fixtures");
+} = require("./common/fixtures");
 
 test.describe("submit review", { concurrency: false }, function submitReviewSuite() {
     test("guarded manual-review escalation does not regress a batch another runtime already finalized", async () => {

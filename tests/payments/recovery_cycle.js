@@ -10,7 +10,7 @@ const {
     createClock,
     createHarness,
     txTransferRecord
-} = require("./fixtures");
+} = require("./common/fixtures");
 
 test.describe("recovery cycle", { concurrency: false }, function recoveryCycleSuite() {
     test("startup recovery finalizes a submitted integrated batch even when wallet history exposes payment_id", async () => {

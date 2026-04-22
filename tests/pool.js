@@ -9,7 +9,7 @@ const {
     startHarness,
     installTestGlobals,
     poolModule
-} = require("./pool/harness.js");
+} = require("./pool/common/harness.js");
 
 test.describe("pool runtime", { concurrency: false }, function poolRuntimeSuite() {
     test("pool test API exposes the expected runtime entry points", () => {
@@ -49,27 +49,27 @@ test.describe("pool runtime", { concurrency: false }, function poolRuntimeSuite(
         }
     });
 
-    require("./pool/components-core.js");
-    require("./pool/components-runtime.js");
-    require("./pool/coin-basics.js");
-    require("./pool/coin-submitters.js");
-    require("./pool/protocol-stratum.js");
-    require("./pool/protocol-jobs.js");
-    require("./pool/protocol-eth-session.js");
-    require("./pool/protocol-login.js");
-    require("./pool/protocol-routing.js");
-    require("./pool/protocol-eth-direct.js");
-    require("./pool/validation-core.js");
-    require("./pool/validation-login.js");
-    require("./pool/validation-rate-limits.js");
-    require("./pool/runtime-trust.js");
-    require("./pool/runtime-block-submit.js");
-    require("./pool/runtime-daemons.js");
-    require("./pool/runtime-eth.js");
-    require("./pool/runtime-sockets.js");
-    require("./pool/runtime-retention.js");
-    require("./pool/runtime-submissions.js");
-    require("./pool/runtime-bans.js");
-    require("./pool/runtime-timeouts.js");
+    require("./pool/components/core.js");
+    require("./pool/components/runtime.js");
+    require("./pool/coin/basics.js");
+    require("./pool/coin/submitters.js");
+    require("./pool/protocol/stratum.js");
+    require("./pool/protocol/jobs.js");
+    require("./pool/protocol/eth-session.js");
+    require("./pool/protocol/login.js");
+    require("./pool/protocol/routing.js");
+    require("./pool/protocol/eth-direct.js");
+    require("./pool/validation/core.js");
+    require("./pool/validation/login.js");
+    require("./pool/validation/rate-limits.js");
+    require("./pool/runtime/trust.js");
+    require("./pool/runtime/block-submit.js");
+    require("./pool/runtime/daemons.js");
+    require("./pool/runtime/eth.js");
+    require("./pool/runtime/sockets.js");
+    require("./pool/runtime/retention.js");
+    require("./pool/runtime/submissions.js");
+    require("./pool/runtime/bans.js");
+    require("./pool/runtime/timeouts.js");
     require("./pool/remote-uplink.js");
 });

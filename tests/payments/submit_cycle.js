@@ -10,7 +10,7 @@ const {
     captureConsole,
     createHarness,
     txTransferRecord
-} = require("./fixtures");
+} = require("./common/fixtures");
 
 test.describe("submit cycle", { concurrency: false }, function submitCycleSuite() {
     test("runCycle finalizes an integrated batch and logs the full intended and finalized batch details", async () => {
