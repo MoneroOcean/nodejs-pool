@@ -3,9 +3,30 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
+const accountUtils = require("../script_account_utils.js");
 const fixExchangeXmrBalance = require("../manage_scripts/fix_negative_ex_xmr_balance.js");
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("account utils build parameterized payment clauses", function testPaymentWhere() {
+        assert.deepEqual(accountUtils.paymentWhere({ address: "addr", paymentId: "pid" }, false), {
+            clause: "payment_address = ? AND payment_id = ?",
+            params: ["addr", "pid"]
+        });
+        assert.deepEqual(accountUtils.paymentWhere({ address: "addr", paymentId: null }, true), {
+            clause: "payment_address = ? AND (payment_id IS NULL OR payment_id = '')",
+            params: ["addr"]
+        });
+    });
+
+    test("account utils reject malformed user strings", function testSplitUserValidation() {
+        assert.throws(function onMalformedUser() {
+            accountUtils.splitUser("addr.pid.extra");
+        }, /address>\.<paymentId>/);
+        assert.throws(function onEmptyPaymentId() {
+            accountUtils.splitUser("addr.");
+        }, /address>\.<paymentId>/);
+    });
+
     test("refactored trade-context fix aligns XMR baseline to the current exchange balance", function testTradeContextFix() {
         const plan = fixExchangeXmrBalance.buildTradeContextFix({
             blockId: 12,

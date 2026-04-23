@@ -1,20 +1,48 @@
 "use strict";
 
+const SAFE_SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 function splitUser(user) {
+    if (typeof user !== "string" || user.length === 0) throw new Error("User must be a non-empty string");
     const parts = user.split(".");
+    const address = parts[0];
+    const paymentId = parts[1];
+    if (!address || parts.length > 2 || paymentId === "") {
+        throw new Error("User must be in <address> or <address>.<paymentId> format");
+    }
     return {
-        address: parts.length === 1 ? user : parts[0],
-        paymentId: parts.length === 2 ? parts[1] : null
+        address,
+        paymentId: paymentId || null
     };
+}
+
+function splitUserOrExit(user) {
+    try {
+        return splitUser(user);
+    } catch (error) {
+        console.error(error.message || String(error));
+        process.exit(1);
+    }
 }
 
 function paymentWhere(account, allowEmptyPaymentId) {
     if (account.paymentId !== null) {
-        return "payment_address = '" + account.address + "' AND payment_id = '" + account.paymentId + "'";
+        return {
+            clause: "payment_address = ? AND payment_id = ?",
+            params: [account.address, account.paymentId]
+        };
     }
-    return allowEmptyPaymentId === true ?
-        "payment_address = '" + account.address + "' AND (payment_id IS NULL OR payment_id = '')" :
-        "payment_address = '" + account.address + "' AND payment_id IS NULL";
+    return {
+        clause: allowEmptyPaymentId === true
+            ? "payment_address = ? AND (payment_id IS NULL OR payment_id = '')"
+            : "payment_address = ? AND payment_id IS NULL",
+        params: [account.address]
+    };
+}
+
+function sqlTable(name) {
+    if (!SAFE_SQL_NAME.test(name)) throw new Error("Unsafe SQL table name: " + name);
+    return "`" + name + "`";
 }
 
 function logUser(label, account) {
@@ -22,29 +50,30 @@ function logUser(label, account) {
     console.log(label + "PaymentID: " + account.paymentId);
 }
 
-function cacheKeys(user) {
-    return [user, "stats:" + user, "history:" + user, "identifiers:" + user];
+function forEachCacheKey(user, iterator) {
+    [user, "stats:" + user, "history:" + user, "identifiers:" + user].forEach(iterator);
 }
 
 function logCacheKeys(user) {
-    cacheKeys(user).forEach(function (key) {
-        if (global.database.getCache(key) != false) console.log("Cache key is not empty: " + key);
+    forEachCacheKey(user, function (key) {
+        if (global.database.getCache(key) !== false) console.log("Cache key is not empty: " + key);
     });
 }
 
 function deleteCacheKeys(user) {
     const txn = global.database.env.beginTxn();
-    cacheKeys(user).forEach(function (key) {
-        if (global.database.getCache(key)) txn.del(global.database.cacheDB, key);
+    forEachCacheKey(user, function (key) {
+        if (global.database.getCache(key) !== false) txn.del(global.database.cacheDB, key);
     });
     txn.commit();
 }
 
 module.exports = {
-    cacheKeys,
     deleteCacheKeys,
     logCacheKeys,
     logUser,
     paymentWhere,
+    sqlTable,
+    splitUserOrExit,
     splitUser
 };

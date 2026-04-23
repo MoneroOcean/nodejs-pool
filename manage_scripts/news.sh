@@ -1,9 +1,11 @@
 #!/bin/bash
+set -euo pipefail
 
-subject=$1
-body=$2
+subject="${1-}"
+body="${2-}"
 
 if [ -z "$subject" ]; then echo "Set subject as first script parameter"; exit 1; fi
-if [ -z "$body" ]; then echo "Set bosy as second script parameter"; exit 1; fi
+if [ -z "$body" ]; then echo "Set body as second script parameter"; exit 1; fi
 
-node cache_set.js --key=news --value='{"created": "'$(date +%s)'", "subject": "'"$subject"'", "body": "'"$body"'"}'
+value="$(node -e 'process.stdout.write(JSON.stringify({ created: String(Math.floor(Date.now() / 1000)), subject: process.argv[1], body: process.argv[2] }))' "$subject" "$body")"
+node cache_set.js --key=news --value="$value"
