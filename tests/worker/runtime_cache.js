@@ -388,4 +388,48 @@ test.describe("worker", { concurrency: false }, () => {
         assert.ok(coverage >= 72 * 60 * 60);
         assert.equal(layout.capacities.reduce(function (sum, capacity) { return sum + capacity; }, 0), 1001);
     });
+
+    test("worker enters fail-stop and emails the admin when LMDB is full", async () => {
+        const now = 1710000000000;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const envState = createFakeEnvironment({
+            shares: [
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: "rigMapFull",
+                        rawShares: 800,
+                        shares2: 400,
+                        timestamp: now - 15 * 1000
+                    })
+                }
+            ]
+        });
+        const originalBeginTxn = global.database.env.beginTxn;
+        global.database.env.beginTxn = function beginTxnWithMapFull(options) {
+            const txn = originalBeginTxn.call(this, options);
+            if (options && options.readOnly) return txn;
+            txn.commit = function commitMapFull() {
+                const error = new Error("MDB_MAP_FULL: Environment mapsize limit reached");
+                error.code = -30792;
+                throw error;
+            };
+            return txn;
+        };
+
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+
+        assert.equal(runtime.state.lmdbFailStop, true);
+        assert.equal(runtime.state.started, false);
+        assert.deepEqual(envState.emails[0], [
+            "admin@example.com",
+            "Worker module paused due to LMDB full",
+            "worker paused after LMDB reported map full while writing worker cache: MDB_MAP_FULL: Environment mapsize limit reached."
+        ]);
+    });
 });

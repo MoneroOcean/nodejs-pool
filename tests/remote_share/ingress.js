@@ -336,6 +336,93 @@ test("remote_share accepts valid share frames and flushes queued shares", async 
     }
 });
 
+test("remote_share rejects new frames after LMDB map full while flushing shares", async () => {
+    const restore = installRemoteShareGlobals();
+    const emails = [];
+    global.support.sendEmail = function captureEmail() {
+        emails.push(Array.from(arguments));
+    };
+    const shareStore = {
+        calls: 0,
+        storeShares() {
+            this.calls += 1;
+            const error = new Error("MDB_MAP_FULL: Environment mapsize limit reached");
+            error.code = -30792;
+            throw error;
+        }
+    };
+    const pendingJobs = {
+        enqueueBlock() {
+            throw new Error("unexpected block enqueue");
+        },
+        enqueueAltBlock() {
+            throw new Error("unexpected altblock enqueue");
+        },
+        processDueJobs() {},
+        close() {}
+    };
+    const runtime = createRemoteShareRuntime({
+        clusterEnabled: false,
+        host: "127.0.0.1",
+        port: 0,
+        pendingJobs,
+        shareFlushIntervalMs: 10,
+        shareStore
+    });
+
+    try {
+        runtime.start();
+        const address = await waitForListening(runtime);
+        const sharePayload = PROTOS.Share.encode({
+            paymentAddress: "49abc",
+            foundBlock: false,
+            trustedShare: false,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            poolID: 1,
+            blockDiff: 100,
+            blockHeight: 55,
+            timestamp: Date.now(),
+            identifier: "rigMapFull",
+            raw_shares: 42
+        });
+        const shareFrame = PROTOS.WSData.encode({
+            msgType: PROTOS.MESSAGETYPE.SHARE,
+            key: "secret",
+            msg: sharePayload,
+            exInt: 55
+        });
+        const blockFrame = PROTOS.WSData.encode({
+            msgType: PROTOS.MESSAGETYPE.BLOCK,
+            key: "secret",
+            msg: PROTOS.Block.encode({
+                hash: "ab".repeat(32),
+                difficulty: 100,
+                shares: 0,
+                timestamp: Date.now(),
+                poolType: PROTOS.POOLTYPE.PPLNS,
+                unlocked: false,
+                valid: true
+            }),
+            exInt: 77
+        });
+
+        assert.equal(await postFrame(address.port, shareFrame), 200);
+        await waitForCondition(() => emails.length === 1, 500);
+
+        assert.equal(await postFrame(address.port, shareFrame), 503);
+        assert.equal(await postFrame(address.port, blockFrame), 503);
+        assert.equal(shareStore.calls > 0, true);
+        assert.deepEqual(emails[0], [
+            "admin@example.com",
+            "remote_share rejecting new work due to LMDB full",
+            "remote_share is rejecting new share and block frames after LMDB reported map full while flushing queued shares: MDB_MAP_FULL: Environment mapsize limit reached."
+        ]);
+    } finally {
+        await runtime.stop();
+        restore();
+    }
+});
+
 test("remote_share honors port zero even when the default port is unavailable", async () => {
     const restore = installRemoteShareGlobals();
     let blocker = null;
