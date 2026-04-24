@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const accountUtils = require("../script_account_utils.js");
+const fixHighBridgeCredit = require("../manage_scripts/fix_high_ex_bridge_credit.js");
 const fixExchangeXmrBalance = require("../manage_scripts/fix_negative_ex_xmr_balance.js");
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
@@ -92,5 +93,46 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         });
 
         assert.equal(plan.nextValue.baselineBalances.XMR, -0.5);
+    });
+
+    test("bridge-credit fix aligns expected bridge increase to the reviewed credited balance", function testBridgeCreditFix() {
+        const plan = fixHighBridgeCredit.buildTradeContextFix({
+            blockId: 12,
+            exchange: "nonkyc",
+            stage: "Exchange USDT trade",
+            baselineBalances: { USDT: 1.5 },
+            expectedIncreases: { USDT: 10 }
+        }, 18.75, {
+            activeOrders: false,
+            reviewedCredit: true
+        });
+
+        assert.equal(plan.cacheKey, "altblock_exchange_trade");
+        assert.equal(plan.nextValue.expectedIncreases.USDT, 17.25);
+    });
+
+    test("bridge-credit fix refuses to rewrite while exchange orders are still active", function testBridgeCreditActiveOrders() {
+        assert.throws(function onActiveOrders() {
+            fixHighBridgeCredit.buildTradeContextFix({
+                stage: "Exchange BTC trade",
+                baselineBalances: { BTC: 0.1 },
+                expectedIncreases: { BTC: 0.2 }
+            }, 0.4, {
+                activeOrders: true,
+                reviewedCredit: true
+            });
+        }, /active exchange orders/);
+    });
+
+    test("bridge-credit fix requires explicit operator confirmation", function testBridgeCreditConfirmation() {
+        assert.throws(function onMissingConfirmation() {
+            fixHighBridgeCredit.buildTradeContextFix({
+                stage: "Exchange BTC trade",
+                baselineBalances: { BTC: 0.1 },
+                expectedIncreases: { BTC: 0.2 }
+            }, 0.4, {
+                activeOrders: false
+            });
+        }, /confirm-reviewed-credit/);
     });
 });
