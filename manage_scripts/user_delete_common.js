@@ -17,15 +17,15 @@ module.exports = async function runUserDelete(user, options) {
     let rows2remove = 0;
     let rows;
 
-    accountUtils.logUser("", account);
-    console.log("Max payment to remove: " + global.config.payout.walletMin);
+    accountUtils.logUser("Target ", account);
+    console.log("Maximum allowed remaining payment: " + global.config.payout.walletMin);
 
     rows = await global.mysql.query("SELECT * FROM users WHERE username = ?", [user]);
     if (rows.length > 1) {
         console.error("Too many users were selected!");
         process.exit(1);
     }
-    console.log("Found rows in users table: " + rows.length);
+    console.log("Rows in users table: " + rows.length);
     rows2remove += rows.length;
 
     rows = await queryRows("balance");
@@ -34,7 +34,7 @@ module.exports = async function runUserDelete(user, options) {
         process.exit(1);
     }
     if (rows.length === 1 && rows[0].amount >= global.support.decimalToCoin(global.config.payout.walletMin)) {
-        console.error("Too big payment left: " + global.support.coinToDecimal(rows[0].amount));
+        console.error("Remaining payment is too large: " + global.support.coinToDecimal(rows[0].amount));
         process.exit(1);
     }
     if (options.requireStaleBalance === true && rows.length) {
@@ -44,39 +44,39 @@ module.exports = async function runUserDelete(user, options) {
             process.exit(1);
         }
     }
-    console.log("Found rows in balance table: " + rows.length);
+    console.log("Rows in balance table: " + rows.length);
     rows2remove += rows.length;
 
     rows = await queryRows("payments");
-    console.log("Found rows in payments table: " + rows.length);
+    console.log("Rows in payments table: " + rows.length);
     rows2remove += rows.length;
 
     for (const table of extraTables) {
         rows = await queryRows(table.sql);
-        console.log("Found rows in " + table.name + " table: " + rows.length);
+        console.log("Rows in " + table.name + " table: " + rows.length);
         rows2remove += rows.length;
     }
 
     accountUtils.logCacheKeys(user);
     if (!rows2remove) {
-        console.error("User was not found in SQL. Refusing to proceed to LMDB cache cleaning");
+        console.error("No matching SQL rows found. Refusing to proceed to LMDB cache cleaning");
         process.exit(1);
     }
 
     await global.mysql.query("DELETE FROM users WHERE username = ?", [user]);
-    console.log("DELETE FROM users WHERE username = " + user);
+    console.log("Executed SQL: DELETE FROM users WHERE username = " + user);
     await deleteRows("balance");
-    console.log("DELETE FROM balance WHERE " + where.clause);
+    console.log("Executed SQL: DELETE FROM balance WHERE " + where.clause);
     await deleteRows("payments");
-    console.log("DELETE FROM payments WHERE " + where.clause);
+    console.log("Executed SQL: DELETE FROM payments WHERE " + where.clause);
 
     for (const table of extraTables) {
         await deleteRows(table.sql);
-        console.log("DELETE FROM " + table.name + " WHERE " + where.clause);
+        console.log("Executed SQL: DELETE FROM " + table.name + " WHERE " + where.clause);
     }
 
-    console.log("Deleting LMDB cache keys");
+    console.log("Deleting LMDB cache keys...");
     accountUtils.deleteCacheKeys(user);
-    console.log("DONE");
+    console.log("Done.");
     process.exit(0);
 };

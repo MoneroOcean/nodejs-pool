@@ -32,6 +32,10 @@ function parseBooleanOption(value, message) {
     }
 }
 
+function normalizeCoinAmount(value) {
+    return Number(asFiniteNumber(value, "Invalid coin amount").toFixed(8));
+}
+
 function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
     if (!tradeContext || typeof tradeContext !== "object") throw new Error("altblock_exchange_trade is not found");
     if (tradeContext.stage !== "Exchange XMR trade") {
@@ -50,34 +54,43 @@ function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
     );
 
     const currentBalance = asFiniteNumber(currentXmrBalance, "Current exchange XMR balance is invalid");
-    if (currentBalance < 0) throw new Error("Current exchange XMR balance is invalid: " + currentBalance);
-    if (currentOptions.activeOrders === true) {
-        throw new Error("altblock_exchange_trade still has active exchange orders; refusing to rewrite XMR baseline");
-    }
-    if (currentBalance > baseline) {
+    if (currentBalance < baseline) {
         throw new Error(
             "Current exchange XMR balance " + currentBalance.toFixed(8) +
-            " is above stored baseline " + baseline.toFixed(8) +
-            "; this script is only for manual withdrawal/backward-balance cases"
+            " is below the stored baseline " + baseline.toFixed(8) +
+            "; use fix_negative_ex_xmr_balance.js for backward-balance cases"
         );
     }
-    if (currentBalance === baseline && currentOptions.manualWithdrawalConfirmed !== true) {
+    if (currentOptions.activeOrders === true) {
+        throw new Error("altblock_exchange_trade still has active exchange orders; refusing to rewrite expected XMR credit");
+    }
+
+    const observedIncrease = normalizeCoinAmount(Math.max(0, currentBalance - baseline));
+    if (observedIncrease <= 0) {
+        throw new Error("Current exchange XMR balance has not increased above baseline: " + currentBalance.toFixed(8));
+    }
+    if (observedIncrease >= expectedIncrease) {
         throw new Error(
-            "Current exchange XMR balance matches the stored baseline; rerun with --confirm-manual-withdrawal=true if you already moved XMR off exchange"
+            "Observed XMR increase " + observedIncrease.toFixed(8) +
+            " is not below the stored expectation " + expectedIncrease.toFixed(8) +
+            "; this script is only for low-credit / precision-mismatch cases"
         );
+    }
+    if (currentOptions.reviewedCredit !== true) {
+        throw new Error("Rerun with --confirm-reviewed-credit=true after confirming the exchange filled only the observed XMR amount");
     }
 
     const nextTradeContext = clone(tradeContext);
-    if (!nextTradeContext.baselineBalances || typeof nextTradeContext.baselineBalances !== "object") {
-        nextTradeContext.baselineBalances = {};
+    if (!nextTradeContext.expectedIncreases || typeof nextTradeContext.expectedIncreases !== "object") {
+        nextTradeContext.expectedIncreases = {};
     }
-    nextTradeContext.baselineBalances.XMR = currentBalance - expectedIncrease;
+    nextTradeContext.expectedIncreases.XMR = observedIncrease;
 
     return {
         cacheKey: "altblock_exchange_trade",
         currentValue: clone(tradeContext),
         nextValue: nextTradeContext,
-        summary: "refactored altblock_exchange_trade path with current XMR balance " + currentBalance.toFixed(8)
+        summary: "rewrote expected XMR increase from " + expectedIncrease.toFixed(8) + " to " + observedIncrease.toFixed(8)
     };
 }
 
@@ -142,13 +155,13 @@ async function buildFixPlan(cli, database) {
         }
         const currentXmrBalance = await resolveCurrentXmrBalance(cli, tradeContext, exchangeApi);
         const activeOrders = await resolveActiveOrders(cli, tradeContext, exchangeApi);
-        const manualWithdrawalConfirmed = parseBooleanOption(
-            cli.get("confirm-manual-withdrawal"),
-            "Invalid --confirm-manual-withdrawal value"
+        const reviewedCredit = parseBooleanOption(
+            cli.get("confirm-reviewed-credit"),
+            "Invalid --confirm-reviewed-credit value"
         ) === true;
         return buildTradeContextFix(tradeContext, currentXmrBalance, {
             activeOrders,
-            manualWithdrawalConfirmed
+            reviewedCredit
         });
     }
     throw new Error("altblock_exchange_trade is not found; this script only supports the refactored runtime");

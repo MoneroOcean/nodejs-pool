@@ -1,5 +1,7 @@
 "use strict";
 
+const { formatFixPlanPreview } = require("./fix_trade_preview_common.js");
+
 function clone(value) {
     return value === undefined ? value : JSON.parse(JSON.stringify(value));
 }
@@ -172,12 +174,7 @@ async function main() {
     cli.init(async function run() {
         try {
             const fixPlan = await buildFixPlan(cli, global.database);
-            console.log(
-                "In 10 seconds is going to change " + fixPlan.cacheKey +
-                " from " + formatJson(fixPlan.currentValue) +
-                " into " + formatJson(fixPlan.nextValue) +
-                " (" + fixPlan.summary + ")"
-            );
+            console.log(formatFixPlanPreview(fixPlan));
             setTimeout(function applyFix() {
                 global.database.setCache(fixPlan.cacheKey, fixPlan.nextValue);
                 console.log("Done.");
@@ -194,5 +191,6 @@ if (require.main === module) main();
 
 module.exports = {
     buildTradeContextFix,
+    formatFixPlanPreview,
     getBridgeSymbol
 };
