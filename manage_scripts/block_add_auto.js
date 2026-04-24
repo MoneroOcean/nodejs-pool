@@ -25,10 +25,11 @@ cli.init(function() {
                                 "value":      body.reward
                         };
                         const body3 = global.protos.Block.encode(body2);
+                        const blockHeight = parseInt(height, 10);
                         let txn = global.database.env.beginTxn();
-                        let blockProto = txn.getBinary(global.database.blockDB, parseInt(height));
+                        let blockProto = txn.getBinary(global.database.blockDB, blockHeight);
                         if (blockProto === null) {
-                                txn.putBinary(global.database.blockDB, height, body3);
+                                txn.putBinary(global.database.blockDB, blockHeight, body3);
                                 console.log("Block with " + height + " height added! Exiting!");
                         } else {
                                 console.log("Block with " + height + " height already exists! Exiting!");
