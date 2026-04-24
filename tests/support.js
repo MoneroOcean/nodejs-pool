@@ -270,4 +270,58 @@ test.describe("support", { concurrency: false }, () => {
             restore();
         }
     });
+
+    test("all emails include a unified pool node label", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const originalSetTimeout = global.setTimeout;
+        const support = supportFactory();
+        let capturedPayload = null;
+
+        global.config.hostname = "pool-test";
+        global.config.bind_ip = "203.0.113.7";
+        global.config.general = {
+            adminEmail: "ops@example.com",
+            emailSig: "Pool %(wallet)s",
+            emailFrom: "pool@example.com",
+            mailgunURL: "http://127.0.0.1/send"
+        };
+
+        http.request = function fakeRequest(_options, onResponse) {
+            const request = createRequest();
+            let requestBody = "";
+            request.write = function write(chunk) {
+                requestBody += chunk;
+            };
+            request.end = function end() {
+                capturedPayload = JSON.parse(requestBody);
+                const response = createResponse();
+                setImmediate(function respond() {
+                    onResponse(response);
+                    response.emit("data", "{}");
+                    response.emit("end");
+                });
+            };
+            return request;
+        };
+        global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
+            if (delay === 5 * 60 * 1000 || delay === 30 * 60 * 1000) {
+                return setImmediate(fn, ...args);
+            }
+            return originalSetTimeout(fn, delay, ...args);
+        };
+
+        try {
+            support.sendEmail("miner@example.com", "Worker stopped", "Worker x stopped", "wallet");
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+
+            assert.equal(capturedPayload.subject, "[pool-test 203.0.113.7] Worker stopped");
+            assert.match(capturedPayload.text, /^Hello,\n\nPool node: pool-test 203\.0\.113\.7\n\nWorker x stopped\n\nThank you,/);
+        } finally {
+            http.request = originalRequest;
+            global.setTimeout = originalSetTimeout;
+            restore();
+        }
+    });
 });
