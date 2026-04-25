@@ -9,6 +9,7 @@ node_modules
 .DS_Store
 .codex
 lib2/
+_*.js
 *~
 *.un~
 
@@ -27,9 +28,13 @@ wallet_trust_*
 miner_agents
 extra_verify_wallet_hashes_*
 block_share_dumps/*.cvs
+block_share_dumps/*.cvs.xz
+block_share_dumps/process.sh
 block_template_is_stuck
+ex_keys.json
 
 # Local runtime control files
+*.stop.txt*
 extra_wallet_verify.txt
 ip_whitelist.txt
 wallet_debug.txt
