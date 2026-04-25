@@ -264,7 +264,7 @@ test("erg handlers preserve the pre-refactor autolykos share verification and su
     }
 });
 
-test("eth requires full submitted nonces to include extranonce but erg keeps full nonce compatibility", () => {
+test("eth and erg require full submitted nonces to include extranonce", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const ethPool = coinFuncs.getPoolSettings("ETH");
     const ergPool = coinFuncs.getPoolSettings("ERG");
@@ -296,8 +296,40 @@ test("eth requires full submitted nonces to include extranonce but erg keeps ful
     assert.equal(ergPool.validateSubmitParams({ ...baseContext, params: { nonce: "0011223344556677" } }), true);
     assert.deepEqual(observed, [
         { extraNonce: "abcd", options: { requireFullNonceExtraNoncePrefix: true } },
-        { extraNonce: "abcd", options: { requireFullNonceExtraNoncePrefix: false } }
+        { extraNonce: "abcd", options: { requireFullNonceExtraNoncePrefix: true } }
     ]);
+});
+
+test("erg mining.submit parser uses SRBMiner full nonce field when present", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ergPool = coinFuncs.getPoolSettings("ERG");
+    const params = {
+        raw_params: [
+            "erg-wallet",
+            "21108",
+            "5b3ec51d640c",
+            "undefined",
+            "f0c25b3ec51d640c"
+        ]
+    };
+
+    assert.equal(ergPool.parseMiningSubmitParams({ params }), true);
+    assert.equal(params.nonce, "f0c25b3ec51d640c");
+});
+
+test("erg mining.submit parser falls back to nonce suffix for standard submits", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ergPool = coinFuncs.getPoolSettings("ERG");
+    const params = {
+        raw_params: [
+            "erg-wallet",
+            "21108",
+            "5b3ec51d640c"
+        ]
+    };
+
+    assert.equal(ergPool.parseMiningSubmitParams({ params }), true);
+    assert.equal(params.nonce, "5b3ec51d640c");
 });
 
 test("xtm submit and verify handlers preserve the pre-refactor special-case tari semantics", () => {
