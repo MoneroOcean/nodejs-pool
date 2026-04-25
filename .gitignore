@@ -21,7 +21,7 @@ cert*
 config.json
 
 # Generated local runtime outputs
-core.*
+/core.*
 dump
 dump_[0-9]*
 wallet_trust_*
