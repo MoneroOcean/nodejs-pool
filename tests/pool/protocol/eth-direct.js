@@ -106,9 +106,10 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
         });
 
         assert.equal(subscribeReply.replies[0].error, null);
-        assert.equal(subscribeReply.replies[0].result.length, 2);
+        assert.equal(subscribeReply.replies[0].result.length, 3);
         assert.equal(subscribeReply.replies[0].result[0][2], "EthereumStratum/1.0.0");
         assert.equal(/^[0-9a-f]+$/.test(subscribeReply.replies[0].result[1]), true);
+        assert.equal(subscribeReply.replies[0].result[2], 6);
 
         const authorizeReply = invokePoolMethod({
             socket,
@@ -129,6 +130,28 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
         assert.equal("kawpow" in miner.algos, false);
     } finally {
         global.coinFuncs.portBlobType = originalPortBlobType;
+        await runtime.stop();
+    }
+});
+
+test("ethereum-stratum subscribe omits nonce suffix size for nicehash-style clients", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const subscribeReply = invokePoolMethod({
+            socket,
+            id: 109,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0", "EthereumStratum/1.0.0"],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(subscribeReply.replies[0].error, null);
+        assert.equal(subscribeReply.replies[0].result.length, 2);
+        assert.equal(subscribeReply.replies[0].result[0][2], "EthereumStratum/1.0.0");
+        assert.equal(/^[0-9a-f]+$/.test(subscribeReply.replies[0].result[1]), true);
+    } finally {
         await runtime.stop();
     }
 });

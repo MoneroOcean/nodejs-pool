@@ -264,6 +264,42 @@ test("erg handlers preserve the pre-refactor autolykos share verification and su
     }
 });
 
+test("eth requires full submitted nonces to include extranonce but erg keeps full nonce compatibility", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ethPool = coinFuncs.getPoolSettings("ETH");
+    const ergPool = coinFuncs.getPoolSettings("ERG");
+    const observed = [];
+    const baseContext = {
+        coinFuncs: {
+            nonceSize() {
+                return 8;
+            }
+        },
+        job: {
+            blob_type_num: 102,
+            extraNonce: "abcd"
+        },
+        normalizeExtraNonceSubmitNonce(nonce, extraNonce, options) {
+            observed.push({ extraNonce, options });
+            return nonce;
+        },
+        params: {
+            nonce: "0011223344556677"
+        },
+        state: {
+            nonceCheck64: /^[0-9a-f]{16}$/,
+            hashCheck32: /^[0-9a-f]{64}$/
+        }
+    };
+
+    assert.equal(ethPool.validateSubmitParams({ ...baseContext, params: { nonce: "0011223344556677" } }), true);
+    assert.equal(ergPool.validateSubmitParams({ ...baseContext, params: { nonce: "0011223344556677" } }), true);
+    assert.deepEqual(observed, [
+        { extraNonce: "abcd", options: { requireFullNonceExtraNoncePrefix: true } },
+        { extraNonce: "abcd", options: { requireFullNonceExtraNoncePrefix: false } }
+    ]);
+});
+
 test("xtm submit and verify handlers preserve the pre-refactor special-case tari semantics", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
