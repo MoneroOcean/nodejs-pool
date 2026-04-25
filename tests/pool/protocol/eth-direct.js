@@ -106,6 +106,9 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
         });
 
         assert.equal(subscribeReply.replies[0].error, null);
+        assert.equal(subscribeReply.replies[0].result.length, 2);
+        assert.equal(subscribeReply.replies[0].result[0][2], "EthereumStratum/1.0.0");
+        assert.equal(/^[0-9a-f]+$/.test(subscribeReply.replies[0].result[1]), true);
 
         const authorizeReply = invokePoolMethod({
             socket,
@@ -319,7 +322,7 @@ test("eth-style direct miners still accept submits that provide only the nonce s
     }
 });
 
-test("eth-style direct miners accept full nonces that do not start with the subscribe extranonce", async () => {
+test("eth-style direct miners reject full nonces that do not start with the subscribe extranonce", async () => {
     const { runtime, database } = await startHarness({ freeEthExtranonces: [0xff7e] });
     const originalPortBlobType = global.coinFuncs.portBlobType;
     const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
@@ -385,11 +388,11 @@ test("eth-style direct miners accept full nonces that do not start with the subs
             portData: global.config.ports[1]
         });
 
-        await flushShareAccumulator(() => database.shares.length === 1);
-        assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
-        assert.equal(database.invalidShares.length, 0);
-        assert.equal(database.shares.length, 1);
-        assert.equal(observedNonce, liveCapturedNonce);
+        await flushShareAccumulator(() => database.invalidShares.length === 1);
+        assert.deepEqual(submitReply.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(database.invalidShares.length, 1);
+        assert.equal(database.shares.length, 0);
+        assert.equal(observedNonce, null);
     } finally {
         global.coinFuncs.portBlobType = originalPortBlobType;
         global.coinFuncs.slowHashBuff = originalSlowHashBuff;
