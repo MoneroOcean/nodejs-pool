@@ -214,6 +214,20 @@ let originalProtos;
 let originalSupport;
 let originalCoinFuncs;
 
+test("behind-block emails use concise pool node labels", () => {
+    const poolStats = loadPoolStats();
+    const email = poolStats.formatBehindBlocksEmail({
+        hostname: "jp.moneroocean.stream",
+        ip: "0.0.0.0",
+        port: 18081
+    }, 4);
+
+    assert.deepEqual(email, {
+        subject: "Pool node jp is 4 blocks behind",
+        body: "Pool node jp is 4 blocks behind for 18081 port"
+    });
+});
+
 test.beforeEach(() => {
     delete require.cache[POOL_STATS_PATH];
     originalConsoleLog = console.log;

@@ -352,8 +352,8 @@ test.describe("support", { concurrency: false }, () => {
             await new Promise((resolve) => setImmediate(resolve));
             await new Promise((resolve) => setImmediate(resolve));
 
-            assert.equal(capturedPayload.subject, "[pool-test 203.0.113.7] Worker stopped");
-            assert.match(capturedPayload.text, /^Hello,\n\nPool node: pool-test 203\.0\.113\.7\n\nWorker x stopped\n\nThank you,/);
+            assert.equal(capturedPayload.subject, "[pool-test] Worker stopped");
+            assert.match(capturedPayload.text, /^Hello,\n\nPool node: pool-test\n\nWorker x stopped\n\nThank you,/);
         } finally {
             http.request = originalRequest;
             global.setTimeout = originalSetTimeout;
