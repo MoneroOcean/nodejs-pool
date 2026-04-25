@@ -191,7 +191,14 @@ function authorizeEthMiner(socket, authorizeId, pass) {
     assert.deepEqual(authorizeReply.replies, [{ error: null, result: true }]);
     const notifyPush = authorizeReply.pushes.find((message) => message.method === "mining.notify");
     assert.ok(notifyPush);
+    notifyPush.extraNonce = subscribeReply.replies[0].result[1];
     return notifyPush;
+}
+
+function buildEthSubmitNonce(extraNonce, suffix) {
+    const isSharedNonceProfile = global.coinFuncs.portBlobType(ETH_PORT) === 102;
+    const nonceLength = isSharedNonceProfile ? 16 - extraNonce.length : 16;
+    return "0x" + suffix.padStart(nonceLength, "0");
 }
 
 function submitEthBlockCandidate(socket, id, notifyPush, result = ZERO_RESULT) {
@@ -202,7 +209,7 @@ function submitEthBlockCandidate(socket, id, notifyPush, result = ZERO_RESULT) {
         params: [
             ETH_WALLET,
             notifyPush.params[0],
-            "0x000000000000002a",
+            buildEthSubmitNonce(notifyPush.extraNonce, "2a"),
             `0x${notifyPush.params[1]}`,
             `0x${"11".repeat(32)}`,
             `0x${result}`
@@ -216,7 +223,7 @@ async function submitEthBlockCandidateWithClient(client, worker, requestIds) {
     const authorizeId = requestIds && requestIds.authorizeId ? requestIds.authorizeId : subscribeId + 1;
     const submitId = requestIds && requestIds.submitId ? requestIds.submitId : authorizeId + 1;
 
-    await client.request({
+    const subscribeReply = await client.request({
         id: subscribeId,
         method: "mining.subscribe",
         params: ["HarnessEthMiner/1.0"]
@@ -236,7 +243,7 @@ async function submitEthBlockCandidateWithClient(client, worker, requestIds) {
         params: [
             ETH_WALLET,
             notifyPush.params[0],
-            "0x0000000000000002",
+            buildEthSubmitNonce(subscribeReply.result[1], "2"),
             `0x${notifyPush.params[1]}`,
             `0x${"ab".repeat(32)}`
         ]
