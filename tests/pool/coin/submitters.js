@@ -300,7 +300,7 @@ test("eth and erg require full submitted nonces to include extranonce", () => {
     ]);
 });
 
-test("erg mining.submit parser uses SRBMiner full nonce field when present", () => {
+test("erg mining.submit parser uses the nonce field even when SRBMiner includes a full nonce field", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const ergPool = coinFuncs.getPoolSettings("ERG");
     const params = {
@@ -314,7 +314,7 @@ test("erg mining.submit parser uses SRBMiner full nonce field when present", () 
     };
 
     assert.equal(ergPool.parseMiningSubmitParams({ params }), true);
-    assert.equal(params.nonce, "f0c25b3ec51d640c");
+    assert.equal(params.nonce, "5b3ec51d640c");
 });
 
 test("erg mining.submit parser falls back to nonce suffix for standard submits", () => {
