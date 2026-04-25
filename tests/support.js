@@ -133,7 +133,7 @@ test.describe("support", { concurrency: false }, () => {
         }
     });
 
-    test("rpcPortDaemon2 forces connection close on shared JSON RPC requests", async () => {
+    test("rpcPortDaemon2 forces connection close on shared JSON RPC requests by default", async () => {
         const restore = installSupportGlobals();
         const originalRequest = http.request;
         const support = supportFactory();
@@ -163,6 +163,42 @@ test.describe("support", { concurrency: false }, () => {
             assert.deepEqual(result.reply, { result: { ok: true } });
             assert.equal(result.statusCode, 200);
             assert.equal(requestOptions.headers.Connection, "close");
+        } finally {
+            http.request = originalRequest;
+            restore();
+        }
+    });
+
+    test("rpcPortDaemon2 can disable forced connection close", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const support = supportFactory();
+        let requestOptions;
+
+        http.request = function fakeRequest(options, onResponse) {
+            requestOptions = options;
+            const request = createRequest();
+            const response = createResponse();
+
+            setImmediate(function respond() {
+                onResponse(response);
+                response.emit("data", JSON.stringify({ result: { ok: true } }));
+                response.emit("end");
+            });
+
+            return request;
+        };
+
+        try {
+            const result = await new Promise((resolve) => {
+                support.rpcPortDaemon2(18081, "", { ping: true }, function onReply(reply, statusCode) {
+                    resolve({ reply, statusCode });
+                }, { suppressErrorLog: true, connectionClose: false });
+            });
+
+            assert.deepEqual(result.reply, { result: { ok: true } });
+            assert.equal(result.statusCode, 200);
+            assert.equal(Object.prototype.hasOwnProperty.call(requestOptions.headers, "Connection"), false);
         } finally {
             http.request = originalRequest;
             restore();

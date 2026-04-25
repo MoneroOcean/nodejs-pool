@@ -198,6 +198,10 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
             min_height: 3655400 - 31 * 24 * 30,
             max_height: 3655400
         });
+        assert.deepEqual(historyCalls[0].options, {
+            suppressErrorLog: true,
+            connectionClose: false
+        });
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet submit failed after claim with no wallet match yet: not enough unlocked money/);
         assert.equal(harness.database.getCache("lastPaymentCycle"), undefined);
     });

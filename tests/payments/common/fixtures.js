@@ -166,8 +166,8 @@ function createWallet(script) {
 
     return {
         calls,
-        rpcWallet(method, params, callback) {
-            calls.push({ method, params });
+        rpcWallet(method, params, callback, options) {
+            calls.push({ method, params, options });
             Promise.resolve(nextReply(method, params)).then(function resolveReply(reply) {
                 setImmediate(function replyAsync() {
                     callback(reply);
