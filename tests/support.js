@@ -2,7 +2,9 @@
 
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
 const http = require("node:http");
+const path = require("node:path");
 const test = require("node:test");
 
 const supportFactory = require("../lib/common/support.js");
@@ -307,12 +309,12 @@ test.describe("support", { concurrency: false }, () => {
         }
     });
 
-    test("all emails include a unified pool node label", async () => {
+    test("admin emails include the pool node label", async () => {
         const restore = installSupportGlobals();
         const originalRequest = http.request;
-        const originalSetTimeout = global.setTimeout;
         const support = supportFactory();
         let capturedPayload = null;
+        support._resetEmailState();
 
         global.config.hostname = "pool-test";
         global.config.bind_ip = "203.0.113.7";
@@ -340,8 +342,54 @@ test.describe("support", { concurrency: false }, () => {
             };
             return request;
         };
+
+        try {
+            support.sendEmail("ops@example.com", "Daemon failed", "daemon is down");
+            await new Promise((resolve) => setImmediate(resolve));
+
+            assert.equal(capturedPayload.subject, "[pool-test] Daemon failed");
+            assert.equal(capturedPayload.text, "Pool node: pool-test\n\ndaemon is down");
+        } finally {
+            http.request = originalRequest;
+            restore();
+        }
+    });
+
+    test("miner emails use pool branding without internal node labels", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const originalSetTimeout = global.setTimeout;
+        const support = supportFactory();
+        let capturedPayload = null;
+        support._resetEmailState();
+
+        global.config.hostname = "pool-test";
+        global.config.bind_ip = "203.0.113.7";
+        global.config.general = {
+            adminEmail: "ops@example.com",
+            emailFrom: "pool@example.com",
+            mailgunURL: "http://127.0.0.1/send"
+        };
+
+        http.request = function fakeRequest(_options, onResponse) {
+            const request = createRequest();
+            let requestBody = "";
+            request.write = function write(chunk) {
+                requestBody += chunk;
+            };
+            request.end = function end() {
+                capturedPayload = JSON.parse(requestBody);
+                const response = createResponse();
+                setImmediate(function respond() {
+                    onResponse(response);
+                    response.emit("data", "{}");
+                    response.emit("end");
+                });
+            };
+            return request;
+        };
         global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
-            if (delay === 5 * 60 * 1000 || delay === 30 * 60 * 1000) {
+            if (delay === 5 * 60 * 1000 || delay === 30 * 60 * 1000 || delay === 1000) {
                 return setImmediate(fn, ...args);
             }
             return originalSetTimeout(fn, delay, ...args);
@@ -351,14 +399,60 @@ test.describe("support", { concurrency: false }, () => {
             support.sendEmail("miner@example.com", "Worker stopped", "Worker x stopped", "wallet");
             await new Promise((resolve) => setImmediate(resolve));
             await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
 
-            assert.equal(capturedPayload.subject, "[pool-test] Worker stopped");
-            assert.match(capturedPayload.text, /^Hello,\n\nPool node: pool-test\n\nWorker x stopped\n\nThank you,/);
+            assert.equal(capturedPayload.subject, "MoneroOcean: Worker stopped");
+            assert.equal(capturedPayload.text, "Hello,\n\nWorker x stopped\n\nThank you,\nMoneroOcean Admin Team");
+            assert.equal(capturedPayload.text.includes("Pool node:"), false);
         } finally {
             http.request = originalRequest;
             global.setTimeout = originalSetTimeout;
             restore();
         }
+    });
+
+    test("email helper formats subjects, fields, masks, and UTC timestamps", () => {
+        const restore = installSupportGlobals();
+        const support = supportFactory();
+
+        global.config.hostname = "us.moneroocean.stream";
+        global.config.general = { emailBrand: "MoneroOcean" };
+
+        try {
+            assert.equal(support.formatEmailSubject("Worker stopped", "miner"), "MoneroOcean: Worker stopped");
+            assert.equal(support.formatEmailSubject("Daemon failed", "admin"), "[us] Daemon failed");
+            assert.equal(support.maskWalletAddress("48abcdef1234567897xYz"), "48abcd...7xYz");
+            assert.equal(support.formatPlainTextFields([
+                { label: "Pool", value: "MoneroOcean" },
+                { label: "Empty", value: "" },
+                { label: "Status", value: "stopped" }
+            ]), "Pool: MoneroOcean\nStatus: stopped");
+            assert.equal(support.formatDateUTC(Date.UTC(2026, 3, 25, 21, 22, 0)), "2026-04-25 21:22:00");
+        } finally {
+            restore();
+        }
+    });
+
+    test("deployment base SQL carries the bundled email defaults", () => {
+        const support = supportFactory();
+        const baseSql = fs.readFileSync(path.join(__dirname, "..", "deployment", "base.sql"), "utf8");
+        const sqlString = function sqlString(value) {
+            return String(value).replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/'/g, "''");
+        };
+
+        Object.keys(support.emailDefaults.general).forEach(function assertGeneralDefault(item) {
+            assert.ok(
+                baseSql.includes("('general', '" + item + "', '" + sqlString(support.emailDefaults.general[item]) + "',"),
+                "missing general." + item + " default in deployment/base.sql"
+            );
+        });
+        Object.keys(support.emailDefaults.email).forEach(function assertEmailDefault(item) {
+            assert.ok(
+                baseSql.includes("('email', '" + item + "', '" + sqlString(support.emailDefaults.email[item]) + "',"),
+                "missing email." + item + " default in deployment/base.sql"
+            );
+        });
     });
 
     test("detectNodeIp ignores wildcard bind addresses", () => {

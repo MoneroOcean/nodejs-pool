@@ -68,8 +68,12 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
             harness.support.rpcWallet = harness.wallet.rpcWallet;
             await harness.runtime.runCycle();
         });
+        await new Promise((resolve) => setImmediate(resolve));
 
         const batch = harness.mysql.state.store.paymentBatches[0];
+        const paymentEmail = harness.sentEmails.find(function findPaymentEmail(entry) {
+            return entry.to === "miner@example.com";
+        });
         assert.equal(batch.status, "finalized");
         assert.equal(batch.tx_key, longTxKey);
         assert.equal(harness.mysql.state.store.transactions.length, 1);
@@ -86,6 +90,16 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
         assert.match(output.log.join("\n"), /tx_hash=/);
         assert.match(output.log.join("\n"), /tx_key=/);
         assert.match(output.log.join("\n"), /https:\/\/xmrchain\.net\/prove\//);
+        assert.ok(paymentEmail);
+        assert.equal(paymentEmail.subject, "Payment sent: " + (harness.mysql.state.store.payments[0].amount / COIN) + " XMR");
+        assert.match(paymentEmail.body, /Payment sent\n\nPool: MoneroOcean\nStatus: confirmed\nCoin: XMR/);
+        assert.match(paymentEmail.body, new RegExp("Paid amount: " + (harness.mysql.state.store.payments[0].amount / COIN) + " XMR"));
+        assert.match(paymentEmail.body, new RegExp("Fee charged: " + (harness.mysql.state.store.payments[0].transfer_fee / COIN) + " XMR"));
+        assert.match(paymentEmail.body, new RegExp("Balance decrease: " + ((harness.mysql.state.store.payments[0].amount + harness.mysql.state.store.payments[0].transfer_fee) / COIN) + " XMR"));
+        assert.match(paymentEmail.body, new RegExp("Destination: " + INTEGRATED));
+        assert.match(paymentEmail.body, new RegExp("Transaction hash: " + "a".repeat(64)));
+        assert.match(paymentEmail.body, new RegExp("Transaction key: " + longTxKey));
+        assert.match(paymentEmail.body, new RegExp("Proof URL: https://xmrchain\\.net/prove/" + "a".repeat(64) + "/" + INTEGRATED + "/" + longTxKey));
     });
 
     test("accepted wallet transfer retries wallet-history visibility during submit and finalizes in the same cycle", async () => {

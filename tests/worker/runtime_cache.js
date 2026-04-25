@@ -1,10 +1,13 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
+const http = require("node:http");
 const test = require("node:test");
 
 const WORKER_PATH = require.resolve("../../lib/worker.js");
 const WORKER_HISTORY_PATH = require.resolve("../../lib/common/worker_history.js");
+const supportFactory = require("../../lib/common/support.js");
 
 function loadWorker() {
     const previousAutostart = global.__workerAutostart;
@@ -154,8 +157,10 @@ function createFakeEnvironment(options) {
         formatDate(value) {
             return String(value);
         },
-        formatTemplate(template) {
-            return template;
+        formatTemplate(template, values) {
+            return template.replace(/%\(([^)]+)\)s/g, function replaceValue(_match, key) {
+                return values && Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : "";
+            });
         },
         sendEmail() {
             emails.push(Array.from(arguments));
@@ -180,6 +185,24 @@ function createShare(share) {
         shares2: share.shares2,
         timestamp: share.timestamp
     };
+}
+
+function createResponse() {
+    const response = new EventEmitter();
+    response.statusCode = 200;
+    response.setEncoding = function setEncoding() {};
+    return response;
+}
+
+function createRequest() {
+    const request = new EventEmitter();
+    request.write = function write() {};
+    request.end = function end() {};
+    request.setTimeout = function setTimeout() {};
+    request.destroy = function destroy(error) {
+        this.emit("error", error);
+    };
+    return request;
 }
 
 function runUpdate(runtime, height) {
@@ -431,5 +454,86 @@ test.describe("worker", { concurrency: false }, () => {
             "Worker module paused due to LMDB full",
             "worker paused after LMDB reported map full while writing worker cache: MDB_MAP_FULL: Environment mapsize limit reached."
         ]);
+    });
+
+    test("worker stopped email uses SQL templates with masked wallet, UTC time, and pool signature", async () => {
+        const originalRequest = http.request;
+        const originalSetTimeout = global.setTimeout;
+        let capturedPayload = null;
+        const currentTime = Date.UTC(2026, 3, 25, 21, 22, 0);
+        const address = "48abcd" + "e".repeat(85) + "7xYz";
+
+        createFakeEnvironment();
+        global.config.hostname = "us.moneroocean.stream";
+        global.config.bind_ip = "203.0.113.7";
+        global.config.rpc = { https: false };
+        global.config.daemon.address = "127.0.0.1";
+        global.config.wallet = { address: "127.0.0.1", port: 18081 };
+        global.config.general.emailBrand = "MoneroOcean";
+        global.config.general.emailSig = "MoneroOcean Admin Team";
+        global.config.general.emailFrom = "pool@example.com";
+        global.config.general.mailgunURL = "http://127.0.0.1/send";
+        global.config.email.workerNotHashingSubject = "Worker stopped hashing: %(worker)s";
+        global.config.email.workerNotHashingBody = [
+            "Worker status changed",
+            "",
+            "Pool: %(pool)s",
+            "Status: stopped",
+            "Worker: %(worker)s",
+            "Wallet: %(wallet)s",
+            "Time (UTC): %(timestamp)s",
+            "Notice delay: %(notice_delay)s",
+            "",
+            "No action is required if this was expected."
+        ].join("\n");
+        global.mysql.query = function query(sql, params) {
+            assert.equal(sql, "SELECT email FROM users WHERE username = ? AND enable_email IS true limit 1");
+            assert.deepEqual(params, [address]);
+            return Promise.resolve([{ email: "miner@example.com" }]);
+        };
+        global.support = supportFactory();
+        global.support._resetEmailState();
+
+        http.request = function fakeRequest(_options, onResponse) {
+            const request = createRequest();
+            let requestBody = "";
+            request.write = function write(chunk) {
+                requestBody += chunk;
+            };
+            request.end = function end() {
+                capturedPayload = JSON.parse(requestBody);
+                const response = createResponse();
+                setImmediate(function respond() {
+                    onResponse(response);
+                    response.emit("data", "{}");
+                    response.emit("end");
+                });
+            };
+            return request;
+        };
+        global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
+            if (delay === 5 * 60 * 1000 || delay === 30 * 60 * 1000 || delay === 1000) {
+                return setImmediate(fn, ...args);
+            }
+            return originalSetTimeout(fn, delay, ...args);
+        };
+
+        try {
+            const worker = loadWorker();
+            const runtime = worker.createWorkerRuntime();
+            runtime.delayedSendWorkerStoppedHashingEmail(address + "_rig01", currentTime);
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+
+            assert.equal(capturedPayload.subject, "MoneroOcean: Worker stopped hashing: rig01");
+            assert.match(capturedPayload.text, /^Hello,\n\nWorker status changed\n\nPool: MoneroOcean\nStatus: stopped\nWorker: rig01\nWallet: 48abcd\.\.\.7xYz\nTime \(UTC\): 2026-04-25 21:22:00\nNotice delay: 10 minutes without submitted hashes/);
+            assert.match(capturedPayload.text, /Thank you,\nMoneroOcean Admin Team$/);
+            assert.equal(capturedPayload.text.includes(address), false);
+            assert.equal(capturedPayload.text.includes("Pool node:"), false);
+        } finally {
+            http.request = originalRequest;
+            global.setTimeout = originalSetTimeout;
+        }
     });
 });

@@ -154,8 +154,10 @@ function createFakeEnvironment(options) {
         formatDate(value) {
             return String(value);
         },
-        formatTemplate(template) {
-            return template;
+        formatTemplate(template, values) {
+            return template.replace(/%\(([^)]+)\)s/g, function replaceValue(_match, key) {
+                return values && Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : "";
+            });
         },
         sendEmail() {
             emails.push(Array.from(arguments));
