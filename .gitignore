@@ -26,6 +26,12 @@ wallet_trust_*
 miner_agents
 extra_verify_wallet_hashes_*
 block_share_dumps/*.cvs
+block_template_is_stuck
+
+# Local runtime control files
+extra_wallet_verify.txt
+ip_whitelist.txt
+wallet_debug.txt
 
 # Generated local test outputs
 .cache/live-miners

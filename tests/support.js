@@ -360,4 +360,26 @@ test.describe("support", { concurrency: false }, () => {
             restore();
         }
     });
+
+    test("detectNodeIp ignores wildcard bind addresses", () => {
+        const restore = installSupportGlobals();
+        const os = require("node:os");
+        const originalNetworkInterfaces = os.networkInterfaces;
+        const support = supportFactory();
+
+        global.config.bind_ip = "::";
+        os.networkInterfaces = function fakeNetworkInterfaces() {
+            return {
+                lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+                eth0: [{ family: "IPv4", address: "198.51.100.12", internal: false }]
+            };
+        };
+
+        try {
+            assert.equal(support.detectNodeIp(), "198.51.100.12");
+        } finally {
+            os.networkInterfaces = originalNetworkInterfaces;
+            restore();
+        }
+    });
 });
