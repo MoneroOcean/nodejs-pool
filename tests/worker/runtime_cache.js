@@ -386,17 +386,14 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         fakeNow += 20 * 1000;
         await runUpdate(runtime, 1);
 
-        const startLogs = logs.filter(function (message) {
-            return message === "Worker cycle: height=1 status=start";
+        const cycleLogs = logs.filter(function (message) {
+            return message.indexOf("Worker cycle: ") === 0;
         });
         const layoutLogs = logs.filter(function (message) {
             return message.indexOf("Worker config: ") === 0;
         });
 
-        assert.equal(startLogs.length, 2);
-        assert.equal(startLogs.every(function (message) {
-            return message.indexOf("history_tiers=") === -1;
-        }), true);
+        assert.equal(cycleLogs.length, 0);
         assert.deepEqual(layoutLogs, ["Worker config: history_tiers=7/7/7/6 history_intervals=2m/6m/18m/54m"]);
     });
 

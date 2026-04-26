@@ -335,7 +335,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         assert.equal(state.env.writeCommits, writeCommitsAfterFirstRun);
         assert.equal(state.env.commits.length, commitsAfterFirstRun);
         const processedLog = logs.filter(function (message) {
-            return message.indexOf("Worker cycle: ") === 0 && message.indexOf("status=done") !== -1;
+            return message.indexOf("Summary: ") === 0 && message.indexOf("hashrate=") !== -1;
         }).pop();
         const skippedMatch = processedLog && processedLog.match(/skipped_mb=([0-9.]+) compared_mb=([0-9.]+) hashrate=/);
         assert.notEqual(skippedMatch, null);
