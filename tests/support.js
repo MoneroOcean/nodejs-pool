@@ -331,6 +331,64 @@ test.describe("support", { concurrency: false }, () => {
         }
     });
 
+    test("miner email batching can use a stable key and appends one unsubscribe footer", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const originalSetTimeout = global.setTimeout;
+        const support = supportFactory();
+        let capturedPayload = null;
+
+        global.config.general.adminEmail = "admin@example.com";
+        global.config.general.emailFrom = "pool@example.com";
+        global.config.general.mailgunURL = "http://127.0.0.1/send";
+        support._resetEmailState();
+        http.request = function fakeRequest(_options, onResponse) {
+            const request = createRequest();
+            let requestBody = "";
+            request.write = function write(chunk) {
+                requestBody += chunk;
+            };
+            request.end = function end() {
+                capturedPayload = JSON.parse(requestBody);
+                const response = createResponse();
+                setImmediate(function respond() {
+                    onResponse(response);
+                    response.emit("data", "{}");
+                    response.emit("end");
+                });
+            };
+            return request;
+        };
+        global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
+            if (delay === 5 * 60 * 1000 || delay === 30 * 60 * 1000 || delay === 1000) {
+                return setImmediate(fn, ...args);
+            }
+            return originalSetTimeout(fn, delay, ...args);
+        };
+
+        try {
+            const wallet = "4".repeat(95);
+            const options = {
+                batchKey: "worker-stopped:" + wallet,
+                batchSubject: "Workers stopped hashing"
+            };
+            support.sendEmail("miner@example.com", "Worker stopped hashing: rig01", "Worker: rig01", wallet, options);
+            support.sendEmail("miner@example.com", "Worker stopped hashing: rig02", "Worker: rig02", wallet, options);
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+
+            assert.equal(capturedPayload.subject, "MoneroOcean: Workers stopped hashing");
+            assert.match(capturedPayload.text, /Worker: rig01\n\nWorker: rig02/);
+            assert.equal((capturedPayload.text.match(/Unsubscribe: /g) || []).length, 1);
+            assert.equal(capturedPayload.text.includes(wallet), false);
+        } finally {
+            http.request = originalRequest;
+            global.setTimeout = originalSetTimeout;
+            restore();
+        }
+    });
+
     test("rpcPortDaemon2 logs transport errors without stack traces", async () => {
         const restore = installSupportGlobals();
         const originalRequest = http.request;

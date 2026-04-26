@@ -529,7 +529,7 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
             await new Promise((resolve) => setImmediate(resolve));
             await new Promise((resolve) => setImmediate(resolve));
 
-            assert.equal(capturedPayload.subject, "MoneroOcean: Worker stopped hashing: rig01");
+            assert.equal(capturedPayload.subject, "MoneroOcean: Workers stopped hashing");
             assert.match(capturedPayload.text, /^Hello,\n\nWorker status changed\n\nPool: MoneroOcean\nStatus: stopped\nWorker: rig01\nWallet: 48abcd\.\.\.7xYz\nTime \(UTC\): 2026-04-25 21:22:00\nNotice delay: 10 minutes without submitted hashes/);
             assert.match(capturedPayload.text, /\n\nUnsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/[A-Za-z0-9_-]+\n\nThank you,/);
             assert.match(capturedPayload.text, /Thank you,\nMoneroOcean Admin Team$/);
