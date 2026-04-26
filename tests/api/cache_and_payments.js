@@ -198,7 +198,7 @@ async function captureConsole(run) {
     }
 }
 
-test.describe("api", { concurrency: false }, () => {
+test.describe("api cache and payments", { concurrency: false }, () => {
     test("cached GETs normalize keys and pool stats responses do not mutate cached objects", async () => {
         const poolStats = {
             minerHistory: [{ ts: 1, miners: 2 }],

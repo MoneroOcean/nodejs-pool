@@ -210,7 +210,7 @@ function createPendingJobDatabase() {
     return { database, resets, stores };
 }
 
-test.describe("remote share", { concurrency: false }, () => {
+test.describe("remote share pending summary", { concurrency: false }, () => {
 test("pending job close waits for in-flight processing before closing storage", async () => {
     const restore = installRemoteShareGlobals();
     const { database } = createPendingJobDatabase();

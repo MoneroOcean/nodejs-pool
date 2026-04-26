@@ -418,7 +418,7 @@ function assertApproxRows(actualRows, expectedRows) {
     }
 }
 
-test.describe("block_manager unlockers", { concurrency: false }, () => {
+test.describe("block_manager main unlocker", { concurrency: false }, () => {
     test("failed precalc does not leave hashes stuck in flight", async () => {
         const env = createUnlockerEnvironment({
             lastBlockHeight: 200,

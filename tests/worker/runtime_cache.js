@@ -215,7 +215,7 @@ function toStoredTimestamp(value) {
     return Math.round(value / 1000) * 1000;
 }
 
-test.describe("worker", { concurrency: false }, () => {
+test.describe("worker runtime cache", { concurrency: false }, () => {
     let originalConfig;
     let originalDatabase;
     let originalMysql;

@@ -194,7 +194,7 @@ function toStoredTimestamp(value) {
     return Math.round(value / 1000) * 1000;
 }
 
-test.describe("worker", { concurrency: false }, () => {
+test.describe("worker history imports", { concurrency: false }, () => {
     let originalConfig;
     let originalDatabase;
     let originalMysql;

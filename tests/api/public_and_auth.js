@@ -245,7 +245,7 @@ function createFakeCluster(options) {
     };
 }
 
-test.describe("api", { concurrency: false }, () => {
+test.describe("api public and auth", { concurrency: false }, () => {
     test("authentication preserves legacy login behavior and authed routes still accept query, body, and header tokens", async () => {
         const config = createConfig();
         const secureHash = crypto.createHmac("sha256", config.api.secKey).update("secretpass").digest("hex");

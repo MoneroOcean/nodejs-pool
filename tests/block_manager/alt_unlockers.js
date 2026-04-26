@@ -418,7 +418,7 @@ function assertApproxRows(actualRows, expectedRows) {
     }
 }
 
-test.describe("block_manager unlockers", { concurrency: false }, () => {
+test.describe("block_manager altblock unlocker", { concurrency: false }, () => {
     test("altblock unlocker groups anchor precalc and marks each hash ready", async () => {
         const env = createUnlockerEnvironment({
             lastBlockHeight: 1000,

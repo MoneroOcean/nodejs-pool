@@ -203,7 +203,7 @@ function createTestEnvironment(options = {}) {
     };
 }
 
-test.describe("pool_stats", { concurrency: false }, () => {
+test.describe("pool_stats runtime refresh", { concurrency: false }, () => {
 let originalConsoleLog;
 let originalConsoleError;
 let originalSetInterval;

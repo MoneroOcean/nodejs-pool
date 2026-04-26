@@ -210,7 +210,7 @@ function createPendingJobDatabase() {
     return { database, resets, stores };
 }
 
-test.describe("remote share", { concurrency: false }, () => {
+test.describe("remote share block jobs", { concurrency: false }, () => {
 test("remote_share enqueues block work durably and returns success immediately", async () => {
     const restore = installRemoteShareGlobals();
     const pendingJobs = {

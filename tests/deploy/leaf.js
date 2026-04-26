@@ -454,7 +454,7 @@ function printLogs(t, context) {
     ]) if (filePath && fs.existsSync(filePath)) t.diagnostic(`${label} log: ${filePath}`);
 }
 
-test.describe("deploy", { concurrency: false }, () => {
+test.describe("leaf.bash matrix", { concurrency: false }, () => {
     test("deployment leaf.bash matrix in Docker", { timeout: 2 * 60 * 60 * 1000 }, async (t) => {
         if (spawnSync("docker", ["--version"], { stdio: "ignore" }).status !== 0) {
             throw new Error("Docker is required for test:deploy");

@@ -273,7 +273,7 @@ function createPendingJobDatabase() {
     return { database, resets, stores };
 }
 
-test.describe("remote share", { concurrency: false }, () => {
+test.describe("remote share ingress", { concurrency: false }, () => {
 test("remote_share accepts valid share frames and flushes queued shares", async () => {
     const restore = installRemoteShareGlobals();
     const shareStore = {
