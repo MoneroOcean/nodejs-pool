@@ -183,6 +183,71 @@ test("wallet trust enables daemon-first block submit for a new same-wallet sessi
     }
 });
 
+test("daemon-first failure email includes local block difficulty context", async () => {
+    const mainPowVectors = createMainPowVectorMap();
+    const { runtime } = await startHarness({ realMainPow: true, mainPowVectors });
+    const socket = {};
+    const mismatchedVector = RX0_MAIN_SHARE_VECTORS[1];
+    const originalRpcPortDaemon = global.support.rpcPortDaemon;
+
+    try {
+        global.support.rpcPortDaemon = function rpcPortDaemonFailure(port, method, params, callback) {
+            this.rpcPortDaemonCalls.push({ port, method, params });
+            callback(null, 500);
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 2003,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-wallet-trust-email"
+            }
+        });
+
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const blockTemplate = runtime.getState().activeBlockTemplates[""];
+        const result = buildMainShareResult(runtime, socket, jobId, mismatchedVector.nonce);
+
+        miner.validShares = 1;
+        job.difficulty = 2;
+        job.rewarded_difficulty = 2;
+        job.rewarded_difficulty2 = 2;
+        job.norm_diff = 2;
+        blockTemplate.difficulty = 1;
+        blockTemplate.xmr_difficulty = 3;
+        blockTemplate.xtm_difficulty = Number.MAX_SAFE_INTEGER;
+
+        invokePoolMethod({
+            socket,
+            id: 2004,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000001b",
+                result
+            }
+        });
+
+        await flushTimers();
+        await new Promise((resolve) => setTimeout(resolve, 550));
+        await flushTimers();
+        assert.equal(global.support.rpcPortDaemonCalls.length >= 1, true);
+        assert.equal(global.support.emails.length, 1);
+        assert.match(global.support.emails[0].body, /Submitted share difficulty:/);
+        assert.match(global.support.emails[0].body, /Required block difficulty: 3/);
+        assert.match(global.support.emails[0].body, /Locally verified difficulty:/);
+        assert.match(global.support.emails[0].body, /not block level; no action is needed/);
+    } finally {
+        global.support.rpcPortDaemon = originalRpcPortDaemon;
+        await runtime.stop();
+    }
+});
+
 test("main-chain candidates that only satisfy the XMR threshold submit only to the XMR daemon", async () => {
     const { runtime, database } = await startHarness({
         templates: [
