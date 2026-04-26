@@ -1,5 +1,4 @@
 "use strict";
-
 process.chdir(__dirname);
 
 const argv = require("../parse_args")(process.argv.slice(2));

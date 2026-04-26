@@ -1,5 +1,4 @@
 "use strict";
-
 const { createFakeMysql } = require("./fake_mysql");
 
 const PAYMENTS_PATH = require.resolve("../../../lib/payments.js");

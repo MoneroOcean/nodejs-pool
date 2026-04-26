@@ -1,5 +1,4 @@
 "use strict";
-
 const originalConsole = {
     log: console.log.bind(console),
     info: console.info.bind(console),

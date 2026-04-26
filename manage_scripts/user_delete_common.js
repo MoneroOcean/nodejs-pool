@@ -1,5 +1,4 @@
 "use strict";
-
 const accountUtils = require("../script_account_utils.js");
 
 module.exports = async function runUserDelete(user, options) {

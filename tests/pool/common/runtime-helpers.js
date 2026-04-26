@@ -1,5 +1,4 @@
 "use strict";
-
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -134,9 +133,7 @@ async function withBlockSubmitTestMode(fn) {
     }
 }
 
-function getLoginJobId(loginReply) {
-    return loginReply.replies[0].result.job.job_id;
-}
+function getLoginJobId(loginReply) { return loginReply.replies[0].result.job.job_id; }
 
 function loginMainMiner(socket, id, pass, options) {
     const { ip, login = MAIN_WALLET } = options || {};

@@ -1,5 +1,4 @@
 "use strict";
-
 const lmdb = require('node-lmdb');
 const fs   = require('fs');
 const cli = require("../script_utils.js")();

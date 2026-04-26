@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const height = cli.arg("height", "Please specify block height");
 const body2 = cli.jsonArg("body", "Please specify block body", "Can't parse block body: ");

@@ -1,8 +1,5 @@
 "use strict";
-
-function queryUsers(user) {
-    return global.mysql.query("SELECT * FROM users WHERE username = ?", [user]);
-}
+function queryUsers(user) { return global.mysql.query("SELECT * FROM users WHERE username = ?", [user]); }
 
 function requireExistingUser(user, errorMessage, options = {}) {
     return queryUsers(user).then(function (rows) {

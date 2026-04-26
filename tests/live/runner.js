@@ -1,5 +1,4 @@
 "use strict";
-
 const path = require("node:path");
 
 const parseArgv = require("../../parse_args.js");

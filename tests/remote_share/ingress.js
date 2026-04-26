@@ -1,5 +1,4 @@
 "use strict";
-
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -14,9 +13,7 @@ delete global.__remoteShareAutostart;
 
 const PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "..", "lib", "common", "data.proto")));
 
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
+function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function waitForCondition(check, timeoutMs) {
     const deadline = Date.now() + timeoutMs;

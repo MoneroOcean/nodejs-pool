@@ -33,9 +33,7 @@ function hasClusterWorkers(clusterApi) {
     });
 }
 
-function shutdownErrorMessage(error) {
-    return error && error.stack ? error.stack : String(error);
-}
+function shutdownErrorMessage(error) { return error && error.stack ? error.stack : String(error); }
 
 function stopActiveModule() {
     if (!activeModule || typeof activeModule.stop !== "function") return Promise.resolve();

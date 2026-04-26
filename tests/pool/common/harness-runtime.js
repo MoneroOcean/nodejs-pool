@@ -1,5 +1,4 @@
 "use strict";
-
 const net = require("node:net");
 
 const {
@@ -257,9 +256,7 @@ async function startHarness(extra = {}) {
     };
 }
 
-function flushTimers() {
-    return new Promise((resolve) => setImmediate(resolve));
-}
+function flushTimers() { return new Promise((resolve) => setImmediate(resolve)); }
 
 function invokePoolMethod({
     socket = {},

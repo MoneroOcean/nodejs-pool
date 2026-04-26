@@ -1,5 +1,4 @@
 "use strict";
-
 module.exports = function printBans(callback) {
     global.mysql.query("SELECT * FROM bans").then(function (rows) {
         for (const row of rows) {

@@ -1,5 +1,4 @@
 "use strict";
-
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const http = require("node:http");
@@ -214,9 +213,7 @@ function runUpdate(runtime, height) {
     });
 }
 
-function toStoredTimestamp(value) {
-    return Math.round(value / 1000) * 1000;
-}
+function toStoredTimestamp(value) { return Math.round(value / 1000) * 1000; }
 
 test.describe("worker runtime cache", { concurrency: false }, () => {
     let originalConfig;

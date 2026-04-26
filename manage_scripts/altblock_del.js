@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const timestamp = cli.arg("timestamp", "Please specify altblock time");
 

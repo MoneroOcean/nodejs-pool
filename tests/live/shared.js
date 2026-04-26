@@ -1,5 +1,4 @@
 "use strict";
-
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
@@ -145,9 +144,7 @@ function emitLiveStatus(status, label, detail = "") {
     emitProgress(`[${formatReadableTime(new Date())}] ${status} ${label}${detail ? ` ${detail}` : ""}`);
 }
 
-function firstLine(value) {
-    return String(value || "").split(/\r?\n/, 1)[0] || "";
-}
+function firstLine(value) { return String(value || "").split(/\r?\n/, 1)[0] || ""; }
 
 function tailText(value, maxChars = 4000) {
     const text = String(value || "").trim();

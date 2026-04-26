@@ -1,5 +1,4 @@
 "use strict";
-
 const SAFE_SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function splitUser(user) {
@@ -45,9 +44,7 @@ function sqlTable(name) {
     return "`" + name + "`";
 }
 
-function formatPaymentId(paymentId) {
-    return paymentId === null ? "(none)" : paymentId;
-}
+function formatPaymentId(paymentId) { return paymentId === null ? "(none)" : paymentId; }
 
 function logUser(label, account) {
     console.log(label + "Address: " + account.address);

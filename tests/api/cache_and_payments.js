@@ -1,5 +1,4 @@
 "use strict";
-
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const http = require("node:http");
@@ -11,9 +10,7 @@ global.__apiAutostart = false;
 const createApiRuntime = require("../../lib/api.js").createApiRuntime;
 delete global.__apiAutostart;
 
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
+function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function waitForCondition(check, timeoutMs) {
     const deadline = Date.now() + timeoutMs;

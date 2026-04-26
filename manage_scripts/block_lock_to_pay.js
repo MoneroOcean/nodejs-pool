@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const height = cli.arg("height", "Please specify block height to lock again (to pay it again)");
 

@@ -1,5 +1,4 @@
 "use strict";
-
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
@@ -169,9 +168,7 @@ async function waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffse
     return { logText: bundle.text, worker: files.worker, summary: summarizeBlockSubmitLog(bundle.text, files.worker) };
 }
 
-function withFixedDifficulty(wallet, loginDiff) {
-    return loginDiff ? `${wallet}+${loginDiff}` : wallet;
-}
+function withFixedDifficulty(wallet, loginDiff) { return loginDiff ? `${wallet}+${loginDiff}` : wallet; }
 
 async function withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, fn) {
     const files = createBlockSubmitAttemptFiles(run, `${testCase.name}-${candidate.loginDiff || "auto"}-${candidate.resultHex.slice(0, 8)}`);

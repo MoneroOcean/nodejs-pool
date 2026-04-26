@@ -1,5 +1,4 @@
 "use strict";
-
 const crypto = require("node:crypto");
 const { once } = require("node:events");
 const net = require("node:net");
@@ -247,9 +246,7 @@ async function isPoolEndpointReachable(host, port, useTls, timeoutMs = 1500) {
 const hasGpuProtocolProbe = (plan) => !plan.miner && !!plan.protocolProbe;
 const BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS = 15000;
 
-function escapeRegExp(value) {
-    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+function escapeRegExp(value) { return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
 function bigIntToLittleHex(value, size = 32) {
     let hex = BigInt(value).toString(16);

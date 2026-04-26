@@ -1,5 +1,4 @@
 "use strict";
-
 const { parseArgs } = require("node:util");
 
 module.exports = function parseArgv(args, options = {}) {

@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")({ "--": true });
 const stage = cli.arg("stage", "Please specify new stage value");
 

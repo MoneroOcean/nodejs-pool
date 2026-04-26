@@ -1,5 +1,4 @@
 "use strict";
-
 const ADVISORY_LOCK_NAME = "nodejs-pool:payments";
 const SAFE_BATCH_STATUSES = new Set(["reserved", "retrying"]);
 
@@ -32,13 +31,9 @@ function nowSqlTimestamp(support, timestampMs) {
         pad(date.getUTCSeconds());
 }
 
-function describeItem(item) {
-    return item.payment_address;
-}
+function describeItem(item) { return item.payment_address; }
 
-function isPresent(value) {
-    return value !== null && typeof value !== "undefined" && value !== "";
-}
+function isPresent(value) { return value !== null && typeof value !== "undefined" && value !== ""; }
 
 function collectUnsafeUnlockFlags(batch) {
     const flags = [];

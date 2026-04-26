@@ -1,5 +1,4 @@
 "use strict";
-
 const test = require("node:test");
 
 test.describe("worker", { concurrency: false }, function workerSuite() {

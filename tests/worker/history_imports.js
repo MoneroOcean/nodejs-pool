@@ -1,5 +1,4 @@
 "use strict";
-
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -190,9 +189,7 @@ function runUpdate(runtime, height) {
     });
 }
 
-function toStoredTimestamp(value) {
-    return Math.round(value / 1000) * 1000;
-}
+function toStoredTimestamp(value) { return Math.round(value / 1000) * 1000; }
 
 test.describe("worker history imports", { concurrency: false }, () => {
     let originalConfig;

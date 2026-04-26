@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const hash = cli.arg("hash", "Please specify block hash");
 

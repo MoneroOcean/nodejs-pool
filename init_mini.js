@@ -1,5 +1,4 @@
 "use strict";
-
 const applyConfigRows = require("./lib/common/config_rows.js");
 const path = require("path");
 

@@ -1,5 +1,4 @@
 "use strict";
-
 if (Boolean(process.stdin.isTTY) || process.argv.length !== 3) {
   console.log("Usage: unxz -c <block hash>.cvs.xz | node calc_mo_cvs.js <your Monero wallet address>");
   console.log("       wget -O - https://block-share-dumps.moneroocean.stream/<block hash>.cvs.xz | unxz -c | node calc_mo_cvs.js <your Monero wallet address>");

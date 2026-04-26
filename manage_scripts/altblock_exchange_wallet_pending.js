@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const coinDefs = require("../lib2/coins.js")().COINS;
 

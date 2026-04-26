@@ -1,14 +1,9 @@
 "use strict";
-
 const { formatFixPlanPreview } = require("./fix_trade_preview_common.js");
 
-function clone(value) {
-    return value === undefined ? value : JSON.parse(JSON.stringify(value));
-}
+function clone(value) { return value === undefined ? value : JSON.parse(JSON.stringify(value)); }
 
-function formatJson(value) {
-    return JSON.stringify(value);
-}
+function formatJson(value) { return JSON.stringify(value); }
 
 function asFiniteNumber(value, message) {
     const parsed = Number(value);

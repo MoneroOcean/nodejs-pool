@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const hash = cli.arg("hash", "Please specify altblock hash");
 const pay = cli.arg("pay", "Please specify pay value in main currency");

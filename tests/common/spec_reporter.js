@@ -1,5 +1,4 @@
 "use strict";
-
 const { Transform } = require("node:stream");
 const { spec } = require("node:test/reporters");
 

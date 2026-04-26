@@ -1,5 +1,4 @@
 "use strict";
-
 const initMini = require("./init_mini.js");
 const parseArgv = require("./parse_args.js");
 

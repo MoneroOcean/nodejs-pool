@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const port = cli.arg("port", "Please specify port");
 const height = cli.arg("height", "Please specify height");

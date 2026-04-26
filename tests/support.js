@@ -1,5 +1,4 @@
 "use strict";
-
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const fs = require("node:fs");

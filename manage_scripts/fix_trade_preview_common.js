@@ -1,8 +1,5 @@
 "use strict";
-
-function formatPreviewJson(value) {
-    return JSON.stringify(value, null, 2);
-}
+function formatPreviewJson(value) { return JSON.stringify(value, null, 2); }
 
 function formatFixPlanPreview(fixPlan) {
     return [

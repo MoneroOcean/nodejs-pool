@@ -1,5 +1,4 @@
 "use strict";
-
 function cloneRows(rows) {
     return rows.map(function clone(row) {
         return { ...row };

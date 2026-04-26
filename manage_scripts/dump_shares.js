@@ -1,5 +1,4 @@
 "use strict";
-
 const cli = require("../script_utils.js")();
 const user = cli.arg("user", "Please specify user address to dump");
 const paymentid = cli.get("paymentid");

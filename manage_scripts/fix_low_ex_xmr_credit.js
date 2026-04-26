@@ -1,14 +1,9 @@
 "use strict";
-
 const { formatFixPlanPreview } = require("./fix_trade_preview_common.js");
 
-function clone(value) {
-    return value === undefined ? value : JSON.parse(JSON.stringify(value));
-}
+function clone(value) { return value === undefined ? value : JSON.parse(JSON.stringify(value)); }
 
-function formatJson(value) {
-    return JSON.stringify(value);
-}
+function formatJson(value) { return JSON.stringify(value); }
 
 function asFiniteNumber(value, message) {
     const parsed = Number(value);
@@ -32,9 +27,7 @@ function parseBooleanOption(value, message) {
     }
 }
 
-function normalizeCoinAmount(value) {
-    return Number(asFiniteNumber(value, "Invalid coin amount").toFixed(8));
-}
+function normalizeCoinAmount(value) { return Number(asFiniteNumber(value, "Invalid coin amount").toFixed(8)); }
 
 function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
     if (!tradeContext || typeof tradeContext !== "object") throw new Error("altblock_exchange_trade is not found");

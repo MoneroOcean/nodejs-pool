@@ -1,5 +1,4 @@
 "use strict";
-
 module.exports = function dumpShares(depth, shouldPrint) {
     global.coinFuncs.getLastBlockHeader(function (err, body) {
         if (err !== null) {
