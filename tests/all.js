@@ -12,7 +12,7 @@ require("./api.js");
 require("./support.js");
 require("./live.js");
 require("./payments.js");
-require("./payment_unlock_batch.js");
+require("./payment_batch_unlock.js");
 require("./manage_scripts.js");
 
 const privateLib2Tests = path.join(__dirname, "..", "lib2", "tests", "all.js");

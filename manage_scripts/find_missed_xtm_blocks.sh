@@ -8,7 +8,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-node "$script_dir/dump_altblocks.js" >"$tmpdir/altblocks"
+node "$script_dir/altblock_dump.js" >"$tmpdir/altblocks"
 egrep '"port":(18144|18146|18148),' "$tmpdir/altblocks" | grep '"unlocked":true,"valid":true' | sed 's,.\+"height":,,' | sed 's/,.\+//' | LC_ALL=C sort -u >"$tmpdir/xtm_blocks" || :
 curl -fsS -X POST "http://$host:18145/json_rpc" \
   -d '{"jsonrpc":"2.0","id":"0","method":"GetCompletedTransactions"}' \
