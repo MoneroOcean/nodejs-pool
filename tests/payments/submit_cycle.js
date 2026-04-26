@@ -100,6 +100,7 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
         assert.match(paymentEmail.body, new RegExp("Transaction hash: " + "a".repeat(64)));
         assert.match(paymentEmail.body, new RegExp("Transaction key: " + longTxKey));
         assert.match(paymentEmail.body, new RegExp("Proof URL: https://xmrchain\\.net/prove/" + "a".repeat(64) + "/" + INTEGRATED + "/" + longTxKey));
+        assert.match(paymentEmail.body, /Unsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/test-token/);
     });
 
     test("accepted wallet transfer retries wallet-history visibility during submit and finalizes in the same cycle", async () => {

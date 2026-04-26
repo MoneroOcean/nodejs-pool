@@ -205,6 +205,22 @@ function createFakeMysql(options = {}) {
                 return { email: row.email };
             });
         }
+        if (sql === "UPDATE users SET enable_email = 0 WHERE username = ? AND email = ?") {
+            const row = store.users.find(function findUser(entry) {
+                return entry.username === params[0] && entry.email === params[1];
+            });
+            if (!row) return { affectedRows: 0 };
+            row.enable_email = 0;
+            return { affectedRows: 1 };
+        }
+        if (sql === "UPDATE users SET enable_email = 0 WHERE username = ?") {
+            const row = store.users.find(function findUser(entry) {
+                return entry.username === params[0];
+            });
+            if (!row) return { affectedRows: 0 };
+            row.enable_email = 0;
+            return { affectedRows: 1 };
+        }
         if (sql.indexOf("INSERT INTO payment_batches ") === 0) {
             const row = {
                 id: nextBatchId++,

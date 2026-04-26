@@ -15,6 +15,9 @@ function installSupportGlobals() {
     };
 
     global.config = {
+        api: {
+            secKey: "test-secret"
+        },
         rpc: {
             https: false
         },
@@ -26,7 +29,9 @@ function installSupportGlobals() {
             address: "127.0.0.1",
             port: 18081
         },
-        general: {}
+        general: {
+            emailUnsubscribeBaseUrl: "https://api.moneroocean.stream"
+        }
     };
 
     return function restore() {
@@ -262,6 +267,70 @@ test.describe("support", { concurrency: false }, () => {
         }
     });
 
+    test("miner email includes opaque unsubscribe footer while admin email stays unchanged", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const originalSetTimeout = global.setTimeout;
+        const support = supportFactory();
+        let capturedPayload = null;
+        let minerTimerCount = 0;
+
+        global.config.general.adminEmail = "admin@example.com";
+        global.config.general.emailFrom = "pool@example.com";
+        global.config.general.mailgunURL = "http://127.0.0.1/send";
+        support._resetEmailState();
+        http.request = function fakeRequest(_options, onResponse) {
+            const request = createRequest();
+            let requestBody = "";
+            request.write = function write(chunk) {
+                requestBody += chunk;
+            };
+            request.end = function end() {
+                capturedPayload = JSON.parse(requestBody);
+                const response = createResponse();
+                setImmediate(function respond() {
+                    onResponse(response);
+                    response.emit("data", "{}");
+                    response.emit("end");
+                });
+            };
+            return request;
+        };
+        global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
+            if (delay === 5 * 60 * 1000 || delay === 30 * 60 * 1000 || delay === 1000) {
+                if (delay !== 1000) minerTimerCount += 1;
+                return setImmediate(fn, ...args);
+            }
+            return originalSetTimeout(fn, delay, ...args);
+        };
+
+        try {
+            const wallet = "4".repeat(95);
+            const minerUrl = support.createEmailUnsubscribeUrl(wallet, "miner@example.com");
+            assert.match(minerUrl, /^https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/[A-Za-z0-9_-]+$/);
+            assert.equal(minerUrl.includes(wallet), false);
+            const parsed = support.parseEmailUnsubscribeToken(minerUrl.split("/").pop());
+            assert.equal(parsed.wallet, wallet);
+            assert.equal(parsed.email, "miner@example.com");
+
+            support.sendEmail("miner@example.com", "Subject", "Body", wallet);
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(capturedPayload.subject, "MoneroOcean: Subject");
+            assert.match(capturedPayload.text, /Body\n\nUnsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/[A-Za-z0-9_-]+/);
+            assert.equal(capturedPayload.text.includes(wallet), false);
+
+            global.config.general.mailgunURL = "";
+            support.sendEmail("admin@example.com", "Admin", "Admin body");
+            assert.equal(minerTimerCount, 1, "admin email should not be queued through miner accumulator");
+        } finally {
+            http.request = originalRequest;
+            global.setTimeout = originalSetTimeout;
+            restore();
+        }
+    });
+
     test("rpcPortDaemon2 logs transport errors without stack traces", async () => {
         const restore = installSupportGlobals();
         const originalRequest = http.request;
@@ -403,8 +472,9 @@ test.describe("support", { concurrency: false }, () => {
             await new Promise((resolve) => setImmediate(resolve));
 
             assert.equal(capturedPayload.subject, "MoneroOcean: Worker stopped");
-            assert.equal(capturedPayload.text, "Hello,\n\nWorker x stopped\n\nThank you,\nMoneroOcean Admin Team");
+            assert.match(capturedPayload.text, /^Hello,\n\nWorker x stopped\n\nUnsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/[A-Za-z0-9_-]+\n\nThank you,\nMoneroOcean Admin Team$/);
             assert.equal(capturedPayload.text.includes("Pool node:"), false);
+            assert.equal(capturedPayload.text.includes("wallet"), false);
         } finally {
             http.request = originalRequest;
             global.setTimeout = originalSetTimeout;

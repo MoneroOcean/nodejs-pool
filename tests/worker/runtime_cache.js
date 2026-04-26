@@ -116,6 +116,9 @@ function createFakeEnvironment(options) {
     };
 
     global.config = {
+        api: {
+            secKey: "worker-test-secret"
+        },
         daemon: {
             port: 18081
         },
@@ -528,6 +531,7 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
 
             assert.equal(capturedPayload.subject, "MoneroOcean: Worker stopped hashing: rig01");
             assert.match(capturedPayload.text, /^Hello,\n\nWorker status changed\n\nPool: MoneroOcean\nStatus: stopped\nWorker: rig01\nWallet: 48abcd\.\.\.7xYz\nTime \(UTC\): 2026-04-25 21:22:00\nNotice delay: 10 minutes without submitted hashes/);
+            assert.match(capturedPayload.text, /\n\nUnsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/[A-Za-z0-9_-]+\n\nThank you,/);
             assert.match(capturedPayload.text, /Thank you,\nMoneroOcean Admin Team$/);
             assert.equal(capturedPayload.text.includes(address), false);
             assert.equal(capturedPayload.text.includes("Pool node:"), false);

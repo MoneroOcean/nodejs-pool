@@ -6,6 +6,7 @@ const http = require("node:http");
 const test = require("node:test");
 
 const jwt = require("jsonwebtoken");
+const supportFactory = require("../../lib/common/support.js");
 
 global.__apiAutostart = false;
 const createApiRuntime = require("../../lib/api.js").createApiRuntime;
@@ -464,6 +465,77 @@ test.describe("api public and auth", { concurrency: false }, () => {
             assert.equal(invalidFrom.statusCode, 401);
             assert.deepEqual(invalidFrom.json, { error: "Please specify valid FROM email" });
         });
+    });
+
+    test("email unsubscribe token and legacy routes return html and disable only matching subscriptions", async () => {
+        const originalConfig = global.config;
+        const config = createConfig();
+        config.general.emailUnsubscribeBaseUrl = "https://api.moneroocean.stream";
+        global.config = config;
+        const support = supportFactory();
+        const users = [
+            { username: "wallet", email: "miner@example.com", enable_email: 1, payout_threshold: 25 },
+            { username: "legacy-wallet", email: "legacy@example.com", enable_email: 1, payout_threshold: 30 }
+        ];
+        const mysql = createMysql(async function handler(sql, params) {
+            if (sql === "UPDATE users SET enable_email = 0 WHERE username = ? AND email = ?") {
+                const row = users.find(function findUser(user) {
+                    return user.username === params[0] && user.email === params[1];
+                });
+                if (!row) return { affectedRows: 0 };
+                row.enable_email = 0;
+                return { affectedRows: 1 };
+            }
+            if (sql === "UPDATE users SET enable_email = 0 WHERE username = ?") {
+                const row = users.find(function findUser(user) {
+                    return user.username === params[0];
+                });
+                if (!row) return { affectedRows: 0 };
+                row.enable_email = 0;
+                return { affectedRows: 1 };
+            }
+            if (sql.startsWith("SELECT payout_threshold, enable_email FROM users WHERE username = ? LIMIT 1")) {
+                const row = users.find(function findUser(user) {
+                    return user.username === params[0];
+                });
+                return row ? [{ payout_threshold: row.payout_threshold, enable_email: row.enable_email }] : [];
+            }
+            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+        });
+
+        try {
+            await withRuntime({
+                blockTemplate: createBlockTemplate(),
+                config: config,
+                database: createDatabase({ caches: {} }),
+                mysql: mysql,
+                support: support
+            }, async (port) => {
+                const staleToken = support.createEmailUnsubscribeToken("wallet", "old@example.com", Date.now());
+                const staleResponse = await request(port, { path: "/user/unsubscribeEmail/" + encodeURIComponent(staleToken) });
+                assert.equal(staleResponse.statusCode, 401);
+                assert.match(staleResponse.headers["content-type"], /text\/html/);
+                assert.equal(users[0].enable_email, 1);
+
+                const token = support.createEmailUnsubscribeToken("wallet", "miner@example.com", Date.now());
+                const tokenResponse = await request(port, { path: "/user/unsubscribeEmail/" + encodeURIComponent(token) });
+                assert.equal(tokenResponse.statusCode, 200);
+                assert.match(tokenResponse.headers["content-type"], /text\/html/);
+                assert.match(tokenResponse.text, /Email unsubscribed/);
+                assert.equal(users[0].enable_email, 0);
+
+                const user = await request(port, { path: "/user/wallet" });
+                assert.equal(user.statusCode, 200);
+                assert.equal(user.json.email_enabled, 0);
+
+                const legacyResponse = await request(port, { path: "/user/legacy-wallet/unsubscribeEmail" });
+                assert.equal(legacyResponse.statusCode, 200);
+                assert.match(legacyResponse.headers["content-type"], /text\/html/);
+                assert.equal(users[1].enable_email, 0);
+            });
+        } finally {
+            global.config = originalConfig;
+        }
     });
 
     test("summary logging stays compact and only emits when there was activity", async () => {

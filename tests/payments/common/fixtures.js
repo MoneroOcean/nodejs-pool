@@ -128,8 +128,11 @@ function createSupport(clock, sentEmails) {
             clock.advance(ms);
             return Promise.resolve();
         },
-        sendEmail(to, subject, body) {
-            sentEmails.push({ to, subject, body });
+        sendEmail(to, subject, body, wallet) {
+            const emailBody = wallet
+                ? body + "\n\nUnsubscribe: https://api.moneroocean.stream/user/unsubscribeEmail/test-token"
+                : body;
+            sentEmails.push({ to, subject, body: emailBody });
         }
     };
 }
