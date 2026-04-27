@@ -388,6 +388,77 @@ test.describe("support", { concurrency: false }, () => {
         }
     });
 
+    test("email retry failure logs circular HTTP responses without throwing", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const originalSetTimeout = global.setTimeout;
+        const originalConsoleError = console.error;
+        const support = supportFactory();
+        const errors = [];
+        let requestCount = 0;
+
+        support._resetEmailState();
+        global.config.general.adminEmail = "ops@example.com";
+        global.config.general.emailFrom = "pool@example.com";
+        global.config.general.mailgunURL = "http://127.0.0.1/send";
+
+        console.error = function captureConsoleError(message) {
+            errors.push(String(message));
+        };
+        http.request = function fakeRequest(_options, onResponse) {
+            requestCount += 1;
+            const request = createRequest();
+            let requestBody = "";
+            request.write = function write(chunk) {
+                requestBody += chunk;
+            };
+            request.end = function end() {
+                JSON.parse(requestBody);
+                const response = createResponse();
+                response.statusCode = 500;
+                response.statusMessage = "Internal Server Error";
+                response.headers = { "content-type": "application/json" };
+                response.socket = { _httpMessage: request };
+                request.socket = response.socket;
+
+                setImmediate(function respond() {
+                    onResponse(response);
+                    response.emit("data", "{\"message\":\"mailgun failed\"}");
+                    response.emit("end");
+                });
+            };
+            return request;
+        };
+        global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
+            if (delay === 50 * 1000) {
+                return originalSetTimeout(fn, 1001, ...args);
+            }
+            if (delay === 1000) {
+                return setImmediate(fn, ...args);
+            }
+            return originalSetTimeout(fn, delay, ...args);
+        };
+
+        try {
+            support.sendEmail("ops@example.com", "Mailgun test", "Body");
+            for (let index = 0; index < 30 && errors.length === 0; ++index) {
+                await new Promise((resolve) => originalSetTimeout(resolve, 50));
+            }
+
+            assert.equal(requestCount, 2);
+            assert.equal(errors.length, 1);
+            assert.equal(errors[0].includes("\n"), false);
+            assert.match(errors[0], /Did not send e-mail to 'ops@example\.com' successfully!/);
+            assert.match(errors[0], /status=500 Internal Server Error/);
+            assert.match(errors[0], /mailgun failed/);
+        } finally {
+            console.error = originalConsoleError;
+            http.request = originalRequest;
+            global.setTimeout = originalSetTimeout;
+            restore();
+        }
+    });
+
     test("rpcPortDaemon2 logs transport errors without stack traces", async () => {
         const restore = installSupportGlobals();
         const originalRequest = http.request;
