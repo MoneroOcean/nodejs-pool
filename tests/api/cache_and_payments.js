@@ -332,19 +332,25 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             mysql: mysql,
             support: createSupport()
         }, async (port) => {
+            const typedPoolPayments = await request(port, { path: "/pool/payments/pplns?limit=2&page=0" });
+            assert.equal(typedPoolPayments.statusCode, 200);
+            assert.equal(typedPoolPayments.json.length, 2);
+            assert.equal(typedPoolPayments.json[0].hash, "hash11");
+            assert.equal(mysql.calls.length, 1);
+
             const poolPayments = await request(port, { path: "/pool/payments?limit=2&page=0" });
             assert.equal(poolPayments.statusCode, 200);
             assert.equal(poolPayments.json.length, 2);
             assert.equal(poolPayments.json[0].pool_type, "pplns");
             assert.equal(poolPayments.json[1].pool_type, "legacy");
-            assert.equal(mysql.calls.length, 2);
+            assert.equal(mysql.calls.length, 3);
 
             const minerPayments = await request(port, { path: "/miner/wallet/payments?limit=2&page=0" });
             assert.equal(minerPayments.statusCode, 200);
             assert.equal(minerPayments.json.length, 2);
             assert.equal(minerPayments.json[0].txnHash, "tx21");
             assert.equal(minerPayments.json[1].txnHash, "tx20");
-            assert.equal(mysql.calls.length, 4);
+            assert.equal(mysql.calls.length, 5);
         });
     });
 

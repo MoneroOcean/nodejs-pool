@@ -268,16 +268,7 @@ test("startPoolStats initializes pool and network caches without waiting for pri
             if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") {
                 return [{ miner_count: 0 }];
             }
-            if (
-                sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments WHERE pool_type = ? GROUP BY payment_address, payment_id) as miners" &&
-                params[0] === "pplns"
-            ) {
-                return [{ miner_count: 0 }];
-            }
             if (sql === "SELECT count(id) as txn_count FROM transactions") {
-                return [{ txn_count: 0 }];
-            }
-            if (sql === "SELECT count(distinct transaction_id) as txn_count FROM payments WHERE pool_type = ?" && params[0] === "pplns") {
                 return [{ txn_count: 0 }];
             }
             if (sql === "select * from pools where id < 1000 and last_checkin >= NOW() - INTERVAL 10 MINUTE") return [];
@@ -400,16 +391,7 @@ test("second stats refresh reuses tiny history caches and avoids full DB rescans
             if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") {
                 return [{ miner_count: 0 }];
             }
-            if (
-                sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments WHERE pool_type = ? GROUP BY payment_address, payment_id) as miners" &&
-                params[0] === "pplns"
-            ) {
-                return [{ miner_count: 0 }];
-            }
             if (sql === "SELECT count(id) as txn_count FROM transactions") return [{ txn_count: 0 }];
-            if (sql === "SELECT count(distinct transaction_id) as txn_count FROM payments WHERE pool_type = ?" && params[0] === "pplns") {
-                return [{ txn_count: 0 }];
-            }
             throw new Error("Unexpected SQL: " + sql);
         }
     });

@@ -282,17 +282,8 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
             if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") {
                 return [{ miner_count: 3 }];
             }
-            if (
-                sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments WHERE pool_type = ? GROUP BY payment_address, payment_id) as miners" &&
-                params[0] === "pplns"
-            ) {
-                return [{ miner_count: 2 }];
-            }
             if (sql === "SELECT count(id) as txn_count FROM transactions") {
                 return [{ txn_count: 9 }];
-            }
-            if (sql === "SELECT count(distinct transaction_id) as txn_count FROM payments WHERE pool_type = ?" && params[0] === "pplns") {
-                return [{ txn_count: 4 }];
             }
             throw new Error("Unexpected SQL: " + sql);
         }
@@ -324,8 +315,8 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
     assert.equal(result.pplns.totalAltBlocksFound, 1);
     assert.deepEqual(result.pplns.altBlocksFound, { 18081: 1 });
     assert.equal(result.pplns.pending, 7);
-    assert.equal(result.pplns.totalMinersPaid, 2);
-    assert.equal(result.pplns.totalPayments, 4);
+    assert.equal(result.pplns.totalMinersPaid, 3);
+    assert.equal(result.pplns.totalPayments, 9);
     assert.equal(result.pplns.lastBlockFound, 110);
     assert.equal(result.pplns.lastBlockFoundTime, 6);
 

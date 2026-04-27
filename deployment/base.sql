@@ -17,7 +17,6 @@ CREATE TABLE `balance` (
   `amount` bigint(26) DEFAULT '0',
   `pending_batch_id` bigint(20) unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `balance_id_uindex` (`id`),
   UNIQUE KEY `balance_payment_address_pool_type_payment_id_uindex` (`payment_address`,`pool_type`,`payment_id`),
   KEY `balance_payment_address_payment_id_index` (`payment_address`,`payment_id`),
   KEY `balance_pending_batch_id_index` (`pending_batch_id`)
@@ -41,7 +40,6 @@ CREATE TABLE `block_balance` (
   `amount` float(53) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `block_balance_hex_payment_address_payment_id_uindex` (`hex`, `payment_address`,`payment_id`),
-  KEY `block_balance_hex_index` (`hex`),
   KEY `block_balance_payment_address_payment_id_index` (`payment_address`,`payment_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `bans` (
@@ -51,15 +49,13 @@ CREATE TABLE `bans` (
   `reason` varchar(200) DEFAULT NULL,
   `active` tinyint(1) DEFAULT '1',
   `ins_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `bans_id_uindex` (`id`)
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `notifications` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `mining_address` varchar(200) DEFAULT NULL,
   `message` varchar(200) DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `notifications_id_uindex` (`id`)
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `config` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -69,7 +65,6 @@ CREATE TABLE `config` (
   `item_type` varchar(64) DEFAULT NULL,
   `Item_desc` varchar(512) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `config_id_uindex` (`id`),
   UNIQUE KEY `config_module_item_uindex` (`module`,`item`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `payments` (
@@ -84,7 +79,6 @@ CREATE TABLE `payments` (
   `payment_id` varchar(128) DEFAULT NULL,
   `transfer_fee` bigint(20) DEFAULT '0',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `payments_id_uindex` (`id`),
   KEY `payments_transactions_id_fk` (`transaction_id`),
   KEY `payments_payment_address_payment_id_index` (`payment_address`,`payment_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
@@ -128,7 +122,6 @@ CREATE TABLE `payment_batch_items` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `payment_batch_items_batch_destination_order_uindex` (`batch_id`,`destination_order`),
   UNIQUE KEY `payment_batch_items_batch_balance_id_uindex` (`batch_id`,`balance_id`),
-  KEY `payment_batch_items_batch_id_index` (`batch_id`),
   KEY `payment_batch_items_balance_id_index` (`balance_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `pools` (
@@ -140,8 +133,7 @@ CREATE TABLE `pools` (
   `blockIDTime` timestamp NULL DEFAULT NULL,
   `hostname` varchar(128) DEFAULT NULL,
   `port` int DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `pools_id_uindex` (`id`)
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `pool_workers` (
   `id` tinyint(1) unsigned NOT NULL AUTO_INCREMENT,
@@ -157,8 +149,7 @@ CREATE TABLE `port_config` (
   `portType` varchar(16) DEFAULT NULL,
   `hidden` tinyint(1) DEFAULT '0',
   `ssl` tinyint(1) DEFAULT '0',
-  PRIMARY KEY (`poolPort`),
-  UNIQUE KEY `port_config_poolPort_uindex` (`poolPort`)
+  PRIMARY KEY (`poolPort`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `ports` (
   `pool_id` int(11) DEFAULT NULL,
@@ -183,7 +174,6 @@ CREATE TABLE `transactions` (
   `fees` bigint(26) DEFAULT NULL,
   `payees` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `transactions_id_uindex` (`id`),
   UNIQUE KEY `transactions_transaction_hash_uindex` (`transaction_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 CREATE TABLE `users` (
@@ -195,7 +185,6 @@ CREATE TABLE `users` (
   `enable_email` tinyint(1) DEFAULT '1',
   `payout_threshold_lock` tinyint(1) DEFAULT '0',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `users_id_uindex` (`id`),
   UNIQUE KEY `users_username_uindex` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
