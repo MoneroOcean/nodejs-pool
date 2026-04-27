@@ -42,8 +42,111 @@ const {
     withCapturedConsoleError,
     requestRawJson
 } = require("../common/runtime-helpers.js");
+const createShareBlockHelpers = require("../../../lib/pool/share_blocks.js");
 
 test.describe("pool runtime: daemon submits", { concurrency: false }, () => {
+test("submit failure email marks local hash mismatches as non-actionable even when diff is high enough", async () => {
+    const original = {
+        coinFuncs: global.coinFuncs,
+        config: global.config,
+        consoleError: console.error,
+        database: global.database,
+        protos: global.protos,
+        setTimeout: global.setTimeout,
+        support: global.support
+    };
+    const emails = [];
+    const blockData = Buffer.from("01020304", "hex");
+    const localHash = Buffer.from("11".repeat(32), "hex");
+    const submittedHash = Buffer.from("22".repeat(32), "hex");
+    let submitCallbackValue = null;
+
+    global.config = {
+        daemon: { port: MAIN_PORT },
+        general: { adminEmail: "ops@example.com" },
+        hostname: "pool.test",
+        pool: { trustedMiners: false, trustThreshold: 1, trustMin: 0 }
+    };
+    global.database = {};
+    global.protos = { Block: { encode(value) { return value; } }, AltBlock: { encode(value) { return value; } } };
+    global.support = {
+        sendEmail(to, subject, body) {
+            emails.push({ to, subject, body });
+        }
+    };
+    global.coinFuncs = {
+        convertBlob(blob) { return blob; },
+        slowHashBuff() { return localHash; },
+        getPortLastBlockHeader(_port, callback) { callback(null, { height: 99 }); },
+        getPoolProfile() {
+            return {
+                pool: {
+                    acceptSubmittedBlock() { return false; },
+                    submitBlockRpc(options) {
+                        options.replyFn({ result: "high-hash" }, 200);
+                    }
+                }
+            };
+        }
+    };
+    global.setTimeout = function immediateTimeout(fn) {
+        fn();
+        return { unref() {} };
+    };
+    console.error = function ignoreExpectedFailureLog() {};
+
+    try {
+        const helpers = createShareBlockHelpers({
+            crypto,
+            debug() {},
+            divideBaseDiff() { return 100; },
+            bigIntFromBuffer() { return 1n; },
+            bigIntToBuffer(value) { return value; },
+            toBigInt(value) { return BigInt(value); },
+            baseRavenDiff: 1,
+            anchorState: { current: 0 },
+            activeBlockTemplates: { "": { height: 100 } },
+            walletTrust: {},
+            processSend() {},
+            clearWalletSessionTrust() {},
+            getThreadName() { return ""; },
+            formatCoinPort(_coin, port) { return "XMR:" + port; },
+            getLastMinerLogTime() { return {}; },
+            setLastMinerLogTime() {}
+        });
+
+        helpers.submitBlock(
+            { logString: "miner-1", payout: MAIN_WALLET, poolTypeEnum: 0, trust: { trust: 0 } },
+            { coin: "" },
+            { coin: "", port: MAIN_PORT, height: 100, difficulty: 1, xmr_difficulty: 1, xtm_difficulty: Number.MAX_SAFE_INTEGER },
+            blockData,
+            submittedHash,
+            100,
+            false,
+            true,
+            false,
+            function onSubmitDone(value) {
+                submitCallbackValue = value;
+            }
+        );
+
+        assert.equal(submitCallbackValue, false);
+        assert.equal(emails.length, 1);
+        assert.match(emails[0].body, /Submitted share difficulty: 100/);
+        assert.match(emails[0].body, /Required block difficulty: 1/);
+        assert.match(emails[0].body, /Locally verified difficulty: 100/);
+        assert.match(emails[0].body, /not block level; no action is needed/);
+    } finally {
+        global.coinFuncs = original.coinFuncs;
+        global.config = original.config;
+        global.database = original.database;
+        global.protos = original.protos;
+        global.setTimeout = original.setTimeout;
+        global.support = original.support;
+        console.error = original.consoleError;
+    }
+});
+
 test("block-submit test mode stops daemon-first submits once the marker is removed", async () => {
     const { runtime } = await startHarness({
         templates: createBlockSubmitTemplates("main-block-submit-test-mode-off")
