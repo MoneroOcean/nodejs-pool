@@ -509,8 +509,10 @@ test.describe("support", { concurrency: false }, () => {
     test("admin emails include the pool node label", async () => {
         const restore = installSupportGlobals();
         const originalRequest = http.request;
+        const originalConsoleLog = console.log;
         const support = supportFactory();
         let capturedPayload = null;
+        const logs = [];
         support._resetEmailState();
 
         global.config.hostname = "pool-test";
@@ -541,12 +543,17 @@ test.describe("support", { concurrency: false }, () => {
         };
 
         try {
+            console.log = function captureLog(message) {
+                logs.push(String(message));
+            };
             support.sendEmail("ops@example.com", "Daemon failed", "daemon is down");
             await new Promise((resolve) => setImmediate(resolve));
 
             assert.equal(capturedPayload.subject, "[pool-test] Daemon failed");
             assert.equal(capturedPayload.text, "Pool node: pool-test\n\ndaemon is down");
+            assert.deepEqual(logs, ['Email: to="ops@example.com" status=sent response="{}"']);
         } finally {
+            console.log = originalConsoleLog;
             http.request = originalRequest;
             restore();
         }
