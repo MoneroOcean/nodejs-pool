@@ -94,7 +94,8 @@ function createTestEnvironment(options = {}) {
             adminEmail: "admin@example.com"
         },
         pool: {
-            geoDNS: "pool.example.com"
+            geoDNS: "pool.example.com",
+            targetTime: 30
         }
     };
     global.database = {
@@ -172,6 +173,12 @@ function createTestEnvironment(options = {}) {
         },
         algoShortTypeStr(port) {
             return Number(port) === 18000 ? "rx/0" : "kawpow";
+        },
+        PORT2COIN(port) {
+            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : "RVN";
+        },
+        PORT2COIN_FULL(port) {
+            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : "RVN";
         },
         getPortLastBlockHeaderWithRewardDiff(_port, callback) {
             callback(null, {
@@ -273,6 +280,7 @@ test("startPoolStats initializes pool and network caches without waiting for pri
             }
             if (sql === "select * from pools where id < 1000 and last_checkin >= NOW() - INTERVAL 10 MINUTE") return [];
             if (sql === "select * from ports where hidden = 0 and pool_id < 1000 and lastSeen >= NOW() - INTERVAL 10 MINUTE") return [];
+            if (sql === "SELECT * FROM port_config WHERE hidden = 0") return [];
             if (sql === "SELECT blockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") return [];
             throw new Error("Unexpected SQL: " + sql);
         }
@@ -323,6 +331,39 @@ test("startPoolStats initializes pool and network caches without waiting for pri
         portHash: {},
         portMinerCount: {},
         portCoinAlgo: { 18000: "rx/0", 18081: "kawpow" },
+        coins: {
+            18000: {
+                port: 18000,
+                symbol: "XMR",
+                displayName: "XMR",
+                algo: "rx/0",
+                active: true,
+                profit: 0,
+                comment: "",
+                disabledReason: "",
+                hashrate: 0,
+                miners: 0,
+                pplnsShare: 0,
+                altBlocksFound: 0
+            },
+            18081: {
+                port: 18081,
+                symbol: "XMR",
+                displayName: "XMR",
+                algo: "kawpow",
+                active: false,
+                profit: 0,
+                comment: "",
+                disabledReason: "",
+                hashrate: 0,
+                miners: 0,
+                pplnsShare: 0,
+                altBlocksFound: 0,
+                blockTime: 120,
+                atomicUnits: 1000000000000,
+                exchangeConfigured: false
+            }
+        },
         updatedAt: global.database.getCache("pool_stats_global").updatedAt
     });
     assert.deepEqual(global.database.getCache("networkBlockInfo"), {

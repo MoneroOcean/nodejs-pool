@@ -72,6 +72,10 @@ test("submit failure email marks local hash mismatches as non-actionable even wh
     global.support = {
         sendEmail(to, subject, body) {
             emails.push({ to, subject, body });
+        },
+        sendAdminFyi(key, subject, body) {
+            emails.push({ to: global.config.general.adminEmail, key, subject, body });
+            return true;
         }
     };
     global.coinFuncs = {

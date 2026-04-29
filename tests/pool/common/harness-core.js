@@ -129,6 +129,14 @@ function createSupportHarness() {
     support.sendEmail = function sendEmail(to, subject, body) {
         this.emails.push({ to, subject, body });
     };
+    support.sendFyi = function sendFyi(to, key, subject, body) {
+        this.emails.push({ to, key, subject, body });
+        return true;
+    };
+    support.sendAdminFyi = function sendAdminFyi(key, subject, body) {
+        this.emails.push({ to: global.config.general.adminEmail, key, subject, body });
+        return true;
+    };
     support.rpcPortDaemon = function rpcPortDaemon(port, method, params, callback) {
         this.rpcPortDaemonCalls.push({ port, method, params });
         callback({ result: { status: "OK", block_hash: "11".repeat(32) } }, 200);

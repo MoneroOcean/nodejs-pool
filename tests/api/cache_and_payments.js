@@ -84,7 +84,8 @@ function createConfig() {
             poolDevDonation: 3,
             blocksRequired: 30,
             denom: 0.01,
-            defaultPay: 0.5
+            defaultPay: 0.5,
+            feeSlewEnd: 4
         },
         general: {
             sigDivisor: 100,
@@ -200,11 +201,25 @@ test.describe("api cache and payments", { concurrency: false }, () => {
         const poolStats = {
             minerHistory: [{ ts: 1, miners: 2 }],
             hashHistory: [{ ts: 1, hs: 3 }],
-            miners: 4
+            miners: 4,
+            coins: {
+                18081: {
+                    port: 18081,
+                    symbol: "XMR",
+                    displayName: "XMR",
+                    algo: "rx/0",
+                    active: true
+                }
+            }
         };
         const database = createDatabase({
             caches: {
                 pool_stats_global: poolStats,
+                poolPorts: {
+                    global: [{ port: 3333, tls: false }],
+                    pplns: [{ port: 9000, tls: true }],
+                    configured: [{ port: 3333, tlsPort: 9000, difficulty: 1000, targetHashrate: 1000 / 30, description: "Main", portType: "pplns" }]
+                },
                 lastPaymentCycle: 99
             }
         });
@@ -219,10 +234,18 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             const stats = await request(port, { path: "/pool/stats" });
             assert.equal(stats.statusCode, 200);
             assert.equal(stats.json.pool_statistics.miners, 4);
+            assert.equal(stats.json.pool_statistics.coins["18081"].port, 18081);
             assert.equal("hashHistory" in stats.json.pool_statistics, false);
             assert.equal("minerHistory" in stats.json.pool_statistics, false);
             assert.deepEqual(poolStats.hashHistory, [{ ts: 1, hs: 3 }]);
             assert.deepEqual(poolStats.minerHistory, [{ ts: 1, miners: 2 }]);
+
+            const ports = await request(port, { path: "/pool/ports" });
+            assert.deepEqual(ports.json, {
+                global: [{ port: 3333, tls: false }],
+                pplns: [{ port: 9000, tls: true }],
+                configured: [{ port: 3333, tlsPort: 9000, difficulty: 1000, targetHashrate: 1000 / 30, description: "Main", portType: "pplns" }]
+            });
 
             const first = await request(port, { path: "/pool/blocks?limit=25&page=0&noise=one" });
             const second = await request(port, { path: "/pool/blocks?page=0&limit=25&noise=two" });
@@ -249,6 +272,17 @@ test.describe("api cache and payments", { concurrency: false }, () => {
         }, async (port) => {
             const initial = await request(port, { path: "/config" });
             assert.equal(initial.json.coin_code, "XMR");
+            assert.deepEqual(initial.json.payout_policy, {
+                minimumThreshold: 0.1,
+                defaultThreshold: 0.5,
+                exchangeMinimumThreshold: 0.2,
+                denomination: 0.01,
+                maturityDepth: 30,
+                feeFormula: {
+                    maxFee: 0.0004,
+                    zeroFeeThreshold: 4
+                }
+            });
             config.general.coinCode = "WOW";
 
             const cached = await request(port, { path: "/config" });

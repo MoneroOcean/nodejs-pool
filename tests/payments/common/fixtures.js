@@ -132,6 +132,14 @@ function createSupport(clock, sentEmails) {
                 ? body + "\n\nUnsubscribe: https://api.moneroocean.stream/user/unsubscribeEmail/test-token"
                 : body;
             sentEmails.push({ to, subject, body: emailBody });
+        },
+        sendFyi(to, key, subject, body) {
+            sentEmails.push({ to, key, subject, body });
+            return true;
+        },
+        sendAdminFyi(key, subject, body) {
+            sentEmails.push({ to: "admin@example.com", key, subject, body });
+            return true;
         }
     };
 }

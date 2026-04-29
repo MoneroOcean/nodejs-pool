@@ -1,5 +1,6 @@
 "use strict";
 const assert = require("node:assert/strict");
+const Module = require("node:module");
 const test = require("node:test");
 
 const POOL_STATS_PATH = require.resolve("../../lib/pool_stats.js");
@@ -94,7 +95,8 @@ function createTestEnvironment(options = {}) {
             adminEmail: "admin@example.com"
         },
         pool: {
-            geoDNS: "pool.example.com"
+            geoDNS: "pool.example.com",
+            targetTime: 30
         }
     };
     global.database = {
@@ -172,6 +174,12 @@ function createTestEnvironment(options = {}) {
         },
         algoShortTypeStr(port) {
             return Number(port) === 18000 ? "rx/0" : "kawpow";
+        },
+        PORT2COIN(port) {
+            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : "RVN";
+        },
+        PORT2COIN_FULL(port) {
+            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : "RVN";
         },
         getPortLastBlockHeaderWithRewardDiff(_port, callback) {
             callback(null, {
@@ -260,6 +268,7 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
             xmr_profit: { value: 1.25 },
             coin_xmr_profit: { 18081: 0.5 },
             coin_comment: { 18081: "stable" },
+            coin_disabled_reason: { 18081: "maintenance" },
             pplns_port_shares: { 18081: 44 },
             pplns_window_time: 600,
             port_hash: { 18081: 77 },
@@ -309,6 +318,25 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
     assert.equal(result.global.currentEfforts[18000], 200);
     assert.equal(result.global.currentEfforts[18081], 33);
     assert.equal(result.global.portCoinAlgo[18081], "kawpow");
+    assert.deepEqual(result.global.coins[18081], {
+        port: 18081,
+        symbol: "XMR",
+        displayName: "XMR",
+        algo: "kawpow",
+        active: true,
+        profit: 0.5,
+        comment: "stable",
+        disabledReason: "maintenance",
+        hashrate: 77,
+        miners: 2,
+        pplnsShare: 44,
+        altBlocksFound: 1,
+        blockTime: 120,
+        atomicUnits: 1000000000000,
+        exchangeConfigured: false
+    });
+    assert.equal("nonkyc_address" in result.global.coins[18081], false);
+    assert.equal("nonkyc_paymentid" in result.global.coins[18081], false);
     assert.equal(typeof result.global.updatedAt, "number");
 
     assert.equal(result.pplns.totalBlocksFound, 1);
@@ -344,9 +372,16 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
             }
             if (sql === "select * from ports where hidden = 0 and pool_id < 1000 and lastSeen >= NOW() - INTERVAL 10 MINUTE") {
                 return [
-                    { pool_id: 1, port_type: "pplns", network_port: 3333, starting_diff: 1000, description: "Main", miners: 2 },
-                    { pool_id: 2, port_type: "pplns", network_port: 3333, starting_diff: 1000, description: "Main", miners: 3 },
-                    { pool_id: 1, port_type: "solo", network_port: 4444, starting_diff: 2000, description: "Solo", miners: 1 }
+                    { pool_id: 1, port_type: "pplns", network_port: 3333, starting_diff: 1000, description: "Main", miners: 2, ssl_port: 0 },
+                    { pool_id: 2, port_type: "pplns", network_port: 3333, starting_diff: 1000, description: "Main", miners: 3, ssl_port: 0 },
+                    { pool_id: 1, port_type: "solo", network_port: 4444, starting_diff: 2000, description: "Solo", miners: 1, ssl_port: 0 }
+                ];
+            }
+            if (sql === "SELECT * FROM port_config WHERE hidden = 0") {
+                return [
+                    { poolPort: 3333, difficulty: 1000, portDesc: "Main", portType: "pplns", hidden: 0, ssl: 0 },
+                    { poolPort: 9000, difficulty: 1000, portDesc: "Main", portType: "pplns", hidden: 0, ssl: 1 },
+                    { poolPort: 4444, difficulty: 2000, portDesc: "TLS only", portType: "pplns", hidden: 0, ssl: 1 }
                 ];
             }
             throw new Error("Unexpected SQL: " + sql);
@@ -382,7 +417,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
                 pool_type: "pplns",
                 difficulty: 1000,
                 miners: 5,
-                description: "Main"
+                description: "Main",
+                tls: false
             }
         ],
         pplns: [
@@ -396,7 +432,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
                 port: 3333,
                 difficulty: 1000,
                 description: "Main",
-                miners: 2
+                miners: 2,
+                tls: false
             },
             {
                 host: {
@@ -408,10 +445,76 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
                 port: 3333,
                 difficulty: 1000,
                 description: "Main",
-                miners: 3
+                miners: 3,
+                tls: false
+            }
+        ],
+        configured: [
+            {
+                port: 3333,
+                tlsPort: 9000,
+                difficulty: 1000,
+                targetHashrate: 1000 / 30,
+                description: "Main",
+                portType: "pplns"
+            },
+            {
+                port: null,
+                tlsPort: 4444,
+                difficulty: 2000,
+                targetHashrate: 2000 / 30,
+                description: "TLS only",
+                portType: "pplns"
             }
         ]
     });
+});
+
+test("refreshPoolStats keeps coin metadata when optional lib2 coins are unavailable", async () => {
+    createTestEnvironment({
+        ports: [19999],
+        caches: {
+            global_stats: { hash: 1, minerCount: 1 },
+            global_stats2: { totalHashes: 2, roundHashes: 3 },
+            pplns_stats: { hash: 1, minerCount: 1 },
+            pplns_stats2: { totalHashes: 2, roundHashes: 3 },
+            active_ports: [19999]
+        },
+        mysqlQuery(sql) {
+            if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") return [{ miner_count: 0 }];
+            if (sql === "SELECT count(id) as txn_count FROM transactions") return [{ txn_count: 0 }];
+            throw new Error("Unexpected SQL: " + sql);
+        }
+    });
+    const originalLoad = Module._load;
+
+    Module._load = function patchedLoad(request, parent, isMain) {
+        if (request === "../lib2/coins.js") throw new Error("lib2 unavailable");
+        return originalLoad.call(this, request, parent, isMain);
+    };
+    try {
+        const poolStats = loadPoolStats();
+        console.log = function () {};
+
+        const result = await poolStats.refreshPoolStats();
+
+        assert.deepEqual(result.global.coins[19999], {
+            port: 19999,
+            symbol: "RVN",
+            displayName: "RVN",
+            algo: "kawpow",
+            active: true,
+            profit: 0,
+            comment: "",
+            disabledReason: "",
+            hashrate: 0,
+            miners: 0,
+            pplnsShare: 0,
+            altBlocksFound: 0
+        });
+    } finally {
+        Module._load = originalLoad;
+    }
 });
 
 });

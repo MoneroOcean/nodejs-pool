@@ -97,6 +97,10 @@ test("queue monitor emits FYI backlog email once threshold is reached", async ()
         global.support = {
             sendEmail(to, subject, body) {
                 emails.push({ to, subject, body });
+            },
+            sendAdminFyi(key, subject, body) {
+                emails.push({ to: global.config.general.adminEmail, key, subject, body });
+                return true;
             }
         };
         global.database = {
