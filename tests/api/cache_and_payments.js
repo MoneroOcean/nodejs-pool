@@ -1,10 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
-const crypto = require("node:crypto");
 const http = require("node:http");
 const test = require("node:test");
-
-const jwt = require("jsonwebtoken");
 
 global.__apiAutostart = false;
 const createApiRuntime = require("../../lib/api.js").createApiRuntime;
@@ -312,18 +309,18 @@ test.describe("api cache and payments", { concurrency: false }, () => {
         }, async (port) => {
             const malformed = await request(port, {
                 method: "POST",
-                path: "/authenticate",
+                path: "/user/subscribeEmail",
                 body: "{\"username\":",
                 headers: { "Content-Type": "application/json" }
             });
             assert.equal(malformed.statusCode, 400);
             assert.deepEqual(malformed.json, { error: "Invalid request body" });
 
-            const hugePassword = "a".repeat(40 * 1024);
+            const hugeEmail = "a".repeat(40 * 1024);
             const oversized = await request(port, {
                 method: "POST",
-                path: "/authenticate",
-                body: JSON.stringify({ username: "wallet", password: hugePassword }),
+                path: "/user/subscribeEmail",
+                body: JSON.stringify({ username: "wallet", enabled: 1, from: "", to: hugeEmail }),
                 headers: { "Content-Type": "application/json" }
             });
             assert.equal(oversized.statusCode, 413);

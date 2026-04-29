@@ -1,10 +1,8 @@
 "use strict";
 const assert = require("node:assert/strict");
-const crypto = require("node:crypto");
 const http = require("node:http");
 const test = require("node:test");
 
-const jwt = require("jsonwebtoken");
 const supportFactory = require("../../lib/common/support.js");
 
 global.__apiAutostart = false;
@@ -254,19 +252,42 @@ function createFakeCluster(options) {
 }
 
 test.describe("api public and auth", { concurrency: false }, () => {
-    test("authentication preserves legacy login behavior and authed routes still accept query, body, and header tokens", async () => {
-        const config = createConfig();
-        const secureHash = crypto.createHmac("sha256", config.api.secKey).update("secretpass").digest("hex");
+    test("legacy password auth routes are no longer exposed", async () => {
+        let dbCalls = 0;
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: createConfig(),
+            database: createDatabase({ caches: {} }),
+            mysql: createMysql(async function handler(sql) {
+                dbCalls += 1;
+                throw new Error("Unexpected SQL: " + sql);
+            }),
+            support: createSupport()
+        }, async (port) => {
+            const authenticate = await requestJson(port, "POST", "/authenticate", { username: "legacy", password: "mailpass" });
+            assert.equal(authenticate.statusCode, 404);
+
+            const authedUser = await request(port, { path: "/authed/" });
+            assert.equal(authedUser.statusCode, 404);
+
+            const tokenRefresh = await request(port, { path: "/authed/tokenRefresh" });
+            assert.equal(tokenRefresh.statusCode, 404);
+            assert.equal(dbCalls, 0);
+        });
+    });
+
+    test("email subscription throttles concurrent failures for the same wallet", async () => {
+        let nowValue = 0;
+        let updateCalls = 0;
+        const firstUpdate = createDeferred();
         const mysql = createMysql(async function handler(sql, params) {
-            if (sql.startsWith("SELECT id, pass, email FROM users WHERE username = ?")) {
-                if (params[0] === "legacy") return [{ id: 1, pass: null, email: "mailpass" }];
-                if (params[0] === "secure") return [{ id: 2, pass: secureHash, email: "user@example.com" }];
-                return [];
-            }
-            if (sql.startsWith("SELECT payout_threshold, enable_email, email FROM users WHERE id = ?")) {
-                return [{ payout_threshold: 10, enable_email: 1, email: "user@example.com" }];
-            }
-            if (sql.startsWith("UPDATE users SET email = ? WHERE id = ?")) {
+            if (sql.startsWith("UPDATE users SET enable_email = ?, email = ? WHERE username = ? AND email = ?")) {
+                updateCalls += 1;
+                assert.deepEqual(params, [1, "new@example.com", "wallet", "old@example.com"]);
+                if (updateCalls === 1) {
+                    await firstUpdate.promise;
+                    return { affectedRows: 0 };
+                }
                 return { affectedRows: 1 };
             }
             throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
@@ -274,89 +295,55 @@ test.describe("api public and auth", { concurrency: false }, () => {
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
-            config: config,
+            config: createConfig(),
             database: createDatabase({ caches: {} }),
-            jwt: jwt,
-            mysql: mysql,
-            support: createSupport()
-        }, async (port) => {
-            const legacyLogin = await requestJson(port, "POST", "/authenticate", { username: "legacy", password: "mailpass" });
-            assert.equal(legacyLogin.statusCode, 200);
-            assert.equal(legacyLogin.json.success, true);
-
-            const secureLogin = await requestJson(port, "POST", "/authenticate", { username: "secure", password: "secretpass" });
-            assert.equal(secureLogin.statusCode, 200);
-            assert.equal(secureLogin.json.success, true);
-
-            const headerAuthed = await request(port, {
-                path: "/authed/",
-                headers: { "x-access-token": legacyLogin.json.msg }
-            });
-            assert.equal(headerAuthed.statusCode, 200);
-            assert.equal(headerAuthed.json.msg.email, "user@example.com");
-
-            const queryAuthed = await request(port, {
-                path: "/authed/?token=" + encodeURIComponent(secureLogin.json.msg)
-            });
-            assert.equal(queryAuthed.statusCode, 200);
-            assert.equal(queryAuthed.json.msg.payout_threshold, 10);
-
-            const bodyAuthed = await requestJson(port, "POST", "/authed/changeEmail", {
-                token: secureLogin.json.msg,
-                email: "changed@example.com"
-            });
-            assert.equal(bodyAuthed.statusCode, 200);
-            assert.equal(bodyAuthed.json.msg, "Updated email was set to: changed@example.com");
-        });
-    });
-
-    test("authentication throttles repeated failures for the same wallet", async () => {
-        const config = createConfig();
-        const secureHash = crypto.createHmac("sha256", config.api.secKey).update("secretpass").digest("hex");
-        let nowValue = 0;
-        let selectCalls = 0;
-        const firstLookup = createDeferred();
-        const mysql = createMysql(async function handler(sql, params) {
-            if (sql.startsWith("SELECT id, pass, email FROM users WHERE username = ?")) {
-                selectCalls += 1;
-                assert.equal(params[0], "secure");
-                if (selectCalls === 1) await firstLookup.promise;
-                return [{ id: 2, pass: secureHash, email: "user@example.com" }];
-            }
-            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
-        });
-
-        await withRuntime({
-            blockTemplate: createBlockTemplate(),
-            config: config,
-            database: createDatabase({ caches: {} }),
-            jwt: jwt,
             mysql: mysql,
             now: () => nowValue,
             support: createSupport()
         }, async (port) => {
-            const failedPromise = requestJson(port, "POST", "/authenticate", { username: "secure", password: "wrongpass" });
-            await waitForCondition(() => selectCalls === 1, 1000);
+            const failedPromise = requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 1,
+                from: "old@example.com",
+                to: "new@example.com"
+            });
+            await waitForCondition(() => updateCalls === 1, 1000);
 
-            const concurrent = await requestJson(port, "POST", "/authenticate", { username: "secure", password: "secretpass" });
+            const concurrent = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 1,
+                from: "old@example.com",
+                to: "new@example.com"
+            });
             assert.equal(concurrent.statusCode, 429);
             assert.match(concurrent.json.msg, /Too many attempts/);
-            assert.equal(selectCalls, 1);
+            assert.equal(updateCalls, 1);
 
-            firstLookup.resolve();
+            firstUpdate.resolve();
             const failed = await failedPromise;
             assert.equal(failed.statusCode, 401);
+            assert.deepEqual(failed.json, { error: "FROM email does not match" });
 
-            const throttled = await requestJson(port, "POST", "/authenticate", { username: "secure", password: "secretpass" });
+            const throttled = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 1,
+                from: "old@example.com",
+                to: "new@example.com"
+            });
             assert.equal(throttled.statusCode, 429);
             assert.match(throttled.json.msg, /Too many attempts/);
-            assert.equal(selectCalls, 1);
+            assert.equal(updateCalls, 1);
 
             nowValue += 2001;
-            const accepted = await requestJson(port, "POST", "/authenticate", { username: "secure", password: "secretpass" });
+            const accepted = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 1,
+                from: "old@example.com",
+                to: "new@example.com"
+            });
             assert.equal(accepted.statusCode, 200);
-            assert.equal(accepted.json.success, true);
-            assert.equal(selectCalls, 2);
+            assert.deepEqual(accepted.json, { msg: "Email preferences were updated" });
+            assert.equal(updateCalls, 2);
         });
     });
 
@@ -645,7 +632,6 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 clusterEnabled: true,
                 config: createConfig(),
                 database: createDatabase({ caches: {} }),
-                jwt: jwt,
                 mysql: createMysql(async () => []),
                 os: { cpus() { return [{}, {}]; } },
                 support: createSupport()
@@ -671,7 +657,6 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 config: createConfig(),
                 database: createDatabase({ caches: {} }),
                 host: "127.0.0.1",
-                jwt: jwt,
                 mysql: createMysql(async () => []),
                 port: 0,
                 support: createSupport()
