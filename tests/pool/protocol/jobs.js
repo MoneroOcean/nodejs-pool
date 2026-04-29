@@ -319,4 +319,152 @@ test("unauthenticated getjob, submit, and keepalive requests are rejected", asyn
         await runtime.stop();
     }
 });
+
+test("legacy submit charges invalid job ids to the authenticated socket miner", async () => {
+    const { runtime } = await startHarness();
+    const victimSocket = {};
+    const attackerSocket = {};
+
+    try {
+        invokePoolMethod({
+            socket: victimSocket,
+            id: 321,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+        invokePoolMethod({
+            socket: victimSocket,
+            id: 322,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "victim-eth-worker"],
+            portData: global.config.ports[1]
+        });
+        invokePoolMethod({
+            socket: attackerSocket,
+            id: 323,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+        invokePoolMethod({
+            socket: attackerSocket,
+            id: 324,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "attacker-eth-worker"],
+            portData: global.config.ports[1]
+        });
+
+        const victim = runtime.getState().activeMiners.get(victimSocket.miner_id);
+        const attacker = runtime.getState().activeMiners.get(attackerSocket.miner_id);
+        const submitReply = invokePoolMethod({
+            socket: attackerSocket,
+            id: 325,
+            method: "submit",
+            params: {
+                id: victimSocket.miner_id,
+                job_id: "missing-job",
+                nonce: "000000000001",
+                result: VALID_RESULT
+            },
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: "Invalid job id", result: undefined }]);
+        assert.equal(victim.invalidJobIdCount, 0);
+        assert.equal(attacker.invalidJobIdCount, 1);
+        assert.equal(runtime.getState().activeMiners.has(victimSocket.miner_id), true);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("getjob applies forged params ids to the authenticated socket miner only", async () => {
+    const { runtime } = await startHarness();
+    const victimSocket = {};
+    const attackerSocket = {};
+
+    try {
+        invokePoolMethod({
+            socket: victimSocket,
+            id: 331,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "victim-getjob"
+            }
+        });
+        invokePoolMethod({
+            socket: attackerSocket,
+            id: 332,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "attacker-getjob"
+            }
+        });
+
+        const victim = runtime.getState().activeMiners.get(victimSocket.miner_id);
+        const attacker = runtime.getState().activeMiners.get(attackerSocket.miner_id);
+        victim.curr_coin = undefined;
+        victim.curr_coin_time = 0;
+        attacker.curr_coin = undefined;
+        attacker.curr_coin_time = 0;
+        poolModule.setTestCoinHashFactor("ETH", 5);
+
+        const getjobReply = invokePoolMethod({
+            socket: attackerSocket,
+            id: 333,
+            method: "getjob",
+            params: {
+                id: victimSocket.miner_id,
+                algo: ["rx/0", "kawpow"],
+                "algo-perf": {
+                    "rx/0": 1,
+                    kawpow: 2
+                },
+                "algo-min-time": 0
+            }
+        });
+
+        assert.equal(getjobReply.replies[0].error, null);
+        assert.equal(Array.isArray(getjobReply.replies[0].result), true);
+        assert.equal(attacker.curr_coin, "ETH");
+        assert.notEqual(victim.curr_coin, "ETH");
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("unauthenticated keepalive cannot refresh another miner by params id", async () => {
+    const { runtime } = await startHarness();
+    const victimSocket = {};
+
+    try {
+        invokePoolMethod({
+            socket: victimSocket,
+            id: 341,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "victim-keepalive"
+            }
+        });
+        const victim = runtime.getState().activeMiners.get(victimSocket.miner_id);
+        victim.lastProtocolActivity = 123;
+
+        const keepaliveReply = invokePoolMethod({
+            socket: {},
+            id: 342,
+            method: "keepalive",
+            params: { id: victimSocket.miner_id }
+        });
+
+        assert.equal(keepaliveReply.replies.length, 0);
+        assert.deepEqual(keepaliveReply.finals, [{ error: "Unauthenticated", timeout: undefined }]);
+        assert.equal(victim.lastProtocolActivity, 123);
+    } finally {
+        await runtime.stop();
+    }
+});
 });

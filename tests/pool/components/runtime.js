@@ -226,7 +226,7 @@ test("eth-style nonces are deduped across miners on the same block template", ()
             const replies = [];
             const finals = [];
             protocolHandler(
-                {},
+                { miner_id: minerId },
                 `${minerId}-${jobId}`,
                 "submit",
                 {
