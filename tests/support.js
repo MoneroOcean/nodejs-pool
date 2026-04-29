@@ -313,9 +313,9 @@ test.describe("support", { concurrency: false }, () => {
             assert.equal(parsed.email, "miner@example.com");
 
             support.sendEmail("miner@example.com", "Subject", "Body", wallet);
-            await new Promise((resolve) => setImmediate(resolve));
-            await new Promise((resolve) => setImmediate(resolve));
-            await new Promise((resolve) => setImmediate(resolve));
+            for (let i = 0; i < 8; i += 1) {
+                await new Promise((resolve) => setImmediate(resolve));
+            }
             assert.equal(capturedPayload.subject, "MoneroOcean: Subject");
             assert.match(capturedPayload.text, /Body\n\nUnsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/[A-Za-z0-9_-]+/);
             assert.equal(capturedPayload.text.includes(wallet), false);
@@ -373,9 +373,9 @@ test.describe("support", { concurrency: false }, () => {
             };
             support.sendEmail("miner@example.com", "Worker stopped hashing: rig01", "Worker: rig01", wallet, options);
             support.sendEmail("miner@example.com", "Worker stopped hashing: rig02", "Worker: rig02", wallet, options);
-            await new Promise((resolve) => setImmediate(resolve));
-            await new Promise((resolve) => setImmediate(resolve));
-            await new Promise((resolve) => setImmediate(resolve));
+            for (let i = 0; i < 8; i += 1) {
+                await new Promise((resolve) => setImmediate(resolve));
+            }
 
             assert.equal(capturedPayload.subject, "MoneroOcean: Workers stopped hashing");
             assert.match(capturedPayload.text, /Worker: rig01\n\nWorker: rig02/);
@@ -555,6 +555,82 @@ test.describe("support", { concurrency: false }, () => {
         } finally {
             console.log = originalConsoleLog;
             http.request = originalRequest;
+            restore();
+        }
+    });
+
+    test("daily FYI emails accumulate events between sends", async () => {
+        const restore = installSupportGlobals();
+        const originalRequest = http.request;
+        const originalSetTimeout = global.setTimeout;
+        const originalDateNow = Date.now;
+        const support = supportFactory();
+        const capturedPayloads = [];
+        let fakeNow = 1710000000000;
+        support._resetEmailState();
+
+        global.config.hostname = "pool-test";
+        global.config.bind_ip = "203.0.113.7";
+        global.config.general = {
+            adminEmail: "ops@example.com",
+            emailSig: "Pool %(wallet)s",
+            emailFrom: "pool@example.com",
+            mailgunURL: "http://127.0.0.1/send"
+        };
+
+        http.request = function fakeRequest(_options, onResponse) {
+            const request = createRequest();
+            let requestBody = "";
+            request.write = function write(chunk) {
+                requestBody += chunk;
+            };
+            request.end = function end() {
+                capturedPayloads.push(JSON.parse(requestBody));
+                const response = createResponse();
+                setImmediate(function respond() {
+                    onResponse(response);
+                    response.emit("data", "{}");
+                    response.emit("end");
+                });
+            };
+            return request;
+        };
+        global.setTimeout = function patchedSetTimeout(fn, delay, ...args) {
+            if (delay === 5 * 60 * 1000 || delay === 30 * 60 * 1000 || delay === 1000) {
+                return setImmediate(fn, ...args);
+            }
+            return originalSetTimeout(fn, delay, ...args);
+        };
+        Date.now = function fakeDateNow() { return fakeNow; };
+
+        try {
+            const baseTs = 1710000000000;
+            function buildBody(events, helpers) {
+                return events.map(function mapEvent(event) {
+                    return helpers.formatTime(event.ts) + " " + event.detail;
+                }).join("\n");
+            }
+
+            assert.equal(support.sendFyiDaily("ops@example.com", "daemon", "FYI Daily: daemon", buildBody, { detail: "first" }, { now: baseTs }), true);
+            for (let i = 0; i < 20 && capturedPayloads.length < 1; i += 1) {
+                await new Promise((resolve) => setImmediate(resolve));
+            }
+            fakeNow += 2000;
+
+            assert.equal(support.sendFyiDaily("ops@example.com", "daemon", "FYI Daily: daemon", buildBody, { detail: "second" }, { now: baseTs + 60 * 60 * 1000 }), false);
+            assert.equal(support.sendFyiDaily("ops@example.com", "daemon", "FYI Daily: daemon", buildBody, { detail: "third" }, { now: baseTs + 24 * 60 * 60 * 1000 }), true);
+            for (let i = 0; i < 20 && capturedPayloads.length < 2; i += 1) {
+                await new Promise((resolve) => setImmediate(resolve));
+            }
+
+            assert.equal(capturedPayloads.length, 2);
+            assert.equal(capturedPayloads[0].subject, "[pool-test] FYI Daily: daemon");
+            assert.equal(capturedPayloads[0].text, "Hello,\n\nPool node: pool-test\n\n2024-03-09T16:00:00Z first\n\nThank you,\nPool undefined");
+            assert.equal(capturedPayloads[1].text, "Hello,\n\nPool node: pool-test\n\n2024-03-09T17:00:00Z second\n2024-03-10T16:00:00Z third\n\nThank you,\nPool undefined");
+        } finally {
+            Date.now = originalDateNow;
+            http.request = originalRequest;
+            global.setTimeout = originalSetTimeout;
             restore();
         }
     });
