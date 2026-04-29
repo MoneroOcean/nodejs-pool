@@ -253,6 +253,9 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             assert.equal(second.statusCode, 200);
             assert.deepEqual(first.json, second.json);
             assert.equal(database.state.blockListCalls.length, 1);
+
+            await request(port, { path: "/pool/blocks?limit=25&page=5000" });
+            assert.deepEqual(database.state.blockListCalls[1], { poolType: null, start: 25000, end: 25025 });
         });
     });
 

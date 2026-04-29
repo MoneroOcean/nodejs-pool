@@ -22,6 +22,16 @@ async function waitForCondition(check, timeoutMs) {
     throw new Error("Condition not met within " + timeoutMs + "ms");
 }
 
+function createDeferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolveFn, rejectFn) => {
+        resolve = resolveFn;
+        reject = rejectFn;
+    });
+    return { promise, resolve, reject };
+}
+
 async function waitForListening(runtime) {
     for (let attempts = 0; attempts < 50; attempts += 1) {
         const address = runtime.address();
@@ -300,6 +310,56 @@ test.describe("api public and auth", { concurrency: false }, () => {
         });
     });
 
+    test("authentication throttles repeated failures for the same wallet", async () => {
+        const config = createConfig();
+        const secureHash = crypto.createHmac("sha256", config.api.secKey).update("secretpass").digest("hex");
+        let nowValue = 0;
+        let selectCalls = 0;
+        const firstLookup = createDeferred();
+        const mysql = createMysql(async function handler(sql, params) {
+            if (sql.startsWith("SELECT id, pass, email FROM users WHERE username = ?")) {
+                selectCalls += 1;
+                assert.equal(params[0], "secure");
+                if (selectCalls === 1) await firstLookup.promise;
+                return [{ id: 2, pass: secureHash, email: "user@example.com" }];
+            }
+            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+        });
+
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: config,
+            database: createDatabase({ caches: {} }),
+            jwt: jwt,
+            mysql: mysql,
+            now: () => nowValue,
+            support: createSupport()
+        }, async (port) => {
+            const failedPromise = requestJson(port, "POST", "/authenticate", { username: "secure", password: "wrongpass" });
+            await waitForCondition(() => selectCalls === 1, 1000);
+
+            const concurrent = await requestJson(port, "POST", "/authenticate", { username: "secure", password: "secretpass" });
+            assert.equal(concurrent.statusCode, 429);
+            assert.match(concurrent.json.msg, /Too many attempts/);
+            assert.equal(selectCalls, 1);
+
+            firstLookup.resolve();
+            const failed = await failedPromise;
+            assert.equal(failed.statusCode, 401);
+
+            const throttled = await requestJson(port, "POST", "/authenticate", { username: "secure", password: "secretpass" });
+            assert.equal(throttled.statusCode, 429);
+            assert.match(throttled.json.msg, /Too many attempts/);
+            assert.equal(selectCalls, 1);
+
+            nowValue += 2001;
+            const accepted = await requestJson(port, "POST", "/authenticate", { username: "secure", password: "secretpass" });
+            assert.equal(accepted.statusCode, 200);
+            assert.equal(accepted.json.success, true);
+            assert.equal(selectCalls, 2);
+        });
+    });
+
     test("public threshold updates still work and missing worker cache rows fail safely", async () => {
         const mysql = createMysql(async function handler(sql) {
             if (sql.startsWith("SELECT id FROM users WHERE username = ? AND payout_threshold_lock = '1'")) return [];
@@ -422,6 +482,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
     });
 
     test("GUI-surfaced email subscription errors keep their legacy error payloads", async () => {
+        let nowValue = 0;
         const mysql = createMysql(async function handler(sql, params) {
             if (sql.startsWith("UPDATE users SET enable_email = ?, email = ? WHERE username = ? AND email = ?")) {
                 assert.equal(params[2], "wallet");
@@ -442,6 +503,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
             config: createConfig(),
             database: createDatabase({ caches: { wallet: { seen: true } } }),
             mysql: mysql,
+            now: () => nowValue,
             support: createSupport()
         }, async (port) => {
             const fromMismatch = await requestJson(port, "POST", "/user/subscribeEmail", {
@@ -453,6 +515,16 @@ test.describe("api public and auth", { concurrency: false }, () => {
             assert.equal(fromMismatch.statusCode, 401);
             assert.deepEqual(fromMismatch.json, { error: "FROM email does not match" });
 
+            const throttled = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 1,
+                from: "old@example.com",
+                to: "new@example.com"
+            });
+            assert.equal(throttled.statusCode, 429);
+            assert.match(throttled.json.msg, /Too many attempts/);
+
+            nowValue += 2001;
             const invalidFrom = await requestJson(port, "POST", "/user/subscribeEmail", {
                 username: "wallet",
                 enabled: 1,
