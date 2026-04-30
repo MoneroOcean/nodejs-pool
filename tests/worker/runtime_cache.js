@@ -534,4 +534,33 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
             global.setTimeout = originalSetTimeout;
         }
     });
+
+    test("worker ignores stale empty scan after a populated high-height cycle", async () => {
+        const now = 1710000000000;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const envState = createFakeEnvironment({
+            shares: [{
+                height: 1000,
+                share: createShare({ paymentAddress: address, identifier: "rigStaleEmpty", rawShares: 900, shares2: 450, timestamp: now - 15 * 1000 })
+            }]
+        });
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1000);
+        const commitsAfterGoodRun = envState.env.writeCommits;
+        const minerSetAfterGoodRun = envState.cacheStore.get("minerSet");
+
+        await runUpdate(runtime, 1);
+
+        assert.equal(envState.env.writeCommits, commitsAfterGoodRun);
+        assert.equal(envState.cacheStore.get("minerSet"), minerSetAfterGoodRun);
+        assert.equal(runtime.state.lastShareStatsHeight, 1000);
+        assert.equal(Object.keys(runtime.state.workersStoppedHashingTime).length, 0);
+        assert.deepEqual(envState.emails[0], [
+            "admin@example.com", "Worker ignored stale empty share scan",
+            "Worker ignored a stale empty share scan.\nRequested height: 1\nPrevious height: 1000\nPrevious workers: 2"
+        ]);
+    });
 });
