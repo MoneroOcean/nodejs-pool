@@ -116,6 +116,39 @@ test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex c
     );
 });
 
+test("BlockTemplate derives dual-main candidate difficulty from the lowest chain difficulty", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const originalGetAuxChainXTM = global.coinFuncs.getAuxChainXTM;
+    const template = {
+        ...createBaseTemplate({
+            coin: "",
+            port: MAIN_PORT,
+            idHash: "dual-main-min-difficulty",
+            height: 302
+        }),
+        difficulty: 999,
+        _aux: {
+            base_difficulty: 100,
+            chains: [{
+                id: "xtr",
+                difficulty: 25,
+                height: 12
+            }]
+        }
+    };
+
+    try {
+        global.coinFuncs.getAuxChainXTM = coinFuncs.getAuxChainXTM.bind(coinFuncs);
+        const blockTemplate = new coinFuncs.BlockTemplate(template);
+
+        assert.equal(blockTemplate.xmr_difficulty, 100);
+        assert.equal(blockTemplate.xtm_difficulty, 25);
+        assert.equal(blockTemplate.difficulty, 25);
+    } finally {
+        global.coinFuncs.getAuxChainXTM = originalGetAuxChainXTM;
+    }
+});
+
 test("BlockTemplate instanceId encodes pool_id and pid into separate bit ranges", () => {
     const poolId = 513;
     const pid = 0x2abcde;
