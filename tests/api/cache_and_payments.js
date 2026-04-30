@@ -252,7 +252,19 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             assert.equal(database.state.blockListCalls.length, 1);
 
             await request(port, { path: "/pool/blocks?limit=25&page=5000" });
-            assert.deepEqual(database.state.blockListCalls[1], { poolType: null, start: 25000, end: 25025 });
+            assert.deepEqual(database.state.blockListCalls[1], { poolType: null, start: 15000, end: 15015 });
+
+            await request(port, { path: "/pool/blocks?limit=500&page=1" });
+            assert.deepEqual(database.state.blockListCalls[2], { poolType: null, start: 15, end: 30 });
+
+            await request(port, { path: "/pool/altblocks?limit=500&page=0" });
+            assert.deepEqual(database.state.altBlockListCalls[0], { poolType: null, coinPort: null, start: 0, end: 15 });
+
+            await request(port, { path: "/pool/blocks?limit=100&page=2" });
+            assert.deepEqual(database.state.blockListCalls[3], { poolType: null, start: 200, end: 300 });
+
+            await request(port, { path: "/pool/blocks?limit=0&page=2" });
+            assert.deepEqual(database.state.blockListCalls[4], { poolType: null, start: 30, end: 45 });
         });
     });
 
