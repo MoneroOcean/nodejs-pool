@@ -103,6 +103,11 @@ server {
         index index.html;
 	gzip on;
 
+	location = /robots.txt {
+		default_type text/plain;
+		return 200 "User-agent: *\nAllow: /\n";
+	}
+
 	location / {
 		try_files \$uri \$uri/ /index.html;
 	}
