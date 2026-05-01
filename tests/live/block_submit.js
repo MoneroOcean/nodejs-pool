@@ -205,6 +205,7 @@ async function authorizeStratumBlockSubmit(run, testCase, client, files, user) {
     if (authorizeReply.error || authorizeReply.result !== true) {
         throw new Error(`mining.authorize failed: ${JSON.stringify(authorizeReply.error || authorizeReply.result)}`);
     }
+    return subscribeReply;
 }
 
 async function runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, candidate) {
@@ -226,12 +227,13 @@ async function runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, can
 
 async function runEthBlockSubmitAttempt(run, target, logPaths, testCase, candidate) {
     return withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, async ({ client, files, startOffsets, user }) => {
-        await authorizeStratumBlockSubmit(run, testCase, client, files, user);
+        const subscribeReply = await authorizeStratumBlockSubmit(run, testCase, client, files, user);
         const notifyPush = await client.waitFor((message) => message.method === "mining.notify", run.config.timeoutMs);
+        const extraNonce = Array.isArray(subscribeReply.result) ? String(subscribeReply.result[1] || "") : "";
         const submitReply = await client.request({
             id: 3,
             method: "mining.submit",
-            params: buildEthBlockSubmitParams(user, Array.isArray(notifyPush.params) ? String(notifyPush.params[0] || "") : "", candidate.resultHex)
+            params: buildEthBlockSubmitParams(user, Array.isArray(notifyPush.params) ? String(notifyPush.params[0] || "") : "", candidate.resultHex, extraNonce)
         }, run.config.timeoutMs);
 
         if (!isSuccessfulSubmitResponse(submitReply)) throw new Error(`Submit was not accepted: ${JSON.stringify(submitReply)}`);

@@ -439,11 +439,30 @@ function buildC29BlockSubmitPayload(loginReply, resultHex) {
     };
 }
 
-function buildEthBlockSubmitParams(user, jobId, resultHex) {
+function buildEthBlockSubmitNonce(extraNonce) {
+    if (typeof extraNonce !== "string" || extraNonce.trim() === "") {
+        throw new Error("Eth subscribe did not return an extranonce for the block-submit attempt.");
+    }
+
+    const normalizedExtraNonce = extraNonce.toLowerCase().startsWith("0x")
+        ? extraNonce.slice(2).toLowerCase()
+        : extraNonce.toLowerCase();
+    if (!/^[0-9a-f]+$/.test(normalizedExtraNonce) || normalizedExtraNonce.length > 16) {
+        throw new Error(`Invalid eth extranonce for block-submit attempt: ${extraNonce}`);
+    }
+
+    const suffixHexLength = 16 - normalizedExtraNonce.length;
+    const suffix = suffixHexLength
+        ? crypto.randomBytes(Math.ceil(suffixHexLength / 2)).toString("hex").slice(0, suffixHexLength)
+        : "";
+    return `0x${normalizedExtraNonce}${suffix}`;
+}
+
+function buildEthBlockSubmitParams(user, jobId, resultHex, extraNonce) {
     return [
         user,
         jobId,
-        `0x${crypto.randomBytes(8).toString("hex")}`,
+        buildEthBlockSubmitNonce(extraNonce),
         `0x${"11".repeat(32)}`,
         `0x${"00".repeat(32)}`,
         `0x${resultHex}`
@@ -483,6 +502,7 @@ module.exports = {
     isSuccessfulSubmitResponse,
     buildDefaultBlockSubmitPayload,
     buildC29BlockSubmitPayload,
+    buildEthBlockSubmitNonce,
     buildEthBlockSubmitParams,
     buildRavenBlockSubmitParams
 };

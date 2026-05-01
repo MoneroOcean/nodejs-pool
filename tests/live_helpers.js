@@ -10,6 +10,9 @@ const {
     buildSrbMiner,
     getActiveAlgorithms
 } = require("./live/miners.js");
+const {
+    buildEthBlockSubmitParams
+} = require("./live/protocol.js");
 
 test.describe("live miner helpers", { concurrency: false }, () => {
     test("SRBMiner cn/gpu args include conservative stability controls", () => {
@@ -93,5 +96,22 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             if (typeof previous === "undefined") delete process.env.NODEJS_POOL_LIVE_ALGOS;
             else process.env.NODEJS_POOL_LIVE_ALGOS = previous;
         }
+    });
+
+    test("eth block-submit params use the subscribed extranonce prefix", () => {
+        const resultHex = "aa".repeat(32);
+        const params = buildEthBlockSubmitParams("wallet", "job-1", resultHex, "ff7e");
+
+        assert.equal(params[0], "wallet");
+        assert.equal(params[1], "job-1");
+        assert.match(params[2], /^0xff7e[0-9a-f]{12}$/);
+        assert.equal(params[5], `0x${resultHex}`);
+    });
+
+    test("eth block-submit params reject missing subscribed extranonce", () => {
+        assert.throws(
+            () => buildEthBlockSubmitParams("wallet", "job-1", "aa".repeat(32), ""),
+            /Eth subscribe did not return an extranonce/
+        );
     });
 });
