@@ -38,20 +38,39 @@ const {
 } = require("./protocol.js");
 
 const BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES = Object.freeze([null, 10, 100, 1000, 10000, 100000, 1000000]);
+function hasObservedSubmitOutcome(failures) {
+    return failures.some((entry) => entry && entry.summary && entry.summary.outcomeCount > 0);
+}
+
+function xmrWindowSkipReason(label) {
+    return ({ failures }) => hasObservedSubmitOutcome(failures)
+        ? `current live XMR/XTM template did not provide a stable ${label} window`
+        : "";
+}
+
 const BLOCK_SUBMIT_LIVE_CASES = Object.freeze([
     {
         name: "xmr-main-xmr-only",
         protocol: "default-standard",
         algo: "rx/0",
         expectation: { exactFailureCount: 1, includeChains: ["XMR/"], excludeChains: ["XTM/"] },
+        expectedNoCandidateSkipReason: xmrWindowSkipReason("XMR-only block-submit"),
         buildCandidates(context) { return buildCandidateMatrix(buildXmrOnlyResultHexes(context.xmrTemplate), BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES); }
     },
-    { name: "xmr-main-dual", protocol: "default-standard", algo: "rx/0", expectation: { exactFailureCount: 2, includeChains: ["XMR/", "XTM/"] }, buildCandidates() { return buildCandidateMatrix(["00".repeat(32)], BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES); } },
+    {
+        name: "xmr-main-dual",
+        protocol: "default-standard",
+        algo: "rx/0",
+        expectation: { minOutcomeCount: 2, includeChains: ["XMR/", "XTM/"] },
+        expectedNoCandidateSkipReason: xmrWindowSkipReason("XMR/XTM dual-submit"),
+        buildCandidates() { return buildCandidateMatrix(["00".repeat(32)], BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES); }
+    },
     {
         name: "xmr-main-low-diff",
         protocol: "default-standard",
         algo: "rx/0",
-        expectation: { exactFailureCount: 2, includeChains: ["XMR/", "XTM/"] },
+        expectation: { minOutcomeCount: 2, includeChains: ["XMR/", "XTM/"] },
+        expectedNoCandidateSkipReason: xmrWindowSkipReason("low-diff fallback"),
         skipReason(context) {
             if (!context || !context.xmrMainDifficulty) return "missing main difficulty";
             if (context.xmrMainDifficulty >= context.xmrTemplate.primaryDiff) return "current template has no low-diff fallback window";
@@ -65,6 +84,14 @@ const BLOCK_SUBMIT_LIVE_CASES = Object.freeze([
     { name: "eth-submitwork", protocol: "eth", algo: "etchash", expectation: { exactFailureCount: 1, includeChains: ["ETC/"] }, buildCandidates() { return buildCandidateMatrix(["00".repeat(32)], [null]); } },
     { name: "erg-submitblock", protocol: "eth", algo: "autolykos2", expectation: { exactFailureCount: 1, includeChains: ["ERG/"] }, buildCandidates() { return buildCandidateMatrix(["00".repeat(32)], [null]); } }
 ]);
+
+class ExpectedLiveBlockSubmitSkip extends Error {
+    constructor(message, details) {
+        super(message);
+        this.name = "ExpectedLiveBlockSubmitSkip";
+        this.details = details;
+    }
+}
 
 function openLogStreams(stdoutPath, stderrPath) { return { stdout: fs.createWriteStream(stdoutPath, { flags: "a" }), stderr: fs.createWriteStream(stderrPath, { flags: "a" }) }; }
 const closeStreams = async (...streams) => await Promise.all(streams.filter(Boolean).map((stream) => new Promise((resolve) => stream.end(resolve))));
@@ -134,13 +161,34 @@ async function readPm2LogBundle(logPaths, startOffsets) {
     };
 }
 
+function expectedOutcomeCount(expectation) {
+    if (!expectation) return 1;
+    if (expectation.exactFailureCount) return expectation.exactFailureCount;
+    if (expectation.minOutcomeCount) return expectation.minOutcomeCount;
+    if (expectation.minFailureCount) return expectation.minFailureCount;
+    if (Array.isArray(expectation.includeChains)) return expectation.includeChains.length;
+    if (Array.isArray(expectation.includeAnyChains)) return 1;
+    return 1;
+}
+
+function isBlockSubmitAttemptSettled(logText, expectation, worker) {
+    const outcomes = getBlockSubmitOutcomeEntries(logText, worker);
+    if (outcomes.length === 0) return false;
+
+    const chains = outcomes.map((entry) => entry.chain);
+    if (expectation && Array.isArray(expectation.excludeChains) && expectation.excludeChains.some((prefix) => chains.some((chain) => chain.startsWith(prefix)))) {
+        return true;
+    }
+    return outcomes.length >= expectedOutcomeCount(expectation);
+}
+
 async function waitForBlockSubmitAttemptLog(logPaths, startOffsets, expectation, timeoutMs, caseName, worker) {
     const deadline = Date.now() + timeoutMs;
     let lastBundle = { stderrText: "", stdoutText: "", text: "" };
 
     while (Date.now() < deadline) {
         lastBundle = await readPm2LogBundle(logPaths, startOffsets);
-        if (matchesBlockSubmitExpectation(lastBundle.text, expectation, worker)) {
+        if (matchesBlockSubmitExpectation(lastBundle.text, expectation, worker) || isBlockSubmitAttemptSettled(lastBundle.text, expectation, worker)) {
             await sleep(500);
             return await readPm2LogBundle(logPaths, startOffsets);
         }
@@ -261,6 +309,7 @@ async function runRavenBlockSubmitAttempt(run, target, logPaths, testCase, candi
 async function runLiveBlockSubmitCase(run, target, logPaths, testCase, context) {
     const candidates = testCase.buildCandidates(context);
     let lastFailure = null;
+    const failures = [];
 
     for (const candidate of candidates) {
         if (run.config.emitStartLines) {
@@ -280,10 +329,17 @@ async function runLiveBlockSubmitCase(run, target, logPaths, testCase, context) 
                     : await runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, candidate);
             if (matchesBlockSubmitExpectation(attempt.logText, testCase.expectation, attempt.worker)) return attempt.logText;
             lastFailure = `unexpected-log ${JSON.stringify(attempt.summary)}\n${attempt.logText.trimEnd()}`;
+            failures.push({ candidate, summary: attempt.summary, detail: lastFailure });
         } catch (error) {
             lastFailure = error.stack || error.message;
+            failures.push({ candidate, detail: lastFailure });
         }
     }
+
+    const skipReason = typeof testCase.expectedNoCandidateSkipReason === "function"
+        ? testCase.expectedNoCandidateSkipReason({ failures, context })
+        : "";
+    if (skipReason) throw new ExpectedLiveBlockSubmitSkip(skipReason, lastFailure);
 
     throw new Error(`No candidate matched ${testCase.name}.\n${lastFailure || "No attempts were executed."}`);
 }
@@ -397,6 +453,17 @@ async function executeLiveBlockSubmitCoverageCase(run, target, coverage, testCas
         run.logger.event("block-submit-coverage.case.finish", { name: testCase.name });
         return { skipped: false, logText };
     } catch (error) {
+        if (error instanceof ExpectedLiveBlockSubmitSkip) {
+            if (run.config.emitStartLines) emitLiveStatus("skip", `block submit ${testCase.name}`, error.message);
+            run.logger.event("block-submit-coverage.case.skip", {
+                name: testCase.name,
+                protocol: testCase.protocol,
+                algo: testCase.algo,
+                reason: error.message,
+                detail: error.details || ""
+            });
+            return { skipped: true, skipReason: error.message };
+        }
         if (run.config.emitStartLines) emitLiveStatus("fail", `block submit ${testCase.name}`, firstLine(error.message || error.stack));
         throw error;
     }

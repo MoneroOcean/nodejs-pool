@@ -11,7 +11,9 @@ const {
     getActiveAlgorithms
 } = require("./live/miners.js");
 const {
-    buildEthBlockSubmitParams
+    buildEthBlockSubmitParams,
+    matchesBlockSubmitExpectation,
+    summarizeBlockSubmitLog
 } = require("./live/protocol.js");
 
 test.describe("live miner helpers", { concurrency: false }, () => {
@@ -113,5 +115,26 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             () => buildEthBlockSubmitParams("wallet", "job-1", "aa".repeat(32), ""),
             /Eth subscribe did not return an extranonce/
         );
+    });
+
+    test("xmr dual block-submit expectation allows daemon retry outcomes", () => {
+        const worker = "itest-worker";
+        const logText = [
+            `2026-05-01 [S1] Block submit failed: chain=XMR/18081 height=1 miner="abc:${worker} (127.0.0.1)" trusted=true`,
+            `2026-05-01 [S1] Block submit unknown: chain=XTM/18144 height=1 miner="abc:${worker} (127.0.0.1)" trusted=true`,
+            `2026-05-01 [S1] Block submit rpc-error: chain=XTM/18144 height=1 miner="abc:${worker} (127.0.0.1)" trusted=true`
+        ].join("\n");
+
+        assert.equal(matchesBlockSubmitExpectation(logText, { minOutcomeCount: 2, includeChains: ["XMR/", "XTM/"] }, worker), true);
+        assert.equal(matchesBlockSubmitExpectation(logText, { exactFailureCount: 2, includeChains: ["XMR/", "XTM/"] }, worker), false);
+        assert.deepEqual(summarizeBlockSubmitLog(logText, worker), {
+            outcomeCount: 3,
+            failureCount: 1,
+            unknownCount: 1,
+            rpcErrorCount: 1,
+            unresolvedHashCount: 0,
+            rejectedCount: 0,
+            chains: ["XMR/18081", "XTM/18144", "XTM/18144"]
+        });
     });
 });

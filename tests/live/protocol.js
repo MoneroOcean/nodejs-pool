@@ -380,7 +380,8 @@ function getBlockSubmitOutcomeEntries(text, worker) {
 function matchesBlockSubmitExpectation(logText, expectation, worker) {
     const outcomes = getBlockSubmitOutcomeEntries(logText, worker);
     if (expectation.exactFailureCount && outcomes.length !== expectation.exactFailureCount) return false;
-    if (!expectation.exactFailureCount && expectation.minFailureCount && outcomes.length < expectation.minFailureCount) return false;
+    const minOutcomeCount = expectation.minOutcomeCount || expectation.minFailureCount;
+    if (!expectation.exactFailureCount && minOutcomeCount && outcomes.length < minOutcomeCount) return false;
 
     const chains = outcomes.map((entry) => entry.chain);
     if (expectation.includeChains && expectation.includeChains.some((prefix) => !chains.some((chain) => chain.startsWith(prefix)))) return false;

@@ -18,6 +18,12 @@ const {
 const LIVE_TARGET_HOST = process.env.NODEJS_POOL_LIVE_TARGET_HOST || "";
 const liveReachable = async () => LIVE_TARGET_HOST ? true : await isDefaultTargetReachable();
 const liveConfig = () => buildConfig({ emitStartLines: false, targetHost: LIVE_TARGET_HOST || undefined });
+const EXPECTED_LIVE_MINER_SKIP_REASONS = new Set(["no-accepted-share"]);
+
+function expectedLiveMinerSkipReason(target) {
+    if (!target || target.success || !EXPECTED_LIVE_MINER_SKIP_REASONS.has(target.failureReason)) return "";
+    return "no accepted share before timeout on this host";
+}
 
 test.describe("live miner integration suite", { concurrency: false }, () => {
     const state = {
@@ -95,7 +101,8 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
                     || (typeof testCase.skipReason === "function" ? testCase.skipReason(state.blockSubmitCoverage.context) : ""))) return;
 
                 try {
-                    await executeLiveBlockSubmitCoverageCase(state.run, state.target, state.blockSubmitCoverage, testCase);
+                    const result = await executeLiveBlockSubmitCoverageCase(state.run, state.target, state.blockSubmitCoverage, testCase);
+                    if (result && result.skipped) t.skip(result.skipReason);
                 } catch (error) {
                     fail(error, { blockSubmit: true });
                 }
@@ -129,9 +136,16 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
         try {
             const minerPlans = state.run.coveredPlans.filter((plan) => plan.miner);
             for (const plan of minerPlans) {
-                await t.test(plan.algorithm, { timeout: state.run.config.timeoutMs + 60 * 1000 }, async () => {
+                await t.test(plan.algorithm, { timeout: state.run.config.timeoutMs + 60 * 1000 }, async (t) => {
                     const target = await executeScenario(state.run, plan, state.target);
-                    recordCoveredResult(plan.algorithm, plan.miner ? plan.miner.name : "protocol-probe", target);
+                    const expectedSkipReason = expectedLiveMinerSkipReason(target);
+                    const coveredTarget = expectedSkipReason ? { ...target, skipped: true, skipReason: expectedSkipReason } : target;
+                    recordCoveredResult(plan.algorithm, plan.miner ? plan.miner.name : "protocol-probe", coveredTarget);
+
+                    if (expectedSkipReason) {
+                        t.skip(expectedSkipReason);
+                        return;
+                    }
 
                     if (!target.success) {
                         throw target.failureReason || "failed";

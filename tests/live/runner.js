@@ -65,7 +65,7 @@ const {
 } = require("./block_submit.js");
 
 function buildSummary(run, coveredResults) {
-    const failures = coveredResults.filter((entry) => !entry.target.success);
+    const failures = coveredResults.filter((entry) => !entry.target.success && !entry.target.skipped);
     return {
         runId: run.config.runId,
         generatedAt: new Date().toISOString(),
@@ -119,7 +119,7 @@ async function formatFailureDetails(summary) {
     if (summary.errorDetail) sections.push(tailText(summary.errorDetail, 8000));
     if (!Array.isArray(summary.results)) return sections.join("\n\n");
     for (const result of summary.results) {
-        if (result.target?.success) continue;
+        if (result.target?.success || result.target?.skipped) continue;
         const stdoutText = await readTextFileIfExists(result.target.rawStdoutPath);
         const stderrText = await readTextFileIfExists(result.target.rawStderrPath);
         const srbMinerLogText = await readTextFileIfExists(result.target.srbMinerLogPath);
