@@ -108,16 +108,9 @@ function getRequestedCases() {
 }
 
 async function ensureRunnerImage(distro, buildLog) {
-    const imageTag = `nodejs-pool-deploy-runner-v12-${sanitizeName(distro)}`;
-    if (!process.env.POOL_DEPLOY_REBUILD_IMAGES) {
-        const inspect = spawnSync("docker", ["image", "inspect", imageTag], { stdio: "ignore" });
-        if (inspect.status === 0) return imageTag;
-    }
-
-    const buildDir = await fsp.mkdtemp(path.join(os.tmpdir(), "nodejs-pool-deploy-runner-"));
-    const dockerfilePath = path.join(buildDir, "Dockerfile");
-    await fsp.copyFile(path.join(ROOT_DIR, "tests", "deploy", "common", "container_shim.sh"), path.join(buildDir, "container_shim.sh"));
-    await writeFile(dockerfilePath, [
+    const shimPath = path.join(ROOT_DIR, "tests", "deploy", "common", "container_shim.sh");
+    const shimContent = await fsp.readFile(shimPath);
+    const dockerfile = [
         `FROM ${distro}`,
         "ENV DEBIAN_FRONTEND=noninteractive",
         "RUN apt-get update -o Acquire::Retries=5 \\",
@@ -128,8 +121,26 @@ async function ensureRunnerImage(distro, buildLog) {
         "COPY container_shim.sh /usr/local/bin/codex-container-shim",
         "RUN chmod 755 /usr/local/bin/codex-container-shim \\",
         ...["certbot", "git", "service", "systemctl", "timedatectl", "ufw"]
-            .map((name) => ` && ln -sf /usr/local/bin/codex-container-shim /usr/local/bin/${name}`)
-    ].join("\n"));
+            .map((name, index, links) => (
+                ` && ln -sf /usr/local/bin/codex-container-shim /usr/local/bin/${name}${index + 1 === links.length ? "" : " \\"}`
+            ))
+    ].join("\n");
+    const imageHash = crypto.createHash("sha256")
+        .update(shimContent)
+        .update("\0")
+        .update(dockerfile)
+        .digest("hex")
+        .slice(0, 12);
+    const imageTag = `nodejs-pool-deploy-runner-${imageHash}-${sanitizeName(distro)}`;
+    if (!process.env.POOL_DEPLOY_REBUILD_IMAGES) {
+        const inspect = spawnSync("docker", ["image", "inspect", imageTag], { stdio: "ignore" });
+        if (inspect.status === 0) return imageTag;
+    }
+
+    const buildDir = await fsp.mkdtemp(path.join(os.tmpdir(), "nodejs-pool-deploy-runner-"));
+    const dockerfilePath = path.join(buildDir, "Dockerfile");
+    await fsp.copyFile(shimPath, path.join(buildDir, "container_shim.sh"));
+    await writeFile(dockerfilePath, dockerfile);
 
     try {
         await runCommand("docker", ["build", "-t", imageTag, "-f", dockerfilePath, buildDir], {

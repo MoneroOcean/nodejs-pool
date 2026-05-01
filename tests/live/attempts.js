@@ -39,6 +39,7 @@ function createAttemptFiles(run, plan, target, attempt, protocolProbe) {
         attemptDir: path.join(run.runDir, "attempts", attemptId),
         rawStdoutPath: path.join(run.runDir, "attempts", attemptId, "stdout.log"),
         rawStderrPath: path.join(run.runDir, "attempts", attemptId, "stderr.log"),
+        srbMinerLogPath: path.join(run.runDir, "attempts", attemptId, "srbminer.log"),
         wallet: run.allocateWallet(attemptId),
         worker: makeWorkerName(run.config, plan.algorithm, target.name, attempt),
         password: `x~${plan.algorithm}`,
@@ -55,7 +56,8 @@ function createAttemptBase(plan, target, attempt, files, minerName) {
         port: target.port,
         attempt,
         rawStdoutPath: files.rawStdoutPath,
-        rawStderrPath: files.rawStderrPath
+        rawStderrPath: files.rawStderrPath,
+        srbMinerLogPath: files.srbMinerLogPath
     };
 }
 
@@ -100,6 +102,78 @@ function attachAttemptStream(run, plan, target, attempt, name, stream, sink, onL
         });
     });
     return rl;
+}
+
+function attachAttemptFileTail(run, plan, target, attempt, name, filePath, onLine) {
+    let offset = 0;
+    let pending = "";
+    let pollChain = Promise.resolve();
+
+    const emitLine = (line) => {
+        const cleanLine = stripAnsi(line);
+        onLine(cleanLine);
+        run.logger.event("attempt.output", {
+            algorithm: plan.algorithm,
+            miner: plan.miner.name,
+            target: target.name,
+            attempt,
+            stream: name,
+            line: cleanLine
+        });
+    };
+
+    const poll = async () => {
+        let handle;
+        try {
+            handle = await fs.promises.open(filePath, "r");
+            const stats = await handle.stat();
+            if (stats.size < offset) {
+                offset = 0;
+                pending = "";
+            }
+            if (stats.size <= offset) return;
+
+            const buffer = Buffer.alloc(stats.size - offset);
+            const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+            offset += bytesRead;
+
+            const text = pending + buffer.subarray(0, bytesRead).toString("utf8");
+            const lines = text.split(/\r?\n/);
+            pending = lines.pop() || "";
+            for (const line of lines) emitLine(line);
+        } catch (error) {
+            if (error.code !== "ENOENT") {
+                run.logger.event("attempt.output_tail_error", {
+                    algorithm: plan.algorithm,
+                    miner: plan.miner.name,
+                    target: target.name,
+                    attempt,
+                    stream: name,
+                    error: error.message
+                });
+            }
+        } finally {
+            if (handle) await handle.close();
+        }
+    };
+
+    const schedulePoll = () => {
+        pollChain = pollChain.then(poll, poll);
+    };
+    const timer = setInterval(schedulePoll, 500);
+    schedulePoll();
+
+    return {
+        async stop() {
+            clearInterval(timer);
+            await pollChain;
+            await poll();
+            if (pending) {
+                emitLine(pending);
+                pending = "";
+            }
+        }
+    };
 }
 
 async function waitForMinerAttempt(child, metrics, plan, timeoutMs, getProcessError) {
@@ -350,6 +424,10 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         tls: config.tls,
         timeoutMs: config.timeoutMs,
         srbMinerGpuId: config.srbMinerGpuId,
+        srbMinerLogPath: files.srbMinerLogPath,
+        srbMinerGpuIntensity: plan.algorithm === "cn/gpu"
+            ? config.srbMinerCnGpuIntensity
+            : config.srbMinerGpuIntensity,
         srbMinerApiPort: config.srbMinerApiPort + attempt - 1,
         moMinerC29Device: config.moMinerC29Device
     };
@@ -403,6 +481,12 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
     attachAttemptStream(run, plan, target, attempt, "stderr", child.stderr, streams.stderr, (line) => {
         plan.miner.parser(line, metrics);
     });
+    const fileTailers = [];
+    if (plan.miner.style === "srbminer" && plan.algorithm === "cn/gpu") {
+        fileTailers.push(attachAttemptFileTail(run, plan, target, attempt, "srbminer.log", context.srbMinerLogPath, (line) => {
+            plan.miner.parser(line, metrics);
+        }));
+    }
 
     await waitForMinerAttempt(child, metrics, plan, config.timeoutMs, () => processError);
     await stopProcess(child);
@@ -413,6 +497,7 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
     }
 
     await closeStreams(streams.stdout, streams.stderr);
+    await Promise.all(fileTailers.map((tailer) => tailer.stop()));
 
     if (processError) {
         return { ...base, success: false, failureReason: "launch-failure", error: processError.message };

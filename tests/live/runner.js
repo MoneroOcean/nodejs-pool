@@ -14,6 +14,8 @@ const {
     DEFAULT_DIFFICULTY,
     DEFAULT_TARGET_ACCEPTED_SHARES,
     DEFAULT_SRBMINER_GPU_ID,
+    DEFAULT_SRBMINER_GPU_INTENSITY,
+    DEFAULT_SRBMINER_CN_GPU_INTENSITY,
     DEFAULT_SRBMINER_API_PORT,
     DEFAULT_MOMINER_C29_DEVICE,
     EMBEDDED_ACTIVE_ALGOS,
@@ -120,10 +122,12 @@ async function formatFailureDetails(summary) {
         if (result.target?.success) continue;
         const stdoutText = await readTextFileIfExists(result.target.rawStdoutPath);
         const stderrText = await readTextFileIfExists(result.target.rawStderrPath);
+        const srbMinerLogText = await readTextFileIfExists(result.target.srbMinerLogPath);
         sections.push([
             `[${result.algorithm}] ${result.target.failureReason || result.target.error || "failed"}`,
             stdoutText ? tailText(stdoutText, 4000) : "<stdout empty>",
-            stderrText ? `stderr:\n${tailText(stderrText, 4000)}` : ""
+            stderrText ? `stderr:\n${tailText(stderrText, 4000)}` : "",
+            srbMinerLogText ? `srbminer.log:\n${tailText(srbMinerLogText, 4000)}` : ""
         ].filter(Boolean).join("\n"));
     }
     return sections.join("\n\n");
@@ -257,6 +261,8 @@ function buildConfig(input) {
         timeoutMs: DEFAULT_TIMEOUT_MS,
         targetAcceptedShares: DEFAULT_TARGET_ACCEPTED_SHARES,
         srbMinerGpuId: DEFAULT_SRBMINER_GPU_ID,
+        srbMinerGpuIntensity: DEFAULT_SRBMINER_GPU_INTENSITY,
+        srbMinerCnGpuIntensity: DEFAULT_SRBMINER_CN_GPU_INTENSITY,
         srbMinerApiPort: DEFAULT_SRBMINER_API_PORT,
         moMinerC29Device: DEFAULT_MOMINER_C29_DEVICE,
         targetName: "target",

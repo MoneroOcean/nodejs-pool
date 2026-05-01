@@ -11,6 +11,7 @@ require("./remote_share.js");
 require("./api.js");
 require("./support.js");
 require("./local_comms.js");
+require("./live_helpers.js");
 require("./live.js");
 require("./payments.js");
 require("./payment_batch_unlock.js");

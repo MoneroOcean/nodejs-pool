@@ -269,6 +269,7 @@ function buildSrbMiner(binaryPath) {
                 "--worker", context.worker,
                 "--tls", context.tls ? "true" : "false",
                 "--gpu-id", context.srbMinerGpuId,
+                "--enable-workers-ramp-up",
                 "--api-enable",
                 "--api-port", String(context.srbMinerApiPort),
                 "--api-rig-name", context.worker,
@@ -276,6 +277,23 @@ function buildSrbMiner(binaryPath) {
                 "--max-no-share-sent", String(Math.ceil(context.timeoutMs / 1000)),
                 "--give-up-limit", "1"
             ];
+
+            if (context.srbMinerGpuIntensity) {
+                args.push("--gpu-intensity", context.srbMinerGpuIntensity);
+            }
+
+            if (context.algorithm === "cn/gpu") {
+                const srbMinerLogPath = context.srbMinerLogPath || path.join(context.attemptDir || process.cwd(), "srbminer.log");
+                args.push(
+                    "--log-file", srbMinerLogPath,
+                    "--log-file-mode", "0",
+                    "--gpu-disable-interleaving",
+                    "--disable-gpu-dual-kernels",
+                    "--autotune-no-load",
+                    "--busy-wait-recheck", "0.01",
+                    "--extended-log"
+                );
+            }
 
             if (SRBMINER_NICEHASH_STRATUM_ALGOS.has(context.algorithm)) {
                 args.push("--esm", "2", "--nicehash", "true");
@@ -398,13 +416,24 @@ async function writeXmrigSeedConfig(configPath, algorithm) {
 }
 
 function getActiveAlgorithms(logger) {
+    const requestedAlgorithms = new Set((process.env.NODEJS_POOL_LIVE_ALGOS || "")
+        .split(/[,\s]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean));
+    const knownAlgorithms = new Set(EMBEDDED_ACTIVE_ALGOS.map((entry) => entry.algorithm));
+    const unknownAlgorithms = Array.from(requestedAlgorithms).filter((algorithm) => !knownAlgorithms.has(algorithm)).sort();
+    if (unknownAlgorithms.length) {
+        throw new Error(`Unknown live algorithm filter: ${unknownAlgorithms.join(", ")}`);
+    }
     const selected = EMBEDDED_ACTIVE_ALGOS
         .map((entry) => ({ ...entry }))
+        .filter((entry) => !requestedAlgorithms.size || requestedAlgorithms.has(entry.algorithm))
         .sort((left, right) => left.algorithm.localeCompare(right.algorithm));
 
     logger.event("algorithms.discovered", {
-        source: "embedded",
-        algorithms: selected.map((entry) => entry.algorithm)
+        source: requestedAlgorithms.size ? "env" : "embedded",
+        algorithms: selected.map((entry) => entry.algorithm),
+        requestedAlgorithms: requestedAlgorithms.size ? Array.from(requestedAlgorithms).sort() : undefined
     });
 
     return selected;

@@ -1,5 +1,6 @@
 "use strict";
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,14 +9,14 @@ const test = require("node:test");
 const accountUtils = require("../script_account_utils.js");
 const moveBalance = require("../user_scripts/user_balance_move_common.js");
 const unblockCatalog = require("../manage_scripts/exchange_recovery_help.js");
-const unblockDeposit = require("../manage_scripts/exchange_recovery_deposit_clear.js");
-const unblockWallet = require("../manage_scripts/exchange_recovery_wallet_clear.js");
 const cacheFindUnused = require("../manage_scripts/cache_unused_find.js");
 const fixHighBridgeCredit = require("../manage_scripts/exchange_recovery_bridge_credit_fix.js");
 const fixLowXmrCredit = require("../manage_scripts/exchange_recovery_low_xmr_credit_fix.js");
 const fixExchangeXmrBalance = require("../manage_scripts/exchange_recovery_xmr_balance_fix.js");
 const runUserDelete = require("../manage_scripts/user_delete_common.js");
 const INIT_MINI_PATH = require.resolve("../init_mini.js");
+const LIB2_COINS_PATH = path.join(__dirname, "..", "lib2", "coins.js");
+const HAS_LIB2_COINS = fs.existsSync(LIB2_COINS_PATH);
 
 function captureConsole(method, fn) {
     const original = console[method];
@@ -126,11 +127,20 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
-    test("altblock_exchange unblock helpers use canonical exports", function testUnblockExports() {
+    test("altblock_exchange unblock catalog lists canonical commands", function testUnblockCatalog() {
         assert.equal(typeof unblockCatalog.main, "function");
         assert.ok(unblockCatalog.HELP.some(function hasDepositCommand(line) {
             return line.includes("exchange_recovery_deposit_clear.js --port <port> --clear --confirm-reviewed-deposit=true");
         }));
+    });
+
+    test("lib2-dependent altblock_exchange unblock helpers use canonical exports", function testUnblockExports(t) {
+        if (!HAS_LIB2_COINS) {
+            t.skip("lib2-dependent recovery helper scripts require lib2/coins.js");
+            return;
+        }
+        const unblockDeposit = require("../manage_scripts/exchange_recovery_deposit_clear.js");
+        const unblockWallet = require("../manage_scripts/exchange_recovery_wallet_clear.js");
         assert.equal(typeof unblockDeposit.summarizeEntry, "function");
         assert.equal(typeof unblockWallet.summarizeEntry, "function");
     });

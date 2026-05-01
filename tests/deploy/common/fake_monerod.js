@@ -76,6 +76,14 @@ function runWalletCli(argv) {
     fs.writeFileSync(walletPath, "");
     process.stdout.write(`Seed for ${walletPath}\n${address}\n`);
 }
+function inferDefaultRole(invokedAs, argv) {
+    if (invokedAs === "monerod") return "monerod";
+    if (invokedAs === "monero-wallet-rpc") return "wallet-rpc";
+    if (argv.includes("--wallet-file") || argv.includes("--password-file")) return "wallet-rpc";
+    if (arg(argv, ["--rpc-bind-port"]) === "18082") return "wallet-rpc";
+    return "tari-proxy";
+}
+
 function resultFor(state, method, payload) {
     const { header, template } = state;
     const powAlgo = Number(payload?.params?.algo?.pow_algo) || 0;
@@ -122,8 +130,7 @@ function resultFor(state, method, payload) {
 const argv = process.argv.slice(2);
 const invokedAs = path.basename(process.argv[1]);
 if (invokedAs === "monero-wallet-cli") { runWalletCli(argv); process.exit(0); }
-const defaultRole = { monerod: "monerod", "monero-wallet-rpc": "wallet-rpc" }[invokedAs] || "tari-proxy";
-const role = arg(argv, ["--role"], defaultRole);
+const role = arg(argv, ["--role"], inferDefaultRole(invokedAs, argv));
 const dataDir = arg(argv, ["--data-dir"], "/home/monerodaemon/.bitmonero");
 const defaultPort = role === "monerod"
     ? Number(process.env.POOL_DEPLOY_MONEROD_PORT || 18083)
