@@ -288,6 +288,45 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         assert.deepEqual(identifiers, [workerName, "rigOld"]);
     });
 
+    test("worker retains inactive identifiers and zeros stopped worker stats", async () => {
+        const now = 1710002401234;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const activeWorker = "rigActive";
+        const stoppedWorker = "rigStopped";
+        const stoppedKey = address + "_" + stoppedWorker;
+        const stoppedHistory = JSON.stringify({ hashHistory: [{ ts: now - 30 * 60 * 1000, hs: 50, hs2: 40 }] });
+        const state = createFakeEnvironment({
+            cacheEntries: [
+                ["minerSet", JSON.stringify({ [stoppedKey]: 1 })],
+                ["identifiers:" + address, JSON.stringify([stoppedWorker])],
+                [stoppedKey, JSON.stringify({ totalHashes: 100, goodShares: 4 })],
+                ["stats:" + stoppedKey, JSON.stringify({ hash: 50, hash2: 40, lastHash: now - 30 * 60 * 1000 })],
+                ["history:" + stoppedKey, stoppedHistory]
+            ],
+            shares: [
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: activeWorker,
+                        rawShares: 1200,
+                        shares2: 900,
+                        timestamp: now - 30 * 1000
+                    })
+                }
+            ]
+        });
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+
+        assert.deepEqual(JSON.parse(state.cacheStore.get("identifiers:" + address)), [activeWorker, stoppedWorker]);
+        assert.deepEqual(JSON.parse(state.cacheStore.get("stats:" + stoppedKey)), { hash: 0, hash2: 0, lastHash: now - 30 * 60 * 1000 });
+        assert.equal(state.cacheStore.get("history:" + stoppedKey), stoppedHistory);
+    });
+
     test("worker skips unchanged LMDB writes between identical non-history cycles", async () => {
         const now = 1710000000000;
         let fakeNow = now;

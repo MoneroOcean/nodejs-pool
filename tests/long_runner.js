@@ -272,6 +272,23 @@ test("cleanCacheDB prunes stale workers, orphan worker families, stale account h
     assert.equal(state.cacheStore.get("tiny_old"), JSON.stringify({ untouched: true }));
 });
 
+test("cleanCacheDB trims inactive identifiers while keeping recent workers", () => {
+    const now = Date.now();
+    const address = "4".repeat(95);
+    const state = createFakeEnvironment({
+        cacheEntries: [
+            ["identifiers:" + address, JSON.stringify(["old", "recent"])],
+            ["stats:" + address + "_old", JSON.stringify({ lastHash: now - 25 * 60 * 60 * 1000 })],
+            ["stats:" + address + "_recent", JSON.stringify({ lastHash: now - 23 * 60 * 60 * 1000 })]
+        ]
+    });
+    const longRunner = loadLongRunner();
+
+    longRunner.cleanCacheDB();
+
+    assert.deepEqual(JSON.parse(state.cacheStore.get("identifiers:" + address)), ["recent"]);
+});
+
 test("cleanCacheDB flushes large delete sets in multiple LMDB write transactions", () => {
     const now = Date.now();
     const address = "4".repeat(95);
