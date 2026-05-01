@@ -21,7 +21,7 @@ if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
 else
   retry_command apt-get -o Acquire::Retries=3 full-upgrade -y
 fi
-retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl openssl sudo ufw nginx git vim g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev mysql-server chromium-browser
+retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl openssl sudo ufw nginx git vim g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev mysql-server
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
@@ -92,24 +92,34 @@ server {
 	include /etc/letsencrypt/options-ssl-nginx.conf;
 	# Redirect non-https traffic to https
 	if (\$scheme != "https") {
-		return 301 https://$host$request_uri;
+		return 301 https://\$host\$request_uri;
 	}
 }
 
 server {
 	listen 443 ssl;
 	server_name $WWW_DNS;
-	root /var/www/mo/;
+	root /var/www/mo-pool-ui;
         index index.html;
 	gzip on;
-        add_header Content-Security-Policy "default-src 'none'; connect-src https://api.moneroocean.stream; font-src 'self'; img-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" always;
-        add_header X-Frame-Options "SAMEORIGIN" always;
+
+	location / {
+		try_files \$uri \$uri/ /index.html;
+	}
+
+        # The script-src hash allows mo-pool-ui's inline JSON-LD. If that block changes,
+        # rebuild mo-pool-ui and recompute with: ./csp-hash.sh build/index.html
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'sha256-yENZ47wxlUnKLykemLwcnbrHwUk86i6YedHpk5ZL0Kk='; style-src 'self'; img-src 'self' data:; connect-src https://$API_DNS https://stats.uptimerobot.com; font-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), clipboard-write=(self)" always;
 	ssl_certificate /etc/letsencrypt/live/$WWW_DNS/fullchain.pem;
 	ssl_certificate_key /etc/letsencrypt/live/$WWW_DNS/privkey.pem;
 	include /etc/letsencrypt/options-ssl-nginx.conf;
 	# Redirect non-https traffic to https
 	if (\$scheme != "https") {
-		return 301 https://;
+		return 301 https://\$host\$request_uri;
 	}
 }
 EOF
@@ -253,11 +263,11 @@ pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z
 pm2 save
 sudo env PATH=\$PATH:/home/user/.nvm/versions/node/\$NODEJS_VERSION/bin /home/user/.nvm/versions/node/\$NODEJS_VERSION/lib/node_modules/pm2/bin/pm2 startup systemd -u user --hp /home/user
 cd /home/user
-retry_command git clone https://github.com/MoneroOcean/moneroocean-gui.git
-cd moneroocean-gui
-retry_command npm install -g uglifycss uglify-js html-minifier
-retry_command npm install -D critical@latest
+retry_command git clone https://github.com/MoneroOcean/mo-pool-ui.git
+cd mo-pool-ui
+retry_command npm install
+retry_command npm run build
 EOF
 ) | su user -l
 
-echo 'Now logout server, logging again under "user" account and run ~/moneroocean-gui/build.sh to build web site'
+echo 'Frontend is installed in /home/user/mo-pool-ui and deployed to /var/www/mo-pool-ui. To rebuild it later, log in as "user" and run: cd ~/mo-pool-ui && npm install && npm run build'

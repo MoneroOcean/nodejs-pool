@@ -17,7 +17,7 @@ Node.js mining pool backend with LMDB share storage, MySQL-backed configuration,
 
 `nodejs-pool` is the backend used for MoneroOcean-style mining pool deployments. It keeps share state in LMDB, stores configuration and accounting in MySQL, and splits runtime responsibilities into small services that can be scaled or restarted independently.
 
-The backend is typically paired with a separate website/frontend. The reference deployment uses a static frontend and points it at the API service exposed by this repo.
+The backend is typically paired with the static [`mo-pool-ui`](https://github.com/MoneroOcean/mo-pool-ui) frontend and points it at the API service exposed by this repo.
 
 ## Service Layout
 
@@ -79,6 +79,8 @@ pm2 save
 | Path | Purpose |
 | --- | --- |
 | `/home/user/nodejs-pool/config.json` | Main local runtime config |
+| `/home/user/mo-pool-ui/` | Static frontend source checkout |
+| `/var/www/mo-pool-ui/` | Built frontend served by Nginx |
 | `/home/user/pool_db/` | LMDB share database |
 | `/home/user/wallets/` | Generated XMR pool and fee wallet files |
 | `/root/mysql_pass` | MySQL root password created by the installer |
@@ -112,6 +114,7 @@ npm test
 ## Operational Notes
 
 - The deploy script starts most services for you, but leaves `pool` to be started after config review.
+- To redeploy the frontend after a UI update, run `cd ~/mo-pool-ui && npm install && npm run build` as the `user` account.
 - The default SQL schema is XMR-oriented; adapt SQL-backed config if you are building for something else.
 - Mining ports are not hardcoded in `config.json`; they are read from MySQL table `pool.port_config`.
 - If LMDB appears stuck or the API stops moving, start with `mdb_stat -fear ~/pool_db/` and then review PM2 service state.
