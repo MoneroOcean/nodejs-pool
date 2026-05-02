@@ -134,7 +134,7 @@ systemctl daemon-reload
 systemctl restart nginx
 retry_command git clone https://github.com/monero-project/monero.git /usr/local/src/monero
 cd /usr/local/src/monero
-git checkout v0.18.4.5
+git checkout v0.18.4.6
 retry_command git submodule update --init
 USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
 
