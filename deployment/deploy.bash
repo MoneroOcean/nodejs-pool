@@ -9,7 +9,6 @@ TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.0}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
-TARI_EXTERNAL_IP="${TARI_EXTERNAL_IP:-}"
 TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -20,9 +19,22 @@ if [ "$#" -gt 0 ]; then
   echo "Please configure deploy.bash with environment variables: WWW_DNS, API_DNS, CF_DNS_API_TOKEN, CERTBOT_EMAIL"
   exit 1
 fi
+if [ -n "${TARI_EXTERNAL_IP+x}" ]; then
+  echo "deploy.bash does not support TARI_EXTERNAL_IP; it is only for leaf.bash external base node gRPC"
+  exit 1
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
+
+clone_repo_once() {
+  local repo="$1"
+  local dest="$2"
+  if [ -d "$dest/.git" ]; then
+    return 0
+  fi
+  retry_command git clone "$repo" "$dest"
+}
 
 tari_release_arch() {
   case "${TARI_RELEASE_ARCH:-$(uname -m)}" in
@@ -57,6 +69,12 @@ PY
 
 install_tari_suite() {
   local tmp_zip release_url
+  if [ -x "$TARI_INSTALL_DIR/minotari_node" ] && [ -x "$TARI_INSTALL_DIR/minotari_merge_mining_proxy" ]; then
+    if [ ! -f /home/monerodaemon/.tari/mainnet/config/config.toml ]; then
+      sudo -u monerodaemon env HOME=/home/monerodaemon "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
+    fi
+    return 0
+  fi
   rm -rf "$TARI_INSTALL_DIR"
   install -d "$TARI_INSTALL_DIR"
   tmp_zip="$(mktemp)"
@@ -74,9 +92,6 @@ patch_tari_config() {
   local args=("$config" "--no-backup")
   retry_command curl -fsSL -o "$patcher" "$TARI_CONFIG_PATCH_URL"
   chmod 755 "$patcher"
-  if [ -n "$TARI_EXTERNAL_IP" ]; then
-    args+=("--external-ip" "$TARI_EXTERNAL_IP")
-  fi
   args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
   "$patcher" "${args[@]}"
   chown monerodaemon:monerodaemon "$config"
@@ -139,7 +154,9 @@ fi
 echo "dns_cloudflare_api_token=$CF_DNS_API_TOKEN" >/root/dns_cloudflare_api_token.ini
 chmod 600 /root/dns_cloudflare_api_token.ini
 for dns in "$WWW_DNS" "$API_DNS"; do
-  certbot certonly --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --dns-cloudflare --dns-cloudflare-propagation-seconds 30 --dns-cloudflare-credentials /root/dns_cloudflare_api_token.ini -d "$dns"
+  if [ ! -f "/etc/letsencrypt/live/$dns/fullchain.pem" ]; then
+    certbot certonly --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --dns-cloudflare --dns-cloudflare-propagation-seconds 30 --dns-cloudflare-credentials /root/dns_cloudflare_api_token.ini -d "$dns"
+  fi
 done
 cat >/etc/nginx/sites-enabled/default <<EOF
 server {
@@ -209,23 +226,32 @@ EOF
 chown -R www-data:www-data /var/www
 chmod g+s /var/www
 systemctl restart nginx
-retry_command git clone https://github.com/monero-project/monero.git /usr/local/src/monero
+clone_repo_once https://github.com/monero-project/monero.git /usr/local/src/monero
 cd /usr/local/src/monero
-git checkout v0.18.4.6
-retry_command git submodule update --init
-USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
+if [ ! -x /usr/local/src/monero/build/release/bin/monerod ]; then
+  git checkout v0.18.4.6
+  retry_command git submodule update --init
+  USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
+fi
 
 (cat <<EOF
 set -ex
 mkdir -p ~/wallets
 cd ~/wallets
-echo pass >~/wallets/wallet_pass
-echo 1 | /usr/local/src/monero/build/release/bin/monero-wallet-cli --offline --create-address-file --generate-new-wallet ~/wallets/wallet --password-file ~/wallets/wallet_pass --command address
-echo 1 | /usr/local/src/monero/build/release/bin/monero-wallet-cli --offline --create-address-file --generate-new-wallet ~/wallets/wallet_fee --password-file ~/wallets/wallet_pass --command address
+test -f ~/wallets/wallet_pass || echo pass >~/wallets/wallet_pass
+if [ ! -f ~/wallets/wallet.address.txt ]; then
+  echo 1 | /usr/local/src/monero/build/release/bin/monero-wallet-cli --offline --create-address-file --generate-new-wallet ~/wallets/wallet --password-file ~/wallets/wallet_pass --command address
+fi
+if [ ! -f ~/wallets/wallet_fee.address.txt ]; then
+  echo 1 | /usr/local/src/monero/build/release/bin/monero-wallet-cli --offline --create-address-file --generate-new-wallet ~/wallets/wallet_fee --password-file ~/wallets/wallet_pass --command address
+fi
 EOF
 ) | su user -l
 echo; echo; echo
-read -p "*** Write down your seeds for wallet and wallet_fee listed above and press ENTER to continue ***"
+if [ ! -f /root/.moneroocean-wallet-seeds-confirmed ]; then
+  read -p "*** Write down your seeds for wallet and wallet_fee listed above and press ENTER to continue ***"
+  touch /root/.moneroocean-wallet-seeds-confirmed
+fi
 
 cat >/lib/systemd/system/monero.service <<'EOF'
 [Unit]
@@ -245,7 +271,7 @@ EOF
 
 id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
 install_tari_suite
-retry_command git clone https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
+clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
 patch_tari_config
 
 cat >/lib/systemd/system/xtm.service <<'EOF'
@@ -337,7 +363,9 @@ systemctl restart mysql
 (cat <<EOF
 set -ex
 $(declare -f retry_command)
-retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
+if [ ! -f /home/user/.nvm/nvm.sh ]; then
+  retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
+fi
 source /home/user/.nvm/nvm.sh
 retry_command nvm install $NODEJS_VERSION
 NODEJS_VERSION="\$(nvm version "$NODEJS_VERSION")"
@@ -346,51 +374,70 @@ test -x /usr/bin/node || sudo ln -s "\$(command -v node)" /usr/bin/node
 test -x /usr/bin/npm || sudo ln -s "\$(command -v npm)" /usr/bin/npm
 sudo chown -R user:user /usr/local/src/grpc-json-proxy
 cd /usr/local/src/grpc-json-proxy
-retry_command npm install --omit=dev
+if [ ! -d node_modules ]; then
+  retry_command npm install --omit=dev
+fi
 cd /home/user
-retry_command git clone https://github.com/MoneroOcean/nodejs-pool.git
+if [ ! -d /home/user/nodejs-pool/.git ]; then
+  retry_command git clone https://github.com/MoneroOcean/nodejs-pool.git
+fi
 cd /home/user/nodejs-pool
-JOBS=$(nproc) retry_command npm install
+if [ ! -d node_modules ]; then
+  JOBS=$(nproc) retry_command npm install
+fi
 command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2
 retry_command pm2 install pm2-logrotate
-openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
+if [ ! -f cert.key ] || [ ! -f cert.pem ]; then
+  openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
+fi
 # install lmdb tools
 ( cd /home/user
-  rm -rf node-lmdb
-  retry_command git clone https://github.com/Venemo/node-lmdb.git
+  if [ ! -d node-lmdb/.git ]; then
+    retry_command git clone https://github.com/Venemo/node-lmdb.git
+  fi
   cd node-lmdb
   git checkout c3135a3809da1d64ce1f0956b37b618711e33519
   cd dependencies/lmdb/libraries/liblmdb
-  make -j $(nproc)
+  test -x mdb_copy || make -j $(nproc)
   mkdir -p /home/user/.bin
-  echo >>/home/user/.bashrc
-  echo 'export PATH=/home/user/.bin:$PATH' >>/home/user/.bashrc
+  grep -Fq 'export PATH=/home/user/.bin:$PATH' /home/user/.bashrc || {
+    echo >>/home/user/.bashrc
+    echo 'export PATH=/home/user/.bin:$PATH' >>/home/user/.bashrc
+  }
   for i in mdb_copy mdb_dump mdb_load mdb_stat; do cp \$i /home/user/.bin/; done
 )
 mkdir -p /home/user/pool_db
-sed -r 's#("db_storage_path": ).*#\1"/home/user/pool_db/",#' config_example.json >config.json
-$USER_SQL_CMD <deployment/base.sql
-$USER_SQL_CMD -e "INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'authKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Auth key sent with all Websocket frames for validation.')"
-$USER_SQL_CMD -e "INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'secKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Secret key for signing miner email unsubscribe links.')"
+if [ ! -f config.json ]; then
+  sed -r 's#("db_storage_path": ).*#\1"/home/user/pool_db/",#' config_example.json >config.json
+fi
+if ! $USER_SQL_CMD -e "USE pool" >/dev/null 2>&1; then
+  $USER_SQL_CMD <deployment/base.sql
+fi
+$USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'authKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Auth key sent with all Websocket frames for validation.')"
+$USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'secKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Secret key for signing miner email unsubscribe links.')"
 $USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet.address.txt)' WHERE module = 'pool' and item = 'address';"
 $USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet_fee.address.txt)' WHERE module = 'payout' and item = 'feeAddress';"
-pm2 start init.js --name=api --log-date-format="YYYY-MM-DD HH:mm Z" -- --module=api
-pm2 start /usr/local/src/monero/build/release/bin/monero-wallet-rpc -- --rpc-bind-port 18082 --password-file /home/user/wallets/wallet_pass --wallet-file /home/user/wallets/wallet --trusted-daemon --disable-rpc-login
+pm2 describe api >/dev/null 2>&1 || pm2 start init.js --name=api --log-date-format="YYYY-MM-DD HH:mm Z" -- --module=api
+pm2 describe monero-wallet-rpc >/dev/null 2>&1 || pm2 start /usr/local/src/monero/build/release/bin/monero-wallet-rpc -- --rpc-bind-port 18082 --password-file /home/user/wallets/wallet_pass --wallet-file /home/user/wallets/wallet --trusted-daemon --disable-rpc-login
 sleep 30
-pm2 start init.js --name=block_manager --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z"  -- --module=block_manager
-pm2 start init.js --name=worker --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --node-args="--max_old_space_size=8192" -- --module=worker
-pm2 start init.js --name=payments --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --no-autorestart -- --module=payments
-pm2 start init.js --name=remote_share --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=remote_share
-pm2 start init.js --name=long_runner --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=long_runner
+pm2 describe block_manager >/dev/null 2>&1 || pm2 start init.js --name=block_manager --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z"  -- --module=block_manager
+pm2 describe worker >/dev/null 2>&1 || pm2 start init.js --name=worker --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --node-args="--max_old_space_size=8192" -- --module=worker
+pm2 describe payments >/dev/null 2>&1 || pm2 start init.js --name=payments --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --no-autorestart -- --module=payments
+pm2 describe remote_share >/dev/null 2>&1 || pm2 start init.js --name=remote_share --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=remote_share
+pm2 describe long_runner >/dev/null 2>&1 || pm2 start init.js --name=long_runner --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=long_runner
 #pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 sleep 20
-pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
+pm2 describe pool_stats >/dev/null 2>&1 || pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
 pm2 save
 sudo env PATH=\$PATH:/home/user/.nvm/versions/node/\$NODEJS_VERSION/bin /home/user/.nvm/versions/node/\$NODEJS_VERSION/lib/node_modules/pm2/bin/pm2 startup systemd -u user --hp /home/user
 cd /home/user
-retry_command git clone https://github.com/MoneroOcean/mo-pool-ui.git
+if [ ! -d /home/user/mo-pool-ui/.git ]; then
+  retry_command git clone https://github.com/MoneroOcean/mo-pool-ui.git
+fi
 cd mo-pool-ui
-retry_command npm install
+if [ ! -d node_modules ]; then
+  retry_command npm install
+fi
 retry_command npx playwright install --with-deps chromium
 retry_command npm run build
 EOF

@@ -16,6 +16,15 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
 
+clone_repo_once() {
+  local repo="$1"
+  local dest="$2"
+  if [ -d "$dest/.git" ]; then
+    return 0
+  fi
+  retry_command git clone "$repo" "$dest"
+}
+
 tari_release_arch() {
   case "${TARI_RELEASE_ARCH:-$(uname -m)}" in
     x86_64|amd64) echo x86_64 ;;
@@ -49,6 +58,12 @@ PY
 
 install_tari_suite() {
   local tmp_zip release_url
+  if [ -x "$TARI_INSTALL_DIR/minotari_node" ] && [ -x "$TARI_INSTALL_DIR/minotari_merge_mining_proxy" ]; then
+    if [ ! -f /home/monerodaemon/.tari/mainnet/config/config.toml ]; then
+      sudo -u monerodaemon env HOME=/home/monerodaemon "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
+    fi
+    return 0
+  fi
   rm -rf "$TARI_INSTALL_DIR"
   install -d "$TARI_INSTALL_DIR"
   tmp_zip="$(mktemp)"
@@ -66,7 +81,7 @@ patch_tari_config() {
   retry_command curl -fsSL -o "$patcher" "$TARI_CONFIG_PATCH_URL"
   chmod 755 "$patcher"
   if [ -n "$TARI_EXTERNAL_IP" ]; then
-    args+=("--external-ip" "$TARI_EXTERNAL_IP")
+    args+=("--base-node-grpc-ip" "$TARI_EXTERNAL_IP")
   fi
   args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
   "$patcher" "${args[@]}"
@@ -104,11 +119,13 @@ ufw --force enable
 
 printf 'colorscheme desert\nset fo-=ro\n' >/root/.vimrc
 install -m 644 -o user -g user /root/.vimrc /home/user/.vimrc
-retry_command git clone https://github.com/monero-project/monero.git /usr/local/src/monero
+clone_repo_once https://github.com/monero-project/monero.git /usr/local/src/monero
 cd /usr/local/src/monero
-git checkout v0.18.4.6
-retry_command git submodule update --init
-USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
+if [ ! -x /usr/local/src/monero/build/release/bin/monerod ]; then
+  git checkout v0.18.4.6
+  retry_command git submodule update --init
+  USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
+fi
 
 cat >/lib/systemd/system/monero.service <<'EOF'
 [Unit]
@@ -128,10 +145,13 @@ EOF
 
 id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
 install_tari_suite
-retry_command git clone https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
+if [ -z "$TARI_EXTERNAL_IP" ]; then
+  clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
+fi
 patch_tari_config
 
-cat >/lib/systemd/system/xtm.service <<'EOF'
+if [ -z "$TARI_EXTERNAL_IP" ]; then
+  cat >/lib/systemd/system/xtm.service <<'EOF'
 [Unit]
 Description=Tari Daemon
 After=network.target
@@ -146,6 +166,7 @@ CPUQuota=400%
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
 cat >/lib/systemd/system/xtm_mm.service <<'EOF'
 [Unit]
@@ -166,7 +187,11 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable monero xtm xtm_mm
+if [ -z "$TARI_EXTERNAL_IP" ]; then
+  systemctl enable monero xtm xtm_mm
+else
+  systemctl enable monero xtm_mm
+fi
 systemctl start monero
 
 sleep 30
@@ -179,25 +204,41 @@ echo "Monero daemon is synced"
 (cat <<EOF
 set -ex
 $(declare -f retry_command)
-retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
+if [ ! -f /home/user/.nvm/nvm.sh ]; then
+  retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
+fi
 source /home/user/.nvm/nvm.sh
 retry_command nvm install $NODEJS_VERSION
 NODEJS_VERSION="\$(nvm version "$NODEJS_VERSION")"
 nvm alias default "\$NODEJS_VERSION"
 test -x /usr/bin/node || sudo ln -s "\$(command -v node)" /usr/bin/node
 test -x /usr/bin/npm || sudo ln -s "\$(command -v npm)" /usr/bin/npm
-sudo chown -R user:user /usr/local/src/grpc-json-proxy
-cd /usr/local/src/grpc-json-proxy
-retry_command npm install --omit=dev
+if [ -d /usr/local/src/grpc-json-proxy ]; then
+  sudo chown -R user:user /usr/local/src/grpc-json-proxy
+  cd /usr/local/src/grpc-json-proxy
+  if [ ! -d node_modules ]; then
+    retry_command npm install --omit=dev
+  fi
+fi
 cd /home/user
-retry_command git clone https://github.com/MoneroOcean/nodejs-pool.git
+if [ ! -d /home/user/nodejs-pool/.git ]; then
+  retry_command git clone https://github.com/MoneroOcean/nodejs-pool.git
+fi
 cd /home/user/nodejs-pool
-JOBS=$(nproc) retry_command npm install
+if [ ! -d node_modules ]; then
+  JOBS=$(nproc) retry_command npm install
+fi
 command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2
 retry_command pm2 install pm2-logrotate
-openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
+if [ ! -f cert.key ] || [ ! -f cert.pem ]; then
+  openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
+fi
 #pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 EOF
 ) | su user -l
 
-systemctl start xtm xtm_mm
+if [ -z "$TARI_EXTERNAL_IP" ]; then
+  systemctl start xtm xtm_mm
+else
+  systemctl start xtm_mm
+fi

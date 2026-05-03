@@ -156,6 +156,10 @@ case "$cmd" in
             write_fake_tari_zip "$output"
             exit 0
         fi
+        if [[ "$url" == https://api.ipify.org ]]; then
+            printf '127.0.0.1'
+            exit 0
+        fi
         exec /usr/bin/curl "${original_args[@]}"
         ;;
     git)

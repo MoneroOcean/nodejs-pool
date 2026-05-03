@@ -345,15 +345,12 @@ async function verifyLeafInstall(context) {
     await verifyRequiredFiles(context, "leaf checks", [
         "/home/user/nodejs-pool/init.js", "/home/user/nodejs-pool/cert.pem",
         "/home/user/nodejs-pool/cert.key", "/lib/systemd/system/monero.service",
-        "/lib/systemd/system/xtm.service", "/lib/systemd/system/xtm_mm.service",
+        "/lib/systemd/system/xtm_mm.service",
         "/usr/local/src/tari/minotari_node", "/usr/local/src/tari/minotari_merge_mining_proxy",
-        "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
-        "/usr/local/src/grpc-json-proxy/base_node.proto",
-        "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
         "/home/monerodaemon/.tari/mainnet/config/config.toml"
     ]);
-    await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm");
-    await appendCheckLog(context, "verified Tari install does not create xtm compatibility path");
+    await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /lib/systemd/system/xtm.service && test ! -e /usr/local/src/grpc-json-proxy");
+    await appendCheckLog(context, "verified TARI_EXTERNAL_IP skips local Tari base node service");
     await execInContainer(context.containerName, [
         "grep -q 'grpc_enabled = true' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
@@ -363,7 +360,7 @@ async function verifyLeafInstall(context) {
         "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'submit_to_origin = false' /home/monerodaemon/.tari/mainnet/config/config.toml"
     ].join(" && "));
-    await appendCheckLog(context, "verified patched Tari config");
+    await appendCheckLog(context, "verified patched Tari merge mining config");
     await execInContainer(context.containerName, "su user -l -c '. ~/.nvm/nvm.sh >/dev/null 2>&1; command -v pm2'");
     await appendCheckLog(context, "verified pm2 installation");
 
