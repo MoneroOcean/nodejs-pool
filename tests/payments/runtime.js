@@ -467,4 +467,46 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         assert.equal(sentEmails.some(function matchSubject(entry) { return entry.subject === "Payment runtime fail-stop"; }), true);
         await runtime.stop();
     });
+
+    test("runtime clears dead advisory-lock connection after fatal lock-check error", async () => {
+        let lockChecks = 0;
+        const sharedMysql = createFakeMysql({
+            failures: [{
+                once: true,
+                match(sql) {
+                    if (sql !== "SELECT IS_USED_LOCK(?) AS owner_id") return false;
+                    lockChecks += 1;
+                    return lockChecks > 1;
+                },
+                error: new Error("Cannot enqueue Query after fatal error.")
+            }]
+        });
+        const clock = createClock();
+        const sentEmails = [];
+        const support = createSupport(clock, sentEmails);
+        const wallet = createWallet();
+        support.rpcWallet = wallet.rpcWallet;
+        const database = { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
+        const payments = loadPaymentsModule();
+        const runtime = payments.createPaymentsRuntime({
+            clearTimeout,
+            config: createConfig(),
+            database,
+            mysql: sharedMysql,
+            now: clock.now.bind(clock),
+            setTimeout,
+            support
+        });
+
+        await runtime.runCycle();
+        const result = await runtime.runCycle();
+
+        assert.equal(result.clean, false);
+        assert.equal(runtime.inspectState().isFailStop, true);
+        assert.match(runtime.inspectState().failStopReason, /advisory lock check failed: Error: Cannot enqueue Query after fatal error\./);
+        assert.equal(runtime.inspectState().lockConnectionId, null);
+        assert.equal(sharedMysql.state.state.releaseCount, 1);
+        assert.equal(sharedMysql.state.locks.has("nodejs-pool:payments"), false);
+        await runtime.stop();
+    });
 });

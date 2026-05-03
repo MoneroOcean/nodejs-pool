@@ -15,6 +15,15 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
 
+install -d -m 755 /etc/needrestart/conf.d
+cat >/etc/needrestart/conf.d/moneroocean-critical.conf <<'EOF'
+# Keep unattended package maintenance from restarting pool-critical services.
+# Operators should restart these deliberately during a maintenance window.
+$nrconf{override_rc}->{qr(^mysql\.service$)} = 0;
+$nrconf{override_rc}->{qr(^pm2-user\.service$)} = 0;
+$nrconf{override_rc}->{qr(^monero\.service$)} = 0;
+EOF
+
 retry_command apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update
 if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
   echo "Skipping apt full-upgrade in test mode"
