@@ -56,8 +56,10 @@ Run the installer as `root`:
 
 ```bash
 curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/deploy.bash | \
-bash -x -s -- pool.example.com api.pool.example.com "Cloudflare API Token" ops@example.com
+WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudflare API Token" CERTBOT_EMAIL=ops@example.com bash -x
 ```
+
+`WWW_DNS`, `API_DNS`, and `CERTBOT_EMAIL` default to the MoneroOcean production values if omitted. Set them explicitly for any non-production install.
 
 When the script finishes:
 

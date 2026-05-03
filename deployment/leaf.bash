@@ -1,6 +1,12 @@
 #!/bin/bash -ex
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
+TARI_RELEASE_URL="${TARI_RELEASE_URL:-https://github.com/tari-project/tari/releases/download/v5.3.0/tari_suite-5.3.0-mainnet-0b9fc3b-linux-x86_64.zip}"
+TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
+TARI_COMPAT_DIR="${TARI_COMPAT_DIR:-/usr/local/src/xtm}"
+TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
+TARI_EXTERNAL_IP="${TARI_EXTERNAL_IP:-}"
+TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -9,6 +15,31 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
+install_tari_suite() {
+  rm -rf "$TARI_INSTALL_DIR"
+  install -d "$TARI_INSTALL_DIR"
+  tmp_zip="$(mktemp)"
+  retry_command curl -fsSL -o "$tmp_zip" "$TARI_RELEASE_URL"
+  unzip -q "$tmp_zip" -d "$TARI_INSTALL_DIR"
+  rm -f "$tmp_zip"
+  chmod 755 "$TARI_INSTALL_DIR"/minotari_*
+  sudo -u monerodaemon env HOME=/home/monerodaemon "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
+  rm -rf "$TARI_COMPAT_DIR"
+  ln -s "$TARI_INSTALL_DIR" "$TARI_COMPAT_DIR"
+}
+patch_tari_config() {
+  local patcher="/usr/local/src/patch-tari-config.sh"
+  local config="/home/monerodaemon/.tari/mainnet/config/config.toml"
+  local args=("$config" "--no-backup")
+  retry_command curl -fsSL -o "$patcher" "$TARI_CONFIG_PATCH_URL"
+  chmod 755 "$patcher"
+  if [ -n "$TARI_EXTERNAL_IP" ]; then
+    args+=("--external-ip" "$TARI_EXTERNAL_IP")
+  fi
+  args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
+  "$patcher" "${args[@]}"
+  chown monerodaemon:monerodaemon "$config"
+}
 
 retry_command apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update
 if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
@@ -16,7 +47,7 @@ if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
 else
   retry_command apt-get -o Acquire::Retries=3 full-upgrade -y
 fi
-retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl openssl sudo ufw git vim g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev
+retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl openssl sudo ufw git vim unzip python3 g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
@@ -64,8 +95,46 @@ WantedBy=multi-user.target
 EOF
 
 id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
+install_tari_suite
+retry_command git clone https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
+patch_tari_config
+
+cat >/lib/systemd/system/xtm.service <<'EOF'
+[Unit]
+Description=Tari Daemon
+After=network.target
+
+[Service]
+ExecStart=/bin/bash -c "(sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142) & (sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142) & /usr/local/src/xtm/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
+Restart=always
+User=monerodaemon
+Nice=10
+CPUQuota=400%
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat >/lib/systemd/system/xtm_mm.service <<'EOF'
+[Unit]
+Description=Tari Merge Mining Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/local/src/xtm/minotari_merge_mining_proxy --non-interactive-mode
+Restart=always
+RestartSec=3s
+StartLimitBurst=0
+User=monerodaemon
+Nice=10
+CPUQuota=400%
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
-systemctl enable monero
+systemctl enable monero xtm xtm_mm
 systemctl start monero
 
 sleep 30
@@ -84,6 +153,11 @@ retry_command nvm install $NODEJS_VERSION
 NODEJS_VERSION="\$(nvm version "$NODEJS_VERSION")"
 nvm alias default "\$NODEJS_VERSION"
 test -x /usr/bin/node || sudo ln -s "\$(command -v node)" /usr/bin/node
+test -x /usr/bin/npm || sudo ln -s "\$(command -v npm)" /usr/bin/npm
+sudo chown -R user:user /usr/local/src/grpc-json-proxy
+cd /usr/local/src/grpc-json-proxy
+retry_command npm install --omit=dev
+cd /home/user
 retry_command git clone https://github.com/MoneroOcean/nodejs-pool.git
 cd /home/user/nodejs-pool
 JOBS=$(nproc) retry_command npm install
@@ -93,3 +167,5 @@ openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey 
 #pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 EOF
 ) | su user -l
+
+systemctl start xtm xtm_mm

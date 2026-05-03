@@ -1,14 +1,17 @@
 #!/bin/bash -ex
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
-
-WWW_DNS="${1:-moneroocean.stream}"
-API_DNS="${2:-api.moneroocean.stream}"
-CF_DNS_API_TOKEN="${3:-n/a}"
-CERTBOT_EMAIL="${4:-support@moneroocean.stream}"
+WWW_DNS="${WWW_DNS:-moneroocean.stream}"
+API_DNS="${API_DNS:-api.moneroocean.stream}"
+CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN:-n/a}"
+CERTBOT_EMAIL="${CERTBOT_EMAIL:-support@moneroocean.stream}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
+  exit 1
+fi
+if [ "$#" -gt 0 ]; then
+  echo "Please configure deploy.bash with environment variables: WWW_DNS, API_DNS, CF_DNS_API_TOKEN, CERTBOT_EMAIL"
   exit 1
 fi
 
@@ -139,7 +142,6 @@ server {
 EOF
 chown -R www-data:www-data /var/www
 chmod g+s /var/www
-systemctl daemon-reload
 systemctl restart nginx
 retry_command git clone https://github.com/monero-project/monero.git /usr/local/src/monero
 cd /usr/local/src/monero
@@ -280,6 +282,7 @@ cd /home/user
 retry_command git clone https://github.com/MoneroOcean/mo-pool-ui.git
 cd mo-pool-ui
 retry_command npm install
+retry_command npx playwright install --with-deps chromium
 retry_command npm run build
 EOF
 ) | su user -l

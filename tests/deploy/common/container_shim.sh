@@ -32,7 +32,132 @@ start_fake_chain() {
     nohup /usr/bin/node /workspace/repo/tests/deploy/common/fake_monerod.js "${args[@]}" >"/tmp/codex-${role}.log" 2>&1 &
 }
 
+write_fake_tari_zip() {
+    local dest="$1"
+    OUT="$dest" /usr/bin/node <<'NODE'
+const fs = require("node:fs");
+
+const configToml = String.raw`[base_node]
+grpc_enabled = false
+grpc_address = "/ip4/127.0.0.1/tcp/18142"
+grpc_server_allow_methods = [
+  # "GetTipInfo",
+  # "GetHeaderByHash",
+  # "GetBlocks",
+  # "GetNewBlockTemplateWithCoinbases",
+  # "SubmitBlock",
+]
+use_libtor = true
+
+[base_node.storage]
+pruning_horizon = 0
+pruning_interval = 0
+
+[base_node.p2p]
+public_addresses = []
+
+[base_node.p2p.transport]
+type = "tor"
+tcp.listener_address = "/ip4/127.0.0.1/tcp/18189"
+
+[wallet]
+grpc_enabled = false
+grpc_address = "/ip4/127.0.0.1/tcp/18143"
+use_libtor = true
+
+[merge_mining_proxy]
+use_dynamic_fail_data = true
+base_node_grpc_address = "http://127.0.0.1:18142"
+listener_address = "/ip4/127.0.0.1/tcp/18081"
+submit_to_origin = true
+wallet_payment_address = ""
+`;
+const minotariNode = `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "--init" ]; then
+    config_dir="\${HOME:-/home/monerodaemon}/.tari/mainnet/config"
+    mkdir -p "$config_dir"
+    cat >"$config_dir/config.toml" <<'CONFIG'
+${configToml}CONFIG
+    exit 0
+  fi
+done
+sleep 3600
+`;
+const entries = {
+    minotari_node: minotariNode,
+    minotari_merge_mining_proxy: "#!/bin/sh\nsleep 3600\n"
+};
+
+const crcTable = new Uint32Array(256);
+for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crcTable[n] = c >>> 0;
+}
+function crc32(buffer) {
+    let crc = 0xffffffff;
+    for (const byte of buffer) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+}
+function u16(value) { const b = Buffer.alloc(2); b.writeUInt16LE(value); return b; }
+function u32(value) { const b = Buffer.alloc(4); b.writeUInt32LE(value); return b; }
+
+const localParts = [];
+const centralParts = [];
+let offset = 0;
+for (const [name, content] of Object.entries(entries)) {
+    const nameBuffer = Buffer.from(name);
+    const data = Buffer.from(content);
+    const crc = crc32(data);
+    const local = Buffer.concat([
+        u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc),
+        u32(data.length), u32(data.length), u16(nameBuffer.length), u16(0), nameBuffer, data
+    ]);
+    localParts.push(local);
+    centralParts.push(Buffer.concat([
+        u32(0x02014b50), u16(0x031e), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc),
+        u32(data.length), u32(data.length), u16(nameBuffer.length), u16(0), u16(0), u16(0), u16(0),
+        u32(0), u32(offset), nameBuffer
+    ]));
+    offset += local.length;
+}
+const central = Buffer.concat(centralParts);
+const end = Buffer.concat([
+    u32(0x06054b50), u16(0), u16(0), u16(centralParts.length), u16(centralParts.length),
+    u32(central.length), u32(offset), u16(0)
+]);
+fs.writeFileSync(process.env.OUT, Buffer.concat([...localParts, central, end]));
+NODE
+}
+
 case "$cmd" in
+    curl)
+        original_args=("$@")
+        output=""
+        url=""
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                -o)
+                    output="${2:-}"
+                    shift 2
+                    ;;
+                http://*|https://*|file://*)
+                    url="$1"
+                    shift
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        if [[ "$url" == https://github.com/tari-project/tari/releases/download/*/tari_suite-*-linux-x86_64.zip ]]; then
+            test -n "$output" || { echo "fake Tari curl requires -o" >&2; exit 1; }
+            write_fake_tari_zip "$output"
+            exit 0
+        fi
+        exec /usr/bin/curl "${original_args[@]}"
+        ;;
     git)
         if [[ "${1:-}" == "clone" ]]; then
             url="${2:-}"

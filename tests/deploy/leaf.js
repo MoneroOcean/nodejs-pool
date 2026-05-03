@@ -120,7 +120,7 @@ async function ensureRunnerImage(distro, buildLog) {
         " && rm -rf /var/lib/apt/lists/*",
         "COPY container_shim.sh /usr/local/bin/codex-container-shim",
         "RUN chmod 755 /usr/local/bin/codex-container-shim \\",
-        ...["certbot", "git", "service", "systemctl", "timedatectl", "ufw"]
+        ...["certbot", "curl", "git", "service", "systemctl", "timedatectl", "ufw"]
             .map((name, index, links) => (
                 ` && ln -sf /usr/local/bin/codex-container-shim /usr/local/bin/${name}${index + 1 === links.length ? "" : " \\"}`
             ))
@@ -160,6 +160,7 @@ async function collectDiagnostics(context) {
     await appendCheckData(context, "collecting diagnostics", {
         containerInspect: "container-inspect.json", leafPoolLog: "leaf-pool.log",
         monerodLog: "monerod-log.txt", pm2Logs: "pm2-logs.txt",
+        tariConfig: "tari-config.toml",
         ports: "ports.txt", processes: "processes.txt"
     });
     await runCommand("docker", ["inspect", context.containerName], { check: false, logFile: artifactPath(context, "container-inspect.json") });
@@ -168,6 +169,7 @@ async function collectDiagnostics(context) {
         ["ports.txt", "command -v ss >/dev/null 2>&1 && ss -ltnp || true"],
         ["pm2-logs.txt", "if [ -d /home/user/.pm2/logs ]; then for file in /home/user/.pm2/logs/*; do echo \"=== $file ===\"; tail -n 200 \"$file\"; done; fi"],
         ["monerod-log.txt", "if [ -f /home/monerodaemon/.bitmonero/bitmonero.log ]; then tail -n 200 /home/monerodaemon/.bitmonero/bitmonero.log; fi"],
+        ["tari-config.toml", "if [ -f /home/monerodaemon/.tari/mainnet/config/config.toml ]; then cat /home/monerodaemon/.tari/mainnet/config/config.toml; fi"],
         ["leaf-pool.log", "if [ -f /home/user/nodejs-pool/.codex-pool.out ] || [ -f /home/user/nodejs-pool/.codex-pool.err ]; then for file in /home/user/nodejs-pool/.codex-pool.out /home/user/nodejs-pool/.codex-pool.err; do [ -f \"$file\" ] || continue; echo \"=== $file ===\"; tail -n 200 \"$file\"; done; fi"]
     ]) await execInContainer(context.containerName, command, { check: false, logFile: artifactPath(context, file) });
 }
@@ -342,8 +344,25 @@ fs.writeFileSync("/home/user/nodejs-pool/config.json", JSON.stringify(config, nu
 async function verifyLeafInstall(context) {
     await verifyRequiredFiles(context, "leaf checks", [
         "/home/user/nodejs-pool/init.js", "/home/user/nodejs-pool/cert.pem",
-        "/home/user/nodejs-pool/cert.key", "/lib/systemd/system/monero.service"
+        "/home/user/nodejs-pool/cert.key", "/lib/systemd/system/monero.service",
+        "/lib/systemd/system/xtm.service", "/lib/systemd/system/xtm_mm.service",
+        "/usr/local/src/tari/minotari_node", "/usr/local/src/tari/minotari_merge_mining_proxy",
+        "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
+        "/usr/local/src/grpc-json-proxy/base_node.proto",
+        "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
+        "/home/monerodaemon/.tari/mainnet/config/config.toml"
     ]);
+    await execInContainer(context.containerName, "test -L /usr/local/src/xtm && test \"$(readlink /usr/local/src/xtm)\" = /usr/local/src/tari");
+    await appendCheckLog(context, "verified xtm compatibility symlink");
+    await execInContainer(context.containerName, [
+        "grep -q 'grpc_enabled = true' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'public_addresses = \\[\"/ip4/127.0.0.1/tcp/18189\",\\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'submit_to_origin = false' /home/monerodaemon/.tari/mainnet/config/config.toml"
+    ].join(" && "));
+    await appendCheckLog(context, "verified patched Tari config");
     await execInContainer(context.containerName, "su user -l -c '. ~/.nvm/nvm.sh >/dev/null 2>&1; command -v pm2'");
     await appendCheckLog(context, "verified pm2 installation");
 
@@ -364,7 +383,8 @@ async function createContainer(context) {
         POOL_DEPLOY_MINOTARI_NODE_PORT: MINOTARI_NODE_PORT,
         POOL_DEPLOY_XTM_T_COMPAT_PORT: XTM_T_COMPAT_PORT,
         POOL_DEPLOY_XMR_POOL_ADDRESS: XMR_POOL_ADDRESS,
-        POOL_DEPLOY_XMR_FEE_ADDRESS: XMR_FEE_ADDRESS
+        POOL_DEPLOY_XMR_FEE_ADDRESS: XMR_FEE_ADDRESS,
+        TARI_EXTERNAL_IP: "127.0.0.1"
     };
     const args = [
         "run",
