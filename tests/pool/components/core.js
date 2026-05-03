@@ -535,4 +535,111 @@ test("server startup ignores legacy non-pplns port rows", async () => {
     assert.equal(netServers.length, 1);
     assert.deepEqual(listenCalls, [{ port: 39002, host: "127.0.0.1" }]);
 });
+
+test("server startup attempts every pplns port when no listen skip list is configured", async () => {
+    const listenCalls = [];
+    const state = {
+        threadName: "(Test) ",
+        activeConnectionsByIP: {},
+        activeConnectionsBySubnet: {},
+        activeMiners: new Map(),
+        activeMinerSockets: new Map(),
+        freeEthExtranonces: []
+    };
+
+    global.config = {
+        bind_ip: "127.0.0.1",
+        pplns: { enable: true }
+    };
+
+    const net = {
+        createServer() {
+            return {
+                once() {},
+                removeListener() {},
+                on() {},
+                listen(port, host, callback) {
+                    listenCalls.push({ port, host });
+                    callback();
+                }
+            };
+        }
+    };
+    const serverFactory = createServerFactory({
+        debug() {},
+        fs: require("node:fs"),
+        net,
+        tls: require("node:tls"),
+        state,
+        handleMinerData() {},
+        removeMiner() {}
+    });
+
+    const servers = await serverFactory.startPortServers([
+        { port: 80, portType: "pplns", ssl: false },
+        { port: 443, portType: "pplns", ssl: false },
+        { port: 39002, portType: "pplns", ssl: false }
+    ]);
+
+    assert.equal(servers.length, 3);
+    assert.deepEqual(listenCalls, [
+        { port: 80, host: "127.0.0.1" },
+        { port: 443, host: "127.0.0.1" },
+        { port: 39002, host: "127.0.0.1" }
+    ]);
+});
+
+test("server startup skips configured listen ports while keeping other pplns ports active", async () => {
+    const listenCalls = [];
+    const state = {
+        threadName: "(Test) ",
+        activeConnectionsByIP: {},
+        activeConnectionsBySubnet: {},
+        activeMiners: new Map(),
+        activeMinerSockets: new Map(),
+        freeEthExtranonces: []
+    };
+
+    global.config = {
+        bind_ip: "127.0.0.1",
+        pplns: { enable: true },
+        skipListenPorts: [80, 443]
+    };
+
+    const netServers = [];
+    const net = {
+        createServer() {
+            const server = {
+                once() {},
+                removeListener() {},
+                on() {},
+                listen(port, host, callback) {
+                    listenCalls.push({ port, host });
+                    callback();
+                }
+            };
+            netServers.push(server);
+            return server;
+        }
+    };
+    const serverFactory = createServerFactory({
+        debug() {},
+        fs: require("node:fs"),
+        net,
+        tls: require("node:tls"),
+        state,
+        handleMinerData() {},
+        removeMiner() {}
+    });
+
+    const servers = await serverFactory.startPortServers([
+        { port: 80, portType: "pplns", ssl: false },
+        { port: 443, portType: "pplns", ssl: false },
+        { port: 39002, portType: "pplns", ssl: false }
+    ]);
+
+    assert.equal(servers.length, 1);
+    assert.equal(netServers.length, 1);
+    assert.deepEqual(listenCalls, [{ port: 39002, host: "127.0.0.1" }]);
+});
 });

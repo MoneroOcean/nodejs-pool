@@ -6,6 +6,7 @@
   "hostname": "testpool.com",
   "db_storage_path": "CHANGEME",
   "verify_shares_host": null,
+  "skipListenPorts": [],
   "coin": "xmr",
   "mysql": {
     "connectionLimit": 20,
