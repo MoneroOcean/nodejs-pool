@@ -2,7 +2,6 @@
 set -euo pipefail
 
 SERVICE="${TOR_SERVICE:-tor@default.service}"
-STATE_DIR="${TOR_WATCHDOG_STATE_DIR:-/var/lib/tor-watchdog}"
 LOG_FILE="${TOR_WATCHDOG_LOG:-/var/log/tor-watchdog.log}"
 LOCK_FILE="${TOR_WATCHDOG_LOCK:-/run/tor-watchdog.lock}"
 FORCE_RESTART_SECONDS="${TOR_FORCE_RESTART_SECONDS:-21600}"
@@ -16,17 +15,16 @@ restart_tor() {
     local reason="$1"
     log "restarting ${SERVICE}: ${reason}"
     systemctl restart "$SERVICE"
-    printf '%s\n' "$(date +%s)" > "${STATE_DIR}/last_restart"
 }
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
-mkdir -p "$STATE_DIR"
 touch "$LOG_FILE"
 
 now="$(date +%s)"
 reason=""
+active_epoch=""
 
 if ! systemctl is-active --quiet "$SERVICE"; then
     reason="service is not active"
@@ -39,7 +37,6 @@ fi
 
 if [[ -z "$reason" ]]; then
     active_at="$(systemctl show -P ActiveEnterTimestamp "$SERVICE" 2>/dev/null || true)"
-    active_epoch=""
     if [[ -n "$active_at" && "$active_at" != "n/a" ]]; then
         active_epoch="$(date -d "$active_at" +%s 2>/dev/null || true)"
     fi
@@ -56,17 +53,6 @@ if [[ -n "$reason" ]]; then
     exit 0
 fi
 
-if [[ -r "${STATE_DIR}/last_restart" ]]; then
-    last_restart="$(tr -cd '0-9' < "${STATE_DIR}/last_restart")"
-else
-    last_restart="$now"
-    printf '%s\n' "$last_restart" > "${STATE_DIR}/last_restart"
-fi
-
-if [[ -z "$last_restart" ]]; then
-    last_restart=0
-fi
-
-if [[ $((now - last_restart)) -ge "$FORCE_RESTART_SECONDS" ]]; then
-    restart_tor "scheduled refresh after ${FORCE_RESTART_SECONDS}s"
+if [[ -n "$active_epoch" && $((now - active_epoch)) -ge "$FORCE_RESTART_SECONDS" ]]; then
+    restart_tor "scheduled refresh after ${FORCE_RESTART_SECONDS}s service runtime"
 fi
