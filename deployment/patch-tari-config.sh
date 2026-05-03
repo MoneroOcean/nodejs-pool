@@ -10,7 +10,7 @@ set -euo pipefail
 #   - uncomment every method already present in grpc_server_allow_methods
 #   - use_libtor = false
 # - [base_node.storage]
-#   - pruning_horizon = 100000
+#   - pruning_horizon = 10000
 #   - pruning_interval = 50
 # - [base_node.p2p]
 #   - public_addresses = ["/ip4/<external IPv4>/tcp/18189",]
@@ -243,7 +243,7 @@ set_value("base_node", "grpc_address", f'"/ip4/{grpc_bind}/tcp/18142"')
 uncomment_list_entries("base_node", "grpc_server_allow_methods")
 set_value("base_node", "use_libtor", "false")
 
-set_value("base_node.storage", "pruning_horizon", "100000")
+set_value("base_node.storage", "pruning_horizon", "10000")
 set_value("base_node.storage", "pruning_interval", "50")
 
 set_value("base_node.p2p", "public_addresses", f'["/ip4/{external_ip}/tcp/18189",]')

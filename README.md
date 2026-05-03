@@ -37,7 +37,7 @@ The backend is typically paired with the static [`mo-pool-ui`](https://github.co
 
 ### What You Need
 
-- A clean Ubuntu `24.04` x86_64 server
+- A clean Ubuntu `24.04` x86_64 or arm64 server
 - Root access for the initial installer run
 - Cloudflare-managed DNS for both the website hostname and API hostname
 - A Cloudflare API token with `Zone.Zone (Read)` and `Zone.DNS (Edit)`
@@ -60,6 +60,7 @@ WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudfla
 ```
 
 `WWW_DNS`, `API_DNS`, and `CERTBOT_EMAIL` default to the MoneroOcean production values if omitted. Set them explicitly for any non-production install.
+Set `TARI_RELEASE_TAG` to override the bundled Tari release tag; the scripts select the matching Linux x86_64 or arm64 binary for the host automatically.
 
 When the script finishes:
 
@@ -95,6 +96,8 @@ For a leaf-only install:
 ```bash
 curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash -x
 ```
+
+Set `TARI_RELEASE_TAG` before `bash -x` to use a different Tari release tag on leaf nodes.
 
 After install, update the leaf config so it points at the main pool infrastructure, then start the `pool` module on that node.
 

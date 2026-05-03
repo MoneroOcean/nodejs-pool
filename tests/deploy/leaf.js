@@ -357,6 +357,7 @@ async function verifyLeafInstall(context) {
     await execInContainer(context.containerName, [
         "grep -q 'grpc_enabled = true' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'pruning_horizon = 10000' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'public_addresses = \\[\"/ip4/127.0.0.1/tcp/18189\",\\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",

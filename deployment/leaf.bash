@@ -1,7 +1,8 @@
 #!/bin/bash -ex
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
-TARI_RELEASE_URL="${TARI_RELEASE_URL:-https://github.com/tari-project/tari/releases/download/v5.3.0/tari_suite-5.3.0-mainnet-0b9fc3b-linux-x86_64.zip}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.0}"
+TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
 TARI_COMPAT_DIR="${TARI_COMPAT_DIR:-/usr/local/src/xtm}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
@@ -15,11 +16,45 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
+
+tari_release_arch() {
+  case "${TARI_RELEASE_ARCH:-$(uname -m)}" in
+    x86_64|amd64) echo x86_64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *) echo "Unsupported Tari release architecture: ${TARI_RELEASE_ARCH:-$(uname -m)}" >&2; return 1 ;;
+  esac
+}
+
+tari_release_url() {
+  local arch version api_url
+  arch="$(tari_release_arch)"
+  version="${TARI_RELEASE_TAG#v}"
+  api_url="https://api.github.com/repos/tari-project/tari/releases/tags/$TARI_RELEASE_TAG"
+  python3 - "$api_url" "$version" "$TARI_NETWORK" "$arch" <<'PY'
+import json
+import re
+import sys
+import urllib.request
+
+api_url, version, network, arch = sys.argv[1:]
+with urllib.request.urlopen(api_url) as response:
+    release = json.load(response)
+pattern = re.compile(rf"^tari_suite-{re.escape(version)}-{re.escape(network)}-[^-]+-linux-{re.escape(arch)}\.zip$")
+matches = [asset for asset in release.get("assets", []) if pattern.match(asset.get("name", ""))]
+if len(matches) != 1:
+    names = ", ".join(asset.get("name", "") for asset in release.get("assets", []))
+    raise SystemExit(f"Expected one Tari {network} linux-{arch} asset for {version}, found {len(matches)}. Assets: {names}")
+print(matches[0]["browser_download_url"])
+PY
+}
+
 install_tari_suite() {
+  local tmp_zip release_url
   rm -rf "$TARI_INSTALL_DIR"
   install -d "$TARI_INSTALL_DIR"
   tmp_zip="$(mktemp)"
-  retry_command curl -fsSL -o "$tmp_zip" "$TARI_RELEASE_URL"
+  release_url="$(tari_release_url)"
+  retry_command curl -fsSL -o "$tmp_zip" "$release_url"
   unzip -q "$tmp_zip" -d "$TARI_INSTALL_DIR"
   rm -f "$tmp_zip"
   chmod 755 "$TARI_INSTALL_DIR"/minotari_*
@@ -84,7 +119,7 @@ Description=Monero Daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/local/src/monero/build/release/bin/monerod --hide-my-port --prune-blockchain --enable-dns-blocklist --no-zmq --out-peers 64 --non-interactive --restricted-rpc --block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'
+ExecStart=/usr/local/src/monero/build/release/bin/monerod --hide-my-port --prune-blockchain --enable-dns-blocklist --no-zmq --out-peers 64 --non-interactive --restricted-rpc --rpc-bind-port=18083 --block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'
 Restart=always
 User=monerodaemon
 Nice=10

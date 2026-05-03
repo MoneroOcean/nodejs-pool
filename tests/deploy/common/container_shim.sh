@@ -151,7 +151,7 @@ case "$cmd" in
                     ;;
             esac
         done
-        if [[ "$url" == https://github.com/tari-project/tari/releases/download/*/tari_suite-*-linux-x86_64.zip ]]; then
+        if [[ "$url" == https://github.com/tari-project/tari/releases/download/*/tari_suite-*-linux-*.zip ]]; then
             test -n "$output" || { echo "fake Tari curl requires -o" >&2; exit 1; }
             write_fake_tari_zip "$output"
             exit 0

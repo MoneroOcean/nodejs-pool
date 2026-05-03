@@ -120,7 +120,7 @@ async function ensureRunnerImage(distro, buildLog) {
         " && rm -rf /var/lib/apt/lists/*",
         "COPY container_shim.sh /usr/local/bin/codex-container-shim",
         "RUN chmod 755 /usr/local/bin/codex-container-shim \\",
-        ...["certbot", "git", "service", "systemctl", "timedatectl", "ufw"]
+        ...["certbot", "curl", "git", "service", "systemctl", "timedatectl", "ufw"]
             .map((name, index, links) => (
                 ` && ln -sf /usr/local/bin/codex-container-shim /usr/local/bin/${name}${index + 1 === links.length ? "" : " \\"}`
             ))
@@ -302,8 +302,26 @@ async function runInstaller(context) {
 async function verifyDeployInstall(context) {
     await verifyRequiredFiles(context, "deploy checks", [
         "/root/mysql_pass", "/home/user/nodejs-pool/config.json", "/home/user/wallets/wallet.address.txt",
-        "/home/user/wallets/wallet_fee.address.txt", "/lib/systemd/system/monero.service"
+        "/home/user/wallets/wallet_fee.address.txt", "/lib/systemd/system/monero.service",
+        "/lib/systemd/system/xtm.service", "/lib/systemd/system/xtm_mm.service",
+        "/usr/local/src/tari/minotari_node", "/usr/local/src/tari/minotari_merge_mining_proxy",
+        "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
+        "/usr/local/src/grpc-json-proxy/base_node.proto",
+        "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
+        "/home/monerodaemon/.tari/mainnet/config/config.toml"
     ]);
+    await execInContainer(context.containerName, "test -L /usr/local/src/xtm && test \"$(readlink /usr/local/src/xtm)\" = /usr/local/src/tari");
+    await appendCheckLog(context, "verified xtm compatibility symlink");
+    await execInContainer(context.containerName, [
+        "grep -q 'grpc_enabled = true' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'pruning_horizon = 10000' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'public_addresses = \\[\"/ip4/127.0.0.1/tcp/18189\",\\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'submit_to_origin = false' /home/monerodaemon/.tari/mainnet/config/config.toml"
+    ].join(" && "));
+    await appendCheckLog(context, "verified patched Tari config");
 
     await appendCheckLog(context, `deploy checks: pm2 ${EXPECTED_DEPLOY_PROCESSES.join(", ")}`);
     await waitForPm2Processes(context, EXPECTED_DEPLOY_PROCESSES, 45000);
@@ -326,7 +344,8 @@ async function createContainer(context) {
         POOL_DEPLOY_MINOTARI_NODE_PORT: MINOTARI_NODE_PORT,
         POOL_DEPLOY_XTM_T_COMPAT_PORT: XTM_T_COMPAT_PORT,
         POOL_DEPLOY_XMR_POOL_ADDRESS: XMR_POOL_ADDRESS,
-        POOL_DEPLOY_XMR_FEE_ADDRESS: XMR_FEE_ADDRESS
+        POOL_DEPLOY_XMR_FEE_ADDRESS: XMR_FEE_ADDRESS,
+        TARI_EXTERNAL_IP: "127.0.0.1"
     };
     const args = [
         "run",
