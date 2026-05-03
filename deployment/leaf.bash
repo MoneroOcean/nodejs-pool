@@ -4,7 +4,6 @@ NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.0}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
-TARI_COMPAT_DIR="${TARI_COMPAT_DIR:-/usr/local/src/xtm}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
 TARI_EXTERNAL_IP="${TARI_EXTERNAL_IP:-}"
 TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
@@ -59,8 +58,6 @@ install_tari_suite() {
   rm -f "$tmp_zip"
   chmod 755 "$TARI_INSTALL_DIR"/minotari_*
   sudo -u monerodaemon env HOME=/home/monerodaemon "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
-  rm -rf "$TARI_COMPAT_DIR"
-  ln -s "$TARI_INSTALL_DIR" "$TARI_COMPAT_DIR"
 }
 patch_tari_config() {
   local patcher="/usr/local/src/patch-tari-config.sh"
@@ -140,7 +137,7 @@ Description=Tari Daemon
 After=network.target
 
 [Service]
-ExecStart=/bin/bash -c "(sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142) & (sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142) & /usr/local/src/xtm/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
+ExecStart=/bin/bash -c "(sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142) & (sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142) & /usr/local/src/tari/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
 Restart=always
 User=monerodaemon
 Nice=10
@@ -156,7 +153,7 @@ Description=Tari Merge Mining Daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/local/src/xtm/minotari_merge_mining_proxy --non-interactive-mode
+ExecStart=/usr/local/src/tari/minotari_merge_mining_proxy --non-interactive-mode
 Restart=always
 RestartSec=3s
 StartLimitBurst=0

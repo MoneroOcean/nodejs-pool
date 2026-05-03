@@ -310,8 +310,8 @@ async function verifyDeployInstall(context) {
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
         "/home/monerodaemon/.tari/mainnet/config/config.toml"
     ]);
-    await execInContainer(context.containerName, "test -L /usr/local/src/xtm && test \"$(readlink /usr/local/src/xtm)\" = /usr/local/src/tari");
-    await appendCheckLog(context, "verified xtm compatibility symlink");
+    await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm");
+    await appendCheckLog(context, "verified Tari install does not create xtm compatibility path");
     await execInContainer(context.containerName, [
         "grep -q 'grpc_enabled = true' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
