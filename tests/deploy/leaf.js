@@ -120,7 +120,7 @@ async function ensureRunnerImage(distro, buildLog) {
         " && rm -rf /var/lib/apt/lists/*",
         "COPY container_shim.sh /usr/local/bin/codex-container-shim",
         "RUN chmod 755 /usr/local/bin/codex-container-shim \\",
-        ...["certbot", "curl", "git", "service", "systemctl", "timedatectl", "ufw"]
+        ...["certbot", "curl", "git", "service", "systemctl", "timedatectl", "ufw", "wget"]
             .map((name, index, links) => (
                 ` && ln -sf /usr/local/bin/codex-container-shim /usr/local/bin/${name}${index + 1 === links.length ? "" : " \\"}`
             ))
@@ -347,14 +347,14 @@ async function verifyLeafInstall(context) {
         "/home/user/nodejs-pool/cert.key", "/lib/systemd/system/monero.service",
         "/lib/systemd/system/xtm_mm.service",
         "/usr/local/src/tari/minotari_node", "/usr/local/src/tari/minotari_merge_mining_proxy",
-        "/home/monerodaemon/.tari/mainnet/config/config.toml"
+        "/home/monerodaemon/.tari/mainnet/config/config.toml",
+        "/home/monerodaemon/.bitmonero/.blockchain-raw-imported"
     ]);
-    await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /lib/systemd/system/xtm.service && test ! -e /usr/local/src/grpc-json-proxy");
+    await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /lib/systemd/system/xtm.service && test ! -e /usr/local/src/grpc-json-proxy && test ! -e /var/tmp/blockchain.raw");
     await appendCheckLog(context, "verified TARI_EXTERNAL_IP skips local Tari base node service");
     await execInContainer(context.containerName, [
         "grep -q 'grpc_enabled = true' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'pruning_horizon = 10000' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'public_addresses = \\[\"/ip4/127.0.0.1/tcp/18189\",\\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
         "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",

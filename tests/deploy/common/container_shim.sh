@@ -16,7 +16,7 @@ write_fake_monero_repo() {
 release:
 	@true
 EOF
-    for bin in monerod monero-wallet-cli monero-wallet-rpc; do
+    for bin in monerod monero-wallet-cli monero-wallet-rpc monero-blockchain-import; do
         ln -sf /workspace/repo/tests/deploy/common/fake_monerod.js "$dest/build/release/bin/$bin"
     done
 }
@@ -132,6 +132,19 @@ NODE
 }
 
 case "$cmd" in
+    wget)
+        url=""
+        for arg in "$@"; do
+            case "$arg" in
+                http://*|https://*) url="$arg" ;;
+            esac
+        done
+        if [[ "$url" == https://downloads.getmonero.org/blockchain.raw ]]; then
+            printf 'fake blockchain\n' > blockchain.raw
+            exit 0
+        fi
+        exec /usr/bin/wget "$@"
+        ;;
     curl)
         original_args=("$@")
         output=""
@@ -154,6 +167,11 @@ case "$cmd" in
         if [[ "$url" == https://github.com/tari-project/tari/releases/download/*/tari_suite-*-linux-*.zip ]]; then
             test -n "$output" || { echo "fake Tari curl requires -o" >&2; exit 1; }
             write_fake_tari_zip "$output"
+            exit 0
+        fi
+        if [[ "$url" == https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh ]]; then
+            test -n "$output" || { echo "fake patch curl requires -o" >&2; exit 1; }
+            cp /workspace/repo/deployment/patch-tari-config.sh "$output"
             exit 0
         fi
         if [[ "$url" == https://api.ipify.org ]]; then

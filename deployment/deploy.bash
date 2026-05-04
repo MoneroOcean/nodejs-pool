@@ -36,6 +36,35 @@ clone_repo_once() {
   retry_command git clone "$repo" "$dest"
 }
 
+bootstrap_monero_blockchain() {
+  local raw_file="/var/tmp/blockchain.raw"
+  local data_dir="/home/monerodaemon/.bitmonero"
+  local marker="$data_dir/.blockchain-raw-imported"
+  if [ -f "$marker" ] || [ -f "$data_dir/lmdb/data.mdb" ] || [ -f "$data_dir/data.mdb" ]; then
+    rm -f "$raw_file"
+    return 0
+  fi
+  install -d -o monerodaemon -g monerodaemon "$data_dir"
+  (cd /var/tmp && retry_command wget -c https://downloads.getmonero.org/blockchain.raw)
+  sudo -u monerodaemon /usr/local/src/monero/build/release/bin/monero-blockchain-import --input-file "$raw_file" --data-dir "$data_dir" --prune-blockchain
+  rm -f "$raw_file"
+  touch "$marker"
+  chown monerodaemon:monerodaemon "$marker"
+}
+
+wait_for_tari_sync() {
+  echo "Please wait until Tari daemon is synced"
+  for _ in $(seq 1 360); do
+    if curl -fsS -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":"0","method":"GetTipInfo","params":{}}' http://127.0.0.1:18146/json_rpc | grep -Eq 'best_block_height|metadata'; then
+      echo "Tari daemon is synced"
+      return 0
+    fi
+    sleep 10
+  done
+  echo "Timed out waiting for Tari daemon sync" >&2
+  return 1
+}
+
 tari_release_arch() {
   case "${TARI_RELEASE_ARCH:-$(uname -m)}" in
     x86_64|amd64) echo x86_64 ;;
@@ -114,7 +143,7 @@ if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
 else
   retry_command apt-get -o Acquire::Retries=3 full-upgrade -y
 fi
-retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl openssl sudo ufw nginx git vim unzip python3 g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev mysql-server
+retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl wget openssl sudo ufw nginx git vim unzip python3 g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev mysql-server
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
@@ -132,7 +161,7 @@ fi
 
 ufw default deny incoming
 ufw default allow outgoing
-for rule in ssh 443; do
+for rule in ssh 443 18141 18189; do
   ufw allow "$rule"
 done
 ufw --force enable
@@ -270,6 +299,7 @@ WantedBy=multi-user.target
 EOF
 
 id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
+bootstrap_monero_blockchain
 install_tari_suite
 clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
 patch_tari_config
@@ -444,5 +474,6 @@ EOF
 ) | su user -l
 
 systemctl start xtm xtm_mm
+wait_for_tari_sync
 
 echo 'Frontend is installed in /home/user/mo-pool-ui and deployed to /var/www/mo-pool-ui. To rebuild it later, log in as "user" and run: cd ~/mo-pool-ui && npm install && npm run build'
