@@ -124,6 +124,18 @@ function createMysql(options = {}) {
             row.last_error_text = params[3];
             return { affectedRows: 1 };
         }
+        if (sql === "UPDATE payment_batches SET status = ?, released_at = ?, updated_at = ?, submit_started_at = NULL, last_error_text = ? WHERE id = ? AND status IN ('reserved', 'retrying', 'submitting')") {
+            const row = store.paymentBatches.find(function findBatch(entry) {
+                return entry.id === params[4] && ["reserved", "retrying", "submitting"].includes(entry.status);
+            });
+            if (!row) return { affectedRows: 0 };
+            row.submit_started_at = null;
+            row.status = params[0];
+            row.released_at = params[1];
+            row.updated_at = params[2];
+            row.last_error_text = params[3];
+            return { affectedRows: 1 };
+        }
         throw new Error("Unhandled SQL: " + sql);
     }
 
@@ -243,6 +255,106 @@ test.describe("payment unlock batch helper", { concurrency: false }, () => {
         assert.equal(result.clearedPendingRows, 1);
         assert.deepEqual(result.riskFlags, []);
         assert.equal(mysql.state.store.balances[0].pending_batch_id, null);
+        assert.equal(mysql.state.store.paymentBatches[0].status, "retryable");
+        assert.equal(mysql.state.store.paymentBatches[0].released_at, "2026-04-18 12:00:00");
+        assert.equal(mysql.state.state.beginCount, 1);
+        assert.equal(mysql.state.state.commitCount, 1);
+        assert.equal(mysql.state.state.rollbackCount, 0);
+        assert.equal(mysql.state.locks.size, 0);
+    });
+
+    test("unlockBatch can unlock a retrying batch with submit_started_at when wallet history was confirmed", async () => {
+        const mysql = createMysql({
+            balances: [
+                { id: 1, payment_address: "4".repeat(95), payment_id: null, amount: 100, pending_batch_id: 5 }
+            ],
+            paymentBatchItems: [{
+                id: 1,
+                batch_id: 5,
+                balance_id: 1,
+                destination_order: 0,
+                payment_address: "4".repeat(95)
+            }],
+            paymentBatches: [{
+                id: 5,
+                status: "retrying",
+                submit_started_at: "2026-04-18 11:59:50",
+                submitted_at: null,
+                tx_hash: null,
+                tx_key: null,
+                transaction_id: null,
+                finalized_at: null,
+                released_at: null,
+                updated_at: "2026-04-18 11:59:50",
+                last_error_text: "retrying"
+            }]
+        });
+
+        const result = await unlockBatch({
+            batchId: 5,
+            force: false,
+            confirmWalletHistoryChecked: true,
+            mysql,
+            nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
+            support: createSupport()
+        });
+
+        assert.equal(result.batch.status, "retrying");
+        assert.equal(result.batch.submit_started_at, "2026-04-18 11:59:50");
+        assert.equal(result.clearedPendingRows, 1);
+        assert.deepEqual(result.riskFlags, []);
+        assert.equal(mysql.state.store.balances[0].pending_batch_id, null);
+        assert.equal(mysql.state.store.paymentBatches[0].submit_started_at, null);
+        assert.equal(mysql.state.store.paymentBatches[0].status, "retryable");
+        assert.equal(mysql.state.store.paymentBatches[0].released_at, "2026-04-18 12:00:00");
+        assert.equal(mysql.state.state.beginCount, 1);
+        assert.equal(mysql.state.state.commitCount, 1);
+        assert.equal(mysql.state.state.rollbackCount, 0);
+        assert.equal(mysql.state.locks.size, 0);
+    });
+
+    test("unlockBatch can unlock a submitting batch with submit_started_at when wallet history was confirmed and force is requested", async () => {
+        const mysql = createMysql({
+            balances: [
+                { id: 1, payment_address: "4".repeat(95), payment_id: null, amount: 100, pending_batch_id: 11 }
+            ],
+            paymentBatchItems: [{
+                id: 1,
+                batch_id: 11,
+                balance_id: 1,
+                destination_order: 0,
+                payment_address: "4".repeat(95)
+            }],
+            paymentBatches: [{
+                id: 11,
+                status: "submitting",
+                submit_started_at: "2026-04-18 11:59:50",
+                submitted_at: null,
+                tx_hash: null,
+                tx_key: null,
+                transaction_id: null,
+                finalized_at: null,
+                released_at: null,
+                updated_at: "2026-04-18 11:59:50",
+                last_error_text: "submitting"
+            }]
+        });
+
+        const result = await unlockBatch({
+            batchId: 11,
+            force: true,
+            confirmWalletHistoryChecked: true,
+            mysql,
+            nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
+            support: createSupport()
+        });
+
+        assert.equal(result.batch.status, "submitting");
+        assert.equal(result.batch.submit_started_at, "2026-04-18 11:59:50");
+        assert.equal(result.clearedPendingRows, 1);
+        assert.deepEqual(result.riskFlags, ["status is submitting"]);
+        assert.equal(mysql.state.store.balances[0].pending_batch_id, null);
+        assert.equal(mysql.state.store.paymentBatches[0].submit_started_at, null);
         assert.equal(mysql.state.store.paymentBatches[0].status, "retryable");
         assert.equal(mysql.state.store.paymentBatches[0].released_at, "2026-04-18 12:00:00");
         assert.equal(mysql.state.state.beginCount, 1);

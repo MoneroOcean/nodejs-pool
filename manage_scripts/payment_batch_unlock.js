@@ -2,6 +2,10 @@
 const ADVISORY_LOCK_NAME = "nodejs-pool:payments";
 const SAFE_BATCH_STATUSES = new Set(["reserved", "retrying"]);
 
+function isBooleanOption(value) {
+    return value === true || value === "true" || value === "1";
+}
+
 function createUnlockError(message, details) {
     const error = new Error(message);
     if (details && typeof details === "object") Object.assign(error, details);
@@ -35,9 +39,11 @@ function describeItem(item) { return item.payment_address; }
 
 function isPresent(value) { return value !== null && typeof value !== "undefined" && value !== ""; }
 
-function collectUnsafeUnlockFlags(batch) {
+function collectUnsafeUnlockFlags(batch, confirmWalletHistoryChecked) {
     const flags = [];
-    if (isPresent(batch.submit_started_at)) flags.push("submit_started_at is set");
+    if (!confirmWalletHistoryChecked && isPresent(batch.submit_started_at)) {
+        flags.push("submit_started_at is set");
+    }
     if (isPresent(batch.submitted_at)) flags.push("submitted_at is set");
     if (isPresent(batch.tx_hash)) flags.push("tx_hash is set");
     if (isPresent(batch.tx_key)) flags.push("tx_key is set");
@@ -109,8 +115,8 @@ async function loadBatchState(connection, batchId) {
     return { batch, items, reservedBalances };
 }
 
-function assertUnlockAllowed(batchId, batch, items, reservedBalances, force) {
-    const unsafeFlags = collectUnsafeUnlockFlags(batch);
+function assertUnlockAllowed(batchId, batch, items, reservedBalances, force, confirmWalletHistoryChecked) {
+    const unsafeFlags = collectUnsafeUnlockFlags(batch, confirmWalletHistoryChecked);
     if (unsafeFlags.length) {
         throw createUnlockError(
             "Refusing to unlock payment batch " + batchId + " because it may already have crossed the wallet submit boundary.",
@@ -133,6 +139,7 @@ async function unlockBatch(options) {
     const support = opts.support || global.support;
     const batchId = parseBatchId(opts.batchId);
     const force = opts.force === true;
+    const confirmWalletHistoryChecked = isBooleanOption(opts.confirmWalletHistoryChecked);
     const nowMs = typeof opts.nowMs === "number" ? opts.nowMs : Date.now();
 
     if (!mysql || typeof mysql.getConnection !== "function") {
@@ -141,9 +148,10 @@ async function unlockBatch(options) {
 
     return await withPaymentsAdvisoryLock(mysql, async function runUnlock(connection) {
         const loaded = await loadBatchState(connection, batchId);
-        const riskFlags = assertUnlockAllowed(batchId, loaded.batch, loaded.items, loaded.reservedBalances, force);
+        const riskFlags = assertUnlockAllowed(batchId, loaded.batch, loaded.items, loaded.reservedBalances, force, confirmWalletHistoryChecked);
         const releasedAt = nowSqlTimestamp(support, nowMs);
-        const note = "manually released for retry by manage_scripts/payment_batch_unlock.js at " + releasedAt;
+        const note = "manually released for retry by manage_scripts/payment_batch_unlock.js at " + releasedAt +
+            (confirmWalletHistoryChecked ? " (wallet history checked and confirmed no tx match)" : "");
 
         await connection.beginTransaction();
         try {
@@ -151,10 +159,15 @@ async function unlockBatch(options) {
                 "UPDATE balance SET pending_batch_id = NULL WHERE pending_batch_id = ?",
                 [batchId]
             );
-            const batchResult = await connection.query(
-                "UPDATE payment_batches SET status = ?, released_at = ?, updated_at = ?, last_error_text = ? WHERE id = ? AND submit_started_at IS NULL AND status IN (?, ?)",
-                ["retryable", releasedAt, releasedAt, note, batchId, "reserved", "retrying"]
-            );
+            const batchResult = confirmWalletHistoryChecked
+                ? await connection.query(
+                    "UPDATE payment_batches SET status = ?, released_at = ?, updated_at = ?, submit_started_at = NULL, last_error_text = ? WHERE id = ? AND status IN ('reserved', 'retrying', 'submitting')",
+                    ["retryable", releasedAt, releasedAt, note, batchId]
+                )
+                : await connection.query(
+                    "UPDATE payment_batches SET status = ?, released_at = ?, updated_at = ?, last_error_text = ? WHERE id = ? AND submit_started_at IS NULL AND status IN (?, ?)",
+                    ["retryable", releasedAt, releasedAt, note, batchId, "reserved", "retrying"]
+                );
             if (!batchResult || batchResult.affectedRows !== 1) {
                 throw new Error("Payment batch " + batchId + " changed while unlocking; re-read it before retrying");
             }
@@ -198,6 +211,7 @@ function runCli() {
     const cli = require("../script_utils.js")();
     const batchIdRaw = cli.arg("batch_id", "Please specify payment batch id to unlock");
     const force = cli.get("force", false);
+    const confirmWalletHistoryChecked = cli.get("confirm-wallet-history-checked", false);
 
     cli.init(function initScript() {
         (async function main() {
@@ -206,6 +220,7 @@ function runCli() {
                 const result = await unlockBatch({
                     batchId,
                     force,
+                    confirmWalletHistoryChecked,
                     mysql: global.mysql,
                     support: global.support
                 });
