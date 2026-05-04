@@ -366,8 +366,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
         mysqlQuery(sql) {
             if (sql === "select * from pools where id < 1000 and last_checkin >= NOW() - INTERVAL 10 MINUTE") {
                 return [
-                    { id: 1, ip: "10.0.0.1", blockID: 100, blockIDTime: "2026-01-01 00:00:00", hostname: "node-a" },
-                    { id: 2, ip: "10.0.0.2", blockID: 101, blockIDTime: "2026-01-01 00:01:00", hostname: "node-b" }
+                    { id: 1, ip: "203.0.113.10", blockID: 100, blockIDTime: "2026-01-01 00:00:00", hostname: "node-a" },
+                    { id: 2, ip: "2001:db8::20", blockID: 101, blockIDTime: "2026-01-01 00:01:00", hostname: "node-b" }
                 ];
             }
             if (sql === "select * from ports where hidden = 0 and pool_id < 1000 and lastSeen >= NOW() - INTERVAL 10 MINUTE") {
@@ -393,13 +393,13 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
 
     assert.deepEqual(state.caches.get("poolServers"), {
         1: {
-            ip: "10.0.0.1",
+            ip: "203.0.113.10",
             blockID: 100,
             blockIDTime: "formatted:2026-01-01 00:00:00",
             hostname: "node-a"
         },
         2: {
-            ip: "10.0.0.2",
+            ip: "2001:db8::20",
             blockID: 101,
             blockIDTime: "formatted:2026-01-01 00:01:00",
             hostname: "node-b"
@@ -424,7 +424,6 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
         pplns: [
             {
                 host: {
-                    ip: "10.0.0.1",
                     blockID: 100,
                     blockIDTime: "formatted:2026-01-01 00:00:00",
                     hostname: "node-a"
@@ -437,7 +436,6 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
             },
             {
                 host: {
-                    ip: "10.0.0.2",
                     blockID: 101,
                     blockIDTime: "formatted:2026-01-01 00:01:00",
                     hostname: "node-b"
@@ -468,6 +466,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
             }
         ]
     });
+    assert.equal(JSON.stringify(state.caches.get("poolPorts")).includes("203.0.113.10"), false);
+    assert.equal(JSON.stringify(state.caches.get("poolPorts")).includes("2001:db8::20"), false);
 });
 
 test("refreshPoolStats keeps coin metadata when optional lib2 coins are unavailable", async () => {
