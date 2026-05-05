@@ -120,7 +120,7 @@ async function ensureRunnerImage(distro, buildLog) {
         " && rm -rf /var/lib/apt/lists/*",
         "COPY container_shim.sh /usr/local/bin/codex-container-shim",
         "RUN chmod 755 /usr/local/bin/codex-container-shim \\",
-        ...["certbot", "curl", "git", "service", "systemctl", "timedatectl", "ufw", "wget"]
+        ...["certbot", "curl", "git", "service", "setcap", "systemctl", "timedatectl", "ufw", "wget"]
             .map((name, index, links) => (
                 ` && ln -sf /usr/local/bin/codex-container-shim /usr/local/bin/${name}${index + 1 === links.length ? "" : " \\"}`
             ))
@@ -309,8 +309,7 @@ async function verifyDeployInstall(context) {
         "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
         "/usr/local/src/grpc-json-proxy/base_node.proto",
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
-        "/home/monerodaemon/.tari/mainnet/config/config.toml",
-        "/home/monerodaemon/.bitmonero/.blockchain-raw-imported"
+        "/home/monerodaemon/.tari/mainnet/config/config.toml"
     ]);
     await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /var/tmp/blockchain.raw");
     await appendCheckLog(context, "verified Tari install does not create xtm compatibility path");

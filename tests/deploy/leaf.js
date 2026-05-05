@@ -120,7 +120,7 @@ async function ensureRunnerImage(distro, buildLog) {
         " && rm -rf /var/lib/apt/lists/*",
         "COPY container_shim.sh /usr/local/bin/codex-container-shim",
         "RUN chmod 755 /usr/local/bin/codex-container-shim \\",
-        ...["certbot", "curl", "git", "service", "systemctl", "timedatectl", "ufw", "wget"]
+        ...["certbot", "curl", "git", "service", "setcap", "systemctl", "timedatectl", "ufw", "wget"]
             .map((name, index, links) => (
                 ` && ln -sf /usr/local/bin/codex-container-shim /usr/local/bin/${name}${index + 1 === links.length ? "" : " \\"}`
             ))
@@ -347,8 +347,7 @@ async function verifyLeafInstall(context) {
         "/home/user/nodejs-pool/cert.key", "/lib/systemd/system/monero.service",
         "/lib/systemd/system/xtm_mm.service",
         "/usr/local/src/tari/minotari_node", "/usr/local/src/tari/minotari_merge_mining_proxy",
-        "/home/monerodaemon/.tari/mainnet/config/config.toml",
-        "/home/monerodaemon/.bitmonero/.blockchain-raw-imported"
+        "/home/monerodaemon/.tari/mainnet/config/config.toml"
     ]);
     await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /lib/systemd/system/xtm.service && test ! -e /usr/local/src/grpc-json-proxy && test ! -e /var/tmp/blockchain.raw");
     await appendCheckLog(context, "verified TARI_EXTERNAL_IP skips local Tari base node service");

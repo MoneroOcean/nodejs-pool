@@ -36,26 +36,46 @@ clone_repo_once() {
   retry_command git clone "$repo" "$dest"
 }
 
-bootstrap_monero_blockchain() {
-  local raw_file="/var/tmp/blockchain.raw"
-  local data_dir="/home/monerodaemon/.bitmonero"
-  local marker="$data_dir/.blockchain-raw-imported"
-  if [ -f "$marker" ] || [ -f "$data_dir/lmdb/data.mdb" ] || [ -f "$data_dir/data.mdb" ]; then
-    rm -f "$raw_file"
-    return 0
-  fi
-  install -d -o monerodaemon -g monerodaemon "$data_dir"
-  (cd /var/tmp && retry_command wget -c https://downloads.getmonero.org/blockchain.raw)
-  sudo -u monerodaemon /usr/local/src/monero/build/release/bin/monero-blockchain-import --input-file "$raw_file" --data-dir "$data_dir" --prune-blockchain
-  rm -f "$raw_file"
-  touch "$marker"
-  chown monerodaemon:monerodaemon "$marker"
+rpc_synced() {
+  local url="$1"
+  local method="$2"
+  local response
+  response="$(curl -fsS -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":\"0\",\"method\":\"$method\",\"params\":{}}" "$url")" || return 1
+  printf '%s' "$response" | python3 -c '
+import json
+import sys
+
+method = sys.argv[1]
+payload = json.load(sys.stdin)
+result = payload.get("result") or {}
+if method == "get_info":
+    sys.exit(0 if result.get("status") == "OK" and result.get("synchronized") is True and result.get("busy_syncing") is not True else 1)
+if method == "GetTipInfo":
+    metadata = result.get("metadata") or {}
+    synced = result.get("initial_sync_achieved")
+    height = int(metadata.get("best_block_height") or 0)
+    sys.exit(0 if synced is True and height > 0 else 1)
+sys.exit(1)
+' "$method"
+}
+
+wait_for_monero_sync() {
+  echo "Please wait until Monero daemon is fully synced"
+  for _ in $(seq 1 360); do
+    if rpc_synced http://127.0.0.1:18083/json_rpc get_info; then
+      echo "Monero daemon is synced"
+      return 0
+    fi
+    sleep 10
+  done
+  echo "Timed out waiting for Monero daemon sync" >&2
+  return 1
 }
 
 wait_for_tari_sync() {
-  echo "Please wait until Tari daemon is synced"
+  echo "Please wait until Tari daemon is fully synced"
   for _ in $(seq 1 360); do
-    if curl -fsS -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":"0","method":"GetTipInfo","params":{}}' http://127.0.0.1:18146/json_rpc | grep -Eq 'best_block_height|metadata'; then
+    if rpc_synced http://127.0.0.1:18146/json_rpc GetTipInfo; then
       echo "Tari daemon is synced"
       return 0
     fi
@@ -299,7 +319,6 @@ WantedBy=multi-user.target
 EOF
 
 id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
-bootstrap_monero_blockchain
 install_tari_suite
 clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
 patch_tari_config
@@ -341,13 +360,7 @@ EOF
 systemctl daemon-reload
 systemctl enable monero xtm xtm_mm
 systemctl start monero
-
-sleep 30
-echo "Please wait until Monero daemon is fully synced"
-tail -f /home/monerodaemon/.bitmonero/bitmonero.log 2>/dev/null | grep Synced &
-( tail -F -n0 /home/monerodaemon/.bitmonero/bitmonero.log & ) | grep -Eq "You are now synchronized with the network"
-pkill -x tail 2>/dev/null || true
-echo "Monero daemon is synced"
+wait_for_monero_sync
 rm -f /etc/mysql/conf.d/mysql-native-password.cnf
 if mysqld --verbose --help 2>/dev/null | grep -Fq -- "--mysql-native-password[=name]"; then
   cat >/etc/mysql/conf.d/mysql-native-password.cnf <<'EOF'

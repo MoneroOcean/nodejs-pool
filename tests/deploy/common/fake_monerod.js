@@ -76,17 +76,6 @@ function runWalletCli(argv) {
     fs.writeFileSync(walletPath, "");
     process.stdout.write(`Seed for ${walletPath}\n${address}\n`);
 }
-function runBlockchainImport(argv) {
-    const dataDir = arg(argv, ["--data-dir"], "/home/monerodaemon/.bitmonero");
-    const inputFile = arg(argv, ["--input-file"], "");
-    if (inputFile && !fs.existsSync(inputFile)) {
-        console.error(`Input file not found: ${inputFile}`);
-        process.exit(1);
-    }
-    fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(path.join(dataDir, "data.mdb"), "fake imported blockchain\n");
-    process.stdout.write("Imported fake blockchain\n");
-}
 function inferDefaultRole(invokedAs, argv) {
     if (invokedAs === "monerod") return "monerod";
     if (invokedAs === "monero-wallet-rpc") return "wallet-rpc";
@@ -120,7 +109,7 @@ function resultFor(state, method, payload) {
     case "submitblock":
         return OK;
     case "GetTipInfo":
-        return { metadata: { best_block_height: String(header.height), best_block_hash: header.hash } };
+        return { initial_sync_achieved: true, metadata: { best_block_height: String(header.height), best_block_hash: header.hash } };
     case "GetHeaderByHash":
         return { header: rpcHeader(header), reward: String(header.reward) };
     case "GetBlocks":
@@ -141,7 +130,6 @@ function resultFor(state, method, payload) {
 const argv = process.argv.slice(2);
 const invokedAs = path.basename(process.argv[1]);
 if (invokedAs === "monero-wallet-cli") { runWalletCli(argv); process.exit(0); }
-if (invokedAs === "monero-blockchain-import") { runBlockchainImport(argv); process.exit(0); }
 const role = arg(argv, ["--role"], inferDefaultRole(invokedAs, argv));
 const dataDir = arg(argv, ["--data-dir"], "/home/monerodaemon/.bitmonero");
 const defaultPort = role === "monerod"

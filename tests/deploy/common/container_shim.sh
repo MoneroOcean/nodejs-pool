@@ -16,7 +16,7 @@ write_fake_monero_repo() {
 release:
 	@true
 EOF
-    for bin in monerod monero-wallet-cli monero-wallet-rpc monero-blockchain-import; do
+    for bin in monerod monero-wallet-cli monero-wallet-rpc; do
         ln -sf /workspace/repo/tests/deploy/common/fake_monerod.js "$dest/build/release/bin/$bin"
     done
 }
@@ -139,10 +139,6 @@ case "$cmd" in
                 http://*|https://*) url="$arg" ;;
             esac
         done
-        if [[ "$url" == https://downloads.getmonero.org/blockchain.raw ]]; then
-            printf 'fake blockchain\n' > blockchain.raw
-            exit 0
-        fi
         exec /usr/bin/wget "$@"
         ;;
     curl)
@@ -255,7 +251,7 @@ case "$cmd" in
         fi
         exit 0
         ;;
-    ufw|service)
+    setcap|ufw|service)
         exit 0
         ;;
     certbot)
