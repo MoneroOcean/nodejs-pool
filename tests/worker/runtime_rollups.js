@@ -162,6 +162,11 @@ function createFakeEnvironment(options) {
             emails.push(Array.from(arguments));
         }
     };
+    global.coinFuncs = {
+        algoShortTypeStr(port) {
+            return Number(port) === 18000 ? "rx/0" : "kawpow";
+        }
+    };
 
     return {
         cacheStore: cacheStore,
@@ -197,6 +202,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
     let originalMysql;
     let originalProtos;
     let originalSupport;
+    let originalCoinFuncs;
     let originalConsoleError;
     let originalConsoleLog;
     let originalDateNow;
@@ -209,6 +215,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         originalMysql = global.mysql;
         originalProtos = global.protos;
         originalSupport = global.support;
+        originalCoinFuncs = global.coinFuncs;
         originalConsoleError = console.error;
         originalConsoleLog = console.log;
         originalDateNow = Date.now;
@@ -222,6 +229,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         global.mysql = originalMysql;
         global.protos = originalProtos;
         global.support = originalSupport;
+        global.coinFuncs = originalCoinFuncs;
         console.error = originalConsoleError;
         console.log = originalConsoleLog;
         Date.now = originalDateNow;
@@ -283,9 +291,51 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
 
         assert.equal(workerStats.hash, (600 + 1200) / (10 * 60));
         assert.equal(workerStats.hash2, (300 + 900) / (10 * 60));
+        assert.equal(workerStats.lastShareAlgo, "kawpow");
         assert.equal(addressStats.hash, (600 + 1200) / (10 * 60));
         assert.equal(addressStats.hash2, (300 + 900) / (10 * 60));
+        assert.equal(addressStats.lastShareAlgo, "kawpow");
         assert.deepEqual(identifiers, [workerName, "rigOld"]);
+    });
+
+    test("worker latest accepted share records algo from newest share port", async () => {
+        const now = 1710002401234;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const workerName = "rigAlgo";
+        const state = createFakeEnvironment({
+            shares: [
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: workerName,
+                        port: 18081,
+                        rawShares: 1200,
+                        shares2: 900,
+                        timestamp: now - 30 * 1000
+                    })
+                },
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: workerName,
+                        port: 18000,
+                        rawShares: 600,
+                        shares2: 300,
+                        timestamp: now - 20 * 1000
+                    })
+                }
+            ]
+        });
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+
+        assert.equal(JSON.parse(state.cacheStore.get("stats:" + address + "_" + workerName)).lastShareAlgo, "rx/0");
+        assert.equal(JSON.parse(state.cacheStore.get("stats:" + address)).lastShareAlgo, "rx/0");
     });
 
     test("worker retains inactive identifiers and zeros stopped worker stats", async () => {
@@ -301,7 +351,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
                 ["minerSet", JSON.stringify({ [stoppedKey]: 1 })],
                 ["identifiers:" + address, JSON.stringify([stoppedWorker])],
                 [stoppedKey, JSON.stringify({ totalHashes: 100, goodShares: 4 })],
-                ["stats:" + stoppedKey, JSON.stringify({ hash: 50, hash2: 40, lastHash: now - 30 * 60 * 1000 })],
+                ["stats:" + stoppedKey, JSON.stringify({ hash: 50, hash2: 40, lastHash: now - 30 * 60 * 1000, lastShareAlgo: "rx/0" })],
                 ["history:" + stoppedKey, stoppedHistory]
             ],
             shares: [
@@ -323,7 +373,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         await runUpdate(runtime, 1);
 
         assert.deepEqual(JSON.parse(state.cacheStore.get("identifiers:" + address)), [activeWorker, stoppedWorker]);
-        assert.deepEqual(JSON.parse(state.cacheStore.get("stats:" + stoppedKey)), { hash: 0, hash2: 0, lastHash: now - 30 * 60 * 1000 });
+        assert.deepEqual(JSON.parse(state.cacheStore.get("stats:" + stoppedKey)), { hash: 0, hash2: 0, lastHash: now - 30 * 60 * 1000, lastShareAlgo: "rx/0" });
         assert.equal(state.cacheStore.get("history:" + stoppedKey), stoppedHistory);
     });
 

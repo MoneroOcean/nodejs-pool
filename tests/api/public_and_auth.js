@@ -357,7 +357,14 @@ test.describe("api public and auth", { concurrency: false }, () => {
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
-            database: createDatabase({ caches: { wallet: { seen: true } } }),
+            database: createDatabase({
+                caches: {
+                    wallet: { seen: true },
+                    "identifiers:wallet": ["rig01"],
+                    "wallet_rig01": { totalHashes: 1234, goodShares: 7, badShares: 2 },
+                    "stats:wallet_rig01": { hash: 10, hash2: 5, lastHash: 1700000000000, lastShareAlgo: "rx/0" }
+                }
+            }),
             mysql: mysql,
             support: createSupport()
         }, async (port) => {
@@ -376,10 +383,19 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 identifer: "rig01",
                 hash: false,
                 hash2: false,
+                lastShareAlgo: false,
                 totalHash: false,
                 validShares: false,
                 invalidShares: false
             });
+
+            const knownWorkerStats = await request(port, { path: "/miner/wallet/stats/rig01" });
+            assert.equal(knownWorkerStats.statusCode, 200);
+            assert.equal(knownWorkerStats.json.lastShareAlgo, "rx/0");
+
+            const allWorkerStats = await request(port, { path: "/miner/wallet/stats/allWorkers" });
+            assert.equal(allWorkerStats.statusCode, 200);
+            assert.equal(allWorkerStats.json.rig01.lastShareAlgo, "rx/0");
         });
     });
 
