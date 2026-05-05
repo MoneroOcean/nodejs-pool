@@ -36,6 +36,21 @@ clone_repo_once() {
   retry_command git clone "$repo" "$dest"
 }
 
+configure_overcommit() {
+  install -d -m 755 /etc/sysctl.d
+  cat >/etc/sysctl.d/90-monero-overcommit.conf <<'EOF'
+vm.overcommit_memory = 2
+vm.overcommit_ratio = 80
+EOF
+  if ! sysctl -p /etc/sysctl.d/90-monero-overcommit.conf; then
+    if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+      echo "Skipping active overcommit sysctl apply in test mode"
+      return 0
+    fi
+    return 1
+  fi
+}
+
 rpc_synced() {
   local url="$1"
   local method="$2"
@@ -156,6 +171,8 @@ $nrconf{override_rc}->{qr(^monero\.service$)} = 0;
 $nrconf{override_rc}->{qr(^xtm\.service$)} = 0;
 $nrconf{override_rc}->{qr(^xtm_mm\.service$)} = 0;
 EOF
+
+configure_overcommit
 
 retry_command apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update
 if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then

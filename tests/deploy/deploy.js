@@ -309,8 +309,11 @@ async function verifyDeployInstall(context) {
         "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
         "/usr/local/src/grpc-json-proxy/base_node.proto",
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
-        "/home/monerodaemon/.tari/mainnet/config/config.toml"
+        "/home/monerodaemon/.tari/mainnet/config/config.toml",
+        "/etc/sysctl.d/90-monero-overcommit.conf"
     ]);
+    await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 80$' /etc/sysctl.d/90-monero-overcommit.conf");
+    await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /var/tmp/blockchain.raw");
     await appendCheckLog(context, "verified Tari install does not create xtm compatibility path");
     await execInContainer(context.containerName, [

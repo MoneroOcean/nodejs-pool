@@ -347,8 +347,11 @@ async function verifyLeafInstall(context) {
         "/home/user/nodejs-pool/cert.key", "/lib/systemd/system/monero.service",
         "/lib/systemd/system/xtm_mm.service",
         "/usr/local/src/tari/minotari_node", "/usr/local/src/tari/minotari_merge_mining_proxy",
-        "/home/monerodaemon/.tari/mainnet/config/config.toml"
+        "/home/monerodaemon/.tari/mainnet/config/config.toml",
+        "/etc/sysctl.d/90-monero-overcommit.conf"
     ]);
+    await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 80$' /etc/sysctl.d/90-monero-overcommit.conf");
+    await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /lib/systemd/system/xtm.service && test ! -e /usr/local/src/grpc-json-proxy && test ! -e /var/tmp/blockchain.raw");
     await appendCheckLog(context, "verified TARI_EXTERNAL_IP skips local Tari base node service");
     await execInContainer(context.containerName, [
