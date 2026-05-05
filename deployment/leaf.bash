@@ -161,7 +161,7 @@ fi
 
 ufw default deny incoming
 ufw default allow outgoing
-for rule in ssh 3333 5555 7777 9000 18141 18189; do
+for rule in ssh 3333 5555 7777 18141 18189; do
   ufw allow "$rule"
 done
 ufw --force enable
