@@ -136,8 +136,8 @@ test("submit failure email marks local hash mismatches as non-actionable even wh
 
         assert.equal(submitCallbackValue, false);
         assert.equal(emails.length, 1);
-        assert.match(emails[0].body, /Submitted share difficulty: 100/);
-        assert.match(emails[0].body, /Required block difficulty: 1/);
+        assert.match(emails[0].body, /Submitted share difficulty : 100/);
+        assert.match(emails[0].body, /Required block difficulty  :   1/);
         assert.match(emails[0].body, /Locally verified difficulty: 100/);
         assert.match(emails[0].body, /not block level; no action is needed/);
     } finally {
@@ -345,8 +345,8 @@ test("daemon-first failure email includes local block difficulty context", async
         await flushTimers();
         assert.equal(global.support.rpcPortDaemonCalls.length >= 1, true);
         assert.equal(global.support.emails.length, 1);
-        assert.match(global.support.emails[0].body, /Submitted share difficulty:/);
-        assert.match(global.support.emails[0].body, /Required block difficulty: 3/);
+        assert.match(global.support.emails[0].body, /Submitted share difficulty :/);
+        assert.match(global.support.emails[0].body, /Required block difficulty  :\s+3/);
         assert.match(global.support.emails[0].body, /Locally verified difficulty:/);
         assert.match(global.support.emails[0].body, /not block level; no action is needed/);
     } finally {

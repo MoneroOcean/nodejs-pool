@@ -116,6 +116,26 @@ test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex c
     );
 });
 
+test("BlockTemplate uses the SAL blob marker when daemon reserved offset is stale", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const marker = Buffer.concat([Buffer.from([0x02, 17]), Buffer.alloc(17, 0)]);
+    const prefix = Buffer.alloc(42, 0x44);
+    const suffix = Buffer.alloc(8, 0x55);
+    const blob = Buffer.concat([prefix, marker, suffix]);
+    const template = {
+        blocktemplate_blob: blob.toString("hex"),
+        coin: "SAL",
+        difficulty: 1,
+        height: 303,
+        port: 19081,
+        reserved_offset: 12,
+        reward: 1
+    };
+    const blockTemplate = new coinFuncs.BlockTemplate(template);
+
+    assert.equal(blockTemplate.reserved_offset, prefix.length + 2);
+});
+
 test("BlockTemplate derives dual-main candidate difficulty from the lowest chain difficulty", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const originalGetAuxChainXTM = global.coinFuncs.getAuxChainXTM;
