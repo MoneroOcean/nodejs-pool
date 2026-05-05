@@ -93,8 +93,8 @@ test("submit failure email marks local hash mismatches as non-actionable even wh
             };
         }
     };
-    global.setTimeout = function immediateTimeout(fn) {
-        fn();
+    global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
+        fn(...args);
         return { unref() {} };
     };
     console.error = function ignoreExpectedFailureLog() {};
@@ -151,13 +151,226 @@ test("submit failure email marks local hash mismatches as non-actionable even wh
     }
 });
 
+test("xmr submit failures are retried once before final success", async () => {
+    const original = {
+        coinFuncs: global.coinFuncs,
+        config: global.config,
+        consoleWarn: console.warn,
+        database: global.database,
+        protos: global.protos,
+        setTimeout: global.setTimeout,
+        support: global.support
+    };
+    const warnings = [];
+    const blockData = Buffer.from("01020304", "hex");
+    const submittedHash = Buffer.from("22".repeat(32), "hex");
+    let submitCalls = 0;
+    let submitCallbackValue = null;
+    const storedBlocks = [];
+
+    global.config = {
+        daemon: { port: MAIN_PORT },
+        general: { adminEmail: "ops@example.com" },
+        hostname: "pool.test",
+        pool: { trustedMiners: false, trustThreshold: 1, trustMin: 0 }
+    };
+    global.database = {
+        storeBlock(height, payload) {
+            storedBlocks.push({ height, payload });
+        }
+    };
+    global.protos = { Block: { encode(value) { return value; } }, AltBlock: { encode(value) { return value; } } };
+    global.support = {
+        sendAdminFyi() {
+            assert.fail("first XMR submit failure should retry without emailing");
+        }
+    };
+    global.coinFuncs = {
+        getBlockID() {
+            return Buffer.from("aa".repeat(32), "hex");
+        },
+        getPoolProfile() {
+            return {
+                pool: {
+                    acceptSubmittedBlock({ rpcResult }) {
+                        return !!(rpcResult && rpcResult.result && rpcResult.result.status === "OK");
+                    },
+                    resolveSubmittedBlockHash(_ctx, callback) {
+                        callback("bb".repeat(32));
+                    },
+                    submitBlockRpc(options) {
+                        submitCalls += 1;
+                        if (submitCalls === 1) return options.replyFn({ error: { code: -7, message: "Block not accepted" } }, 200);
+                        return options.replyFn({ result: { status: "OK" } }, 200);
+                    }
+                }
+            };
+        }
+    };
+    global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
+        fn(...args);
+        return { unref() {} };
+    };
+    console.warn = function captureWarning(message) {
+        warnings.push(message);
+    };
+
+    try {
+        const helpers = createShareBlockHelpers({
+            crypto,
+            debug() {},
+            divideBaseDiff() { return 100; },
+            bigIntFromBuffer() { return 1n; },
+            bigIntToBuffer(value) { return value; },
+            toBigInt(value) { return BigInt(value); },
+            baseRavenDiff: 1,
+            anchorState: { current: 0 },
+            activeBlockTemplates: { "": { height: 100 } },
+            walletTrust: {},
+            processSend() {},
+            clearWalletSessionTrust() {},
+            getThreadName() { return ""; },
+            formatCoinPort(_coin, port) { return "XMR:" + port; },
+            getLastMinerLogTime() { return {}; },
+            setLastMinerLogTime() {}
+        });
+
+        helpers.submitBlock(
+            { logString: "miner-1", payout: MAIN_WALLET, poolTypeEnum: 0, trust: { trust: 0 } },
+            { coin: "" },
+            { coin: "", port: MAIN_PORT, height: 100, difficulty: 1, xmr_difficulty: 1, xtm_difficulty: Number.MAX_SAFE_INTEGER },
+            blockData,
+            submittedHash,
+            100,
+            true,
+            true,
+            null,
+            function onSubmitDone(value) {
+                submitCallbackValue = value;
+            }
+        );
+
+        assert.equal(submitCalls, 2);
+        assert.equal(submitCallbackValue, true);
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0], /Block submit retry/);
+        assert.equal(storedBlocks.length, 1);
+    } finally {
+        global.coinFuncs = original.coinFuncs;
+        global.config = original.config;
+        global.database = original.database;
+        global.protos = original.protos;
+        global.setTimeout = original.setTimeout;
+        global.support = original.support;
+        console.warn = original.consoleWarn;
+    }
+});
+
+test("non-xmr submit failures are not retried", async () => {
+    const original = {
+        coinFuncs: global.coinFuncs,
+        config: global.config,
+        consoleError: console.error,
+        database: global.database,
+        protos: global.protos,
+        setTimeout: global.setTimeout,
+        support: global.support
+    };
+    const blockData = Buffer.from("01020304", "hex");
+    const submittedHash = Buffer.from("22".repeat(32), "hex");
+    let submitCalls = 0;
+    let submitCallbackValue = null;
+
+    global.config = {
+        daemon: { port: MAIN_PORT },
+        general: { adminEmail: "ops@example.com" },
+        hostname: "pool.test",
+        pool: { trustedMiners: false, trustThreshold: 1, trustMin: 0 }
+    };
+    global.database = {};
+    global.protos = { Block: { encode(value) { return value; } }, AltBlock: { encode(value) { return value; } } };
+    global.support = {
+        sendAdminFyi() {
+            return true;
+        }
+    };
+    global.coinFuncs = {
+        convertBlob(blob) { return blob; },
+        slowHashBuff() { return submittedHash; },
+        getPortLastBlockHeader(_port, callback) { callback(null, { height: 199 }); },
+        getPoolProfile() {
+            return {
+                pool: {
+                    acceptSubmittedBlock() { return false; },
+                    submitBlockRpc(options) {
+                        submitCalls += 1;
+                        return options.replyFn({ error: { code: -7, message: "Block not accepted" } }, 200);
+                    }
+                }
+            };
+        }
+    };
+    global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
+        fn(...args);
+        return { unref() {} };
+    };
+    console.error = function ignoreExpectedFailureLog() {};
+
+    try {
+        const helpers = createShareBlockHelpers({
+            crypto,
+            debug() {},
+            divideBaseDiff() { return 100; },
+            bigIntFromBuffer() { return 1n; },
+            bigIntToBuffer(value) { return value; },
+            toBigInt(value) { return BigInt(value); },
+            baseRavenDiff: 1,
+            anchorState: { current: 0 },
+            activeBlockTemplates: { ETH: { height: 200 } },
+            walletTrust: {},
+            processSend() {},
+            clearWalletSessionTrust() {},
+            getThreadName() { return ""; },
+            formatCoinPort(coin, port) { return coin + ":" + port; },
+            getLastMinerLogTime() { return {}; },
+            setLastMinerLogTime() {}
+        });
+
+        helpers.submitBlock(
+            { logString: "miner-1", payout: ETH_WALLET, poolTypeEnum: 0, trust: { trust: 0 } },
+            { coin: "ETH" },
+            { coin: "ETH", port: ETH_PORT, height: 200, difficulty: 1 },
+            blockData,
+            submittedHash,
+            100,
+            true,
+            true,
+            null,
+            function onSubmitDone(value) {
+                submitCallbackValue = value;
+            }
+        );
+
+        assert.equal(submitCalls, 1);
+        assert.equal(submitCallbackValue, false);
+    } finally {
+        global.coinFuncs = original.coinFuncs;
+        global.config = original.config;
+        global.database = original.database;
+        global.protos = original.protos;
+        global.setTimeout = original.setTimeout;
+        global.support = original.support;
+        console.error = original.consoleError;
+    }
+});
+
 test("block-submit test mode stops daemon-first submits once the marker is removed", async () => {
     const { runtime } = await startHarness({
         templates: createBlockSubmitTemplates("main-block-submit-test-mode-off")
     });
     const socketEnabled = {};
     const socketDisabled = {};
-    const clock = createFrozenTime(1700000100000);
+    const clock = createFrozenTime(Date.now() + 10000);
     const originalRpcPortDaemon = global.support.rpcPortDaemon;
     const markerPath = poolModule.getBlockSubmitTestModeState().markerPath;
 
@@ -174,9 +387,10 @@ test("block-submit test mode stops daemon-first submits once the marker is remov
         const enabledLoginReply = loginMainMiner(socketEnabled, 3003, "worker-block-submit-enabled");
         const enabledSubmitReply = submitMainBlockCandidate(socketEnabled, 3006, getLoginJobId(enabledLoginReply), { nonce: "0000002b" });
 
+        await new Promise((resolve) => setTimeout(resolve, 120));
         await flushTimers();
         assert.deepEqual(enabledSubmitReply.replies, [{ error: null, result: { status: "OK" } }]);
-        assert.equal(global.support.rpcPortDaemonCalls.length, 1);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 2);
 
         await setBlockSubmitTestMarker(markerPath, false);
         assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
@@ -188,7 +402,7 @@ test("block-submit test mode stops daemon-first submits once the marker is remov
 
         await flushTimers();
         assert.deepEqual(disabledSubmitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
-        assert.equal(global.support.rpcPortDaemonCalls.length, 1);
+        assert.equal(global.support.rpcPortDaemonCalls.length, 2);
     } finally {
         clock.restore();
         global.support.rpcPortDaemon = originalRpcPortDaemon;

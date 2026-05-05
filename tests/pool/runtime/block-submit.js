@@ -385,8 +385,10 @@ test("block-submit test mode lets a fresh wallet reach daemon submit without sen
             const submitReply = submitMainBlockCandidate(socket, 3002, getLoginJobId(loginReply));
 
             await flushTimers();
+            await new Promise((resolve) => setTimeout(resolve, 120));
+            await flushTimers();
             assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
-            assert.equal(global.support.rpcPortDaemonCalls.length, 1);
+            assert.equal(global.support.rpcPortDaemonCalls.length, 2);
             assert.equal(global.support.rpcPortDaemonCalls[0].method, "submitblock");
             assert.equal(global.support.emails.length, 0);
             assert.equal(database.blocks.length, 0);
