@@ -103,7 +103,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         assert.equal(batches.length, 0);
     });
 
-    test("preflight requires unlocked balance to cover the planned payout plus a conservative wallet fee buffer", async () => {
+    test("preflight holds without email when total wallet balance can cover the planned payout", async () => {
         const harness = createHarness({
             balances: [
                 { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
@@ -130,6 +130,39 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet preflight insufficient balance/);
         assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /required_total=/);
+        assert.equal(harness.sentEmails.some(function hasPreflightFyi(entry) {
+            return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation";
+        }), false);
+    });
+
+    test("preflight emails when total wallet balance cannot cover the planned payout", async () => {
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ]
+        });
+        const plannedBatches = await harness.runtime.planBatches();
+        const lowBalance = plannedBatches[0].totalNet + Math.round(0.0005 * COIN);
+
+        harness.support.rpcWallet = function scriptedWallet(method, params, callback) {
+            harness.wallet.calls.push({ method, params });
+            setImmediate(function replyAsync() {
+                if (method === "getbalance") {
+                    callback({ result: { balance: lowBalance, unlocked_balance: lowBalance } });
+                    return;
+                }
+                callback({ result: {} });
+            });
+        };
+
+        await harness.runtime.runCycle();
+
+        assert.equal(harness.wallet.calls.filter(function isTransfer(call) { return call.method === "transfer"; }).length, 0);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "retrying");
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /wallet preflight insufficient balance/);
+        assert.equal(harness.sentEmails.some(function hasPreflightFyi(entry) {
+            return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation";
+        }), true);
     });
 
     test("start schedules the cycle and wallet-store heartbeat and stop waits for the active cycle", async () => {
