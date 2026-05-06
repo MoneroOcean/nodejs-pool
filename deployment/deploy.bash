@@ -40,7 +40,7 @@ configure_overcommit() {
   install -d -m 755 /etc/sysctl.d
   cat >/etc/sysctl.d/90-monero-overcommit.conf <<'EOF'
 vm.overcommit_memory = 2
-vm.overcommit_ratio = 80
+vm.overcommit_ratio = 150
 EOF
   if ! sysctl -p /etc/sysctl.d/90-monero-overcommit.conf; then
     if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
