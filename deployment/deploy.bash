@@ -73,6 +73,21 @@ configure_swap() {
   fi
 }
 
+default_tari_memory_high() {
+  local mem_kb
+  mem_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo)"
+  if [ "$mem_kb" -ge $((30 * 1024 * 1024)) ]; then
+    echo 18G
+  else
+    echo 12G
+  fi
+}
+
+TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-$(default_tari_memory_high)}"
+TARI_MEMORY_SWAP_MAX="${TARI_MEMORY_SWAP_MAX:-768M}"
+TARI_MM_MEMORY_HIGH="${TARI_MM_MEMORY_HIGH:-1200M}"
+TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
+
 rpc_synced() {
   local url="$1"
   local method="$2"
@@ -348,6 +363,7 @@ Description=Monero Daemon
 After=network.target
 
 [Service]
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=/usr/local/src/monero/build/release/bin/monerod --hide-my-port --prune-blockchain --enable-dns-blocklist --no-zmq --out-peers 64 --non-interactive --restricted-rpc --rpc-bind-port=18083 --block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'
 Restart=always
 User=monerodaemon
@@ -363,7 +379,7 @@ install_tari_suite
 clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
 patch_tari_config
 
-cat >/lib/systemd/system/xtm.service <<'EOF'
+cat >/lib/systemd/system/xtm.service <<EOF
 [Unit]
 Description=Tari Daemon
 After=network.target
@@ -374,12 +390,14 @@ Restart=always
 User=monerodaemon
 Nice=10
 CPUQuota=400%
+MemoryHigh=$TARI_MEMORY_HIGH
+MemorySwapMax=$TARI_MEMORY_SWAP_MAX
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-cat >/lib/systemd/system/xtm_mm.service <<'EOF'
+cat >/lib/systemd/system/xtm_mm.service <<EOF
 [Unit]
 Description=Tari Merge Mining Daemon
 After=network.target
@@ -392,6 +410,8 @@ StartLimitBurst=0
 User=monerodaemon
 Nice=10
 CPUQuota=400%
+MemoryHigh=$TARI_MM_MEMORY_HIGH
+MemorySwapMax=$TARI_MM_MEMORY_SWAP_MAX
 
 [Install]
 WantedBy=multi-user.target
