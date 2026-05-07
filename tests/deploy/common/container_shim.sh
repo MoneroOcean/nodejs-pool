@@ -9,8 +9,75 @@ xtm_t_compat_port="${POOL_DEPLOY_XTM_T_COMPAT_PORT:-18146}"
 
 write_fake_monero_repo() {
     local dest="$1"
-    mkdir -p "$dest/build/release/bin"
+    mkdir -p "$dest/build/release/bin" "$dest/src/rpc"
     printf 'fake\n' >"$dest/.codex-fake-monero"
+    cat >"$dest/src/rpc/core_rpc_server.cpp" <<'EOF'
+namespace
+{
+  void store_difficulty(cryptonote::difficulty_type difficulty, uint64_t &sdiff, std::string &swdiff, uint64_t &stop64)
+  {
+    store_128(difficulty, sdiff, swdiff, stop64);
+  }
+}
+
+namespace cryptonote
+{
+  bool core_rpc_server::on_getblocktemplate(const COMMAND_RPC_GETBLOCKTEMPLATE::request& req, COMMAND_RPC_GETBLOCKTEMPLATE::response& res, epee::json_rpc::error& error_resp, const connection_context *ctx)
+  {
+    RPC_TRACKER(getblocktemplate);
+    bool r;
+    if (use_bootstrap_daemon_if_necessary<COMMAND_RPC_GETBLOCKTEMPLATE>(invoke_http_mode::JON_RPC, "getblocktemplate", req, res, r))
+      return r;
+
+    if(!check_core_ready())
+    {
+      error_resp.code = CORE_RPC_ERROR_CODE_CORE_BUSY;
+      error_resp.message = "Core is busy";
+      return false;
+    }
+
+    if(req.reserve_size > 255)
+    {
+      error_resp.code = CORE_RPC_ERROR_CODE_TOO_BIG_RESERVE_SIZE;
+      error_resp.message = "Too big reserved size, maximum 255";
+      return false;
+    }
+
+    if(req.reserve_size && !req.extra_nonce.empty())
+    {
+      error_resp.code = CORE_RPC_ERROR_CODE_WRONG_PARAM;
+      error_resp.message = "Cannot specify both a reserve_size and an extra_nonce";
+      return false;
+    }
+
+    if(req.extra_nonce.size() > 510)
+    {
+      error_resp.code = CORE_RPC_ERROR_CODE_TOO_BIG_RESERVE_SIZE;
+      error_resp.message = "Too big extra_nonce size, maximum 510 hex chars";
+      return false;
+    }
+
+    cryptonote::address_parse_info info;
+    block b;
+    cryptonote::blobdata blob_reserve;
+    size_t reserved_offset;
+    if(!req.extra_nonce.empty())
+    {
+      if(!string_tools::parse_hexstr_to_binbuff(req.extra_nonce, blob_reserve))
+      {
+        error_resp.code = CORE_RPC_ERROR_CODE_WRONG_PARAM;
+        error_resp.message = "Parameter extra_nonce should be a hex string";
+        return false;
+      }
+    }
+    else
+      blob_reserve.resize(req.reserve_size, 0);
+    cryptonote::difficulty_type wdiff;
+    crypto::hash prev_block;
+    return true;
+  }
+}
+EOF
     cat >"$dest/Makefile" <<'EOF'
 .PHONY: release
 release:
@@ -19,6 +86,7 @@ EOF
     for bin in monerod monero-wallet-cli monero-wallet-rpc; do
         ln -sf /workspace/repo/tests/deploy/common/fake_monerod.js "$dest/build/release/bin/$bin"
     done
+    /usr/bin/git -C "$dest" init -q
 }
 
 start_fake_chain() {

@@ -1,0 +1,38 @@
+diff --git a/src/rpc/core_rpc_server.cpp b/src/rpc/core_rpc_server.cpp
+--- a/src/rpc/core_rpc_server.cpp
++++ b/src/rpc/core_rpc_server.cpp
+@@ -146,2 +146,7 @@ namespace
+   }
++
++  // MoneroOcean: Tari merge-mining inserts this many bytes into miner tx_extra.
++  // Reserve them in monerod templates so reward penalties are calculated for the
++  // final coinbase weight, matching tari-project/tari#7045 / #7688.
++  constexpr size_t MONEROOCEAN_TARI_MERGE_MINING_DATA_SIZE = 35;
+ }
+@@ -1903,3 +1908,5 @@ namespace cryptonote
+-
+-    if(req.reserve_size > 255)
++
++    const size_t moneroocean_tari_padding_size = req.reserve_size > 0 ? MONEROOCEAN_TARI_MERGE_MINING_DATA_SIZE : 0;
++    const size_t effective_reserve_size = req.reserve_size + moneroocean_tari_padding_size;
++    if(effective_reserve_size > 255)
+     {
+@@ -1917,3 +1924,4 @@ namespace cryptonote
+-
+-    if(req.extra_nonce.size() > 510)
++
++    const size_t moneroocean_tari_extra_nonce_padding_size = req.extra_nonce.empty() ? 0 : MONEROOCEAN_TARI_MERGE_MINING_DATA_SIZE * 2;
++    if(req.extra_nonce.size() + moneroocean_tari_extra_nonce_padding_size > 510)
+     {
+@@ -1950,5 +1958,10 @@ namespace cryptonote
+       }
++      // MoneroOcean: make explicit extra_nonce templates account for the Tari
++      // merge-mining tag bytes before reward calculation.
++      blob_reserve.resize(blob_reserve.size() + MONEROOCEAN_TARI_MERGE_MINING_DATA_SIZE, 0);
+     }
+     else
+-      blob_reserve.resize(req.reserve_size, 0);
++    {
++      blob_reserve.resize(effective_reserve_size, 0);
++    }
+     cryptonote::difficulty_type wdiff;

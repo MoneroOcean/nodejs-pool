@@ -83,6 +83,10 @@ TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR}"
+MONERO_PATCH_STAGING_DIR="${MONERO_PATCH_STAGING_DIR:-/usr/local/src/monero-patches}"
+MONERO_PATCH_SCRIPT_URL="${MONERO_PATCH_SCRIPT_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/apply-monero-patches.sh}"
+MONERO_TARI_MM_RESERVE_PATCH="${MONERO_TARI_MM_RESERVE_PATCH:-monero-tari-mm-reserve.patch}"
+MONERO_TARI_MM_RESERVE_PATCH_URL="${MONERO_TARI_MM_RESERVE_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patches/$MONERO_TARI_MM_RESERVE_PATCH}"
 
 rpc_synced() {
   local url="$1"
@@ -196,6 +200,51 @@ patch_tari_config() {
   chown "$TARI_USER:$TARI_USER" "$config"
 }
 
+install_monero_patch_files() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  install -d -m 755 "$MONERO_PATCH_STAGING_DIR/patches"
+  if [ -f "$script_dir/apply-monero-patches.sh" ]; then
+    install -m 755 "$script_dir/apply-monero-patches.sh" "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh"
+  else
+    retry_command curl -fsSL -o "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh" "$MONERO_PATCH_SCRIPT_URL"
+    chmod 755 "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh"
+  fi
+  if [ -f "$script_dir/patches/$MONERO_TARI_MM_RESERVE_PATCH" ]; then
+    install -m 644 "$script_dir/patches/$MONERO_TARI_MM_RESERVE_PATCH" "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH"
+  else
+    retry_command curl -fsSL -o "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" "$MONERO_TARI_MM_RESERVE_PATCH_URL"
+  fi
+}
+
+apply_monero_patches() {
+  install_monero_patch_files
+  "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh" /usr/local/src/monero
+}
+
+monero_patch_hash() {
+  sha256sum "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" | awk '{print $1}'
+}
+
+monero_patch_stamp_file() {
+  echo /usr/local/src/monero/build/release/.moneroocean-tari-mm-reserve.patch.sha256
+}
+
+monero_patch_build_is_current() {
+  [ -x /usr/local/src/monero/build/release/bin/monerod ] &&
+    [ "$(cat "$(monero_patch_stamp_file)" 2>/dev/null || true)" = "$(monero_patch_hash)" ]
+}
+
+record_monero_patch_build() {
+  install -d -m 755 /usr/local/src/monero/build/release
+  monero_patch_hash >"$(monero_patch_stamp_file)"
+}
+
+build_monero_release() {
+  USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
+  record_monero_patch_build
+}
+
 ensure_tari_user() {
   id -u "$TARI_USER" >/dev/null 2>&1 || useradd -m -d "$TARI_HOME" -s /bin/sh "$TARI_USER"
   install -d -m 755 -o "$TARI_USER" -g "$TARI_USER" "$TARI_HOME"
@@ -261,10 +310,12 @@ printf 'colorscheme desert\nset fo-=ro\n' >/root/.vimrc
 install -m 644 -o user -g user /root/.vimrc /home/user/.vimrc
 clone_repo_once https://github.com/monero-project/monero.git /usr/local/src/monero
 cd /usr/local/src/monero
-if [ ! -x /usr/local/src/monero/build/release/bin/monerod ]; then
-  git checkout v0.18.4.6
-  retry_command git submodule update --init
-  USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
+git checkout v0.18.4.6
+retry_command git submodule update --init
+apply_monero_patches
+if ! monero_patch_build_is_current; then
+  rm -rf build
+  build_monero_release
 fi
 
 id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
