@@ -1,2 +1,2 @@
 #!/bin/bash
-/bin/echo 18081 | /bin/nc -N localhost 2223
+printf "18081\n" >/dev/tcp/127.0.0.1/2223
