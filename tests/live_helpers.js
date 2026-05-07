@@ -21,7 +21,7 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         const miner = buildSrbMiner("/tmp/SRBMiner-MULTI");
         const args = miner.buildArgs({
             algorithm: "cn/gpu",
-            host: "jp.moneroocean.stream",
+            host: "sg.moneroocean.stream",
             port: 20001,
             walletWithDifficulty: "wallet",
             password: "x~cn/gpu",
@@ -49,7 +49,7 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         const miner = buildSrbMiner("/tmp/SRBMiner-MULTI");
         const args = miner.buildArgs({
             algorithm: "autolykos2",
-            host: "jp.moneroocean.stream",
+            host: "sg.moneroocean.stream",
             port: 20001,
             walletWithDifficulty: "wallet",
             password: "x~autolykos2",

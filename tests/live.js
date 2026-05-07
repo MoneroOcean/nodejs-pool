@@ -12,6 +12,7 @@ const {
     executeProtocolProbeBatch,
     finalizeLivePoolRun,
     formatFailureDetails,
+    DEFAULT_TARGET_HOST,
     setupLiveBlockSubmitCoverage
 } = require("./live/runner.js");
 
@@ -21,7 +22,17 @@ const liveConfig = () => buildConfig({ emitStartLines: false, targetHost: LIVE_T
 const EXPECTED_LIVE_MINER_SKIP_REASONS = new Set(["no-accepted-share"]);
 
 function expectedLiveMinerSkipReason(target) {
-    if (!target || target.success || !EXPECTED_LIVE_MINER_SKIP_REASONS.has(target.failureReason)) return "";
+    if (!target || target.success) return "";
+    if (
+        target.algorithm === "autolykos2"
+        && target.host !== DEFAULT_TARGET_HOST
+        && target.failureReason === "rejected-share"
+        && target.acceptedShares === 0
+        && target.disconnects > 0
+    ) {
+        return "remote autolykos2 endpoint rejected or disconnected before an accepted share";
+    }
+    if (!EXPECTED_LIVE_MINER_SKIP_REASONS.has(target.failureReason)) return "";
     return "no accepted share before timeout on this host";
 }
 

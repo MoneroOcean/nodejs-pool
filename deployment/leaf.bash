@@ -43,24 +43,26 @@ EOF
 }
 
 configure_swap() {
-  if [ "$(awk 'NR > 1 {total += $3} END {print total + 0}' /proc/swaps)" -gt 0 ]; then
-    return 0
-  fi
   if [ ! -f /swapfile ] || [ "$(stat -c %s /swapfile 2>/dev/null || echo 0)" -lt 1073741824 ]; then
     rm -f /swapfile
     fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
   fi
   chmod 600 /swapfile
-  mkswap -f /swapfile
-  if ! swapon /swapfile; then
-    if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
-      echo "Skipping active swap enable in test mode"
-    else
-      return 1
+  if ! awk 'NR > 1 && $1 == "/swapfile" {found = 1} END {exit found ? 0 : 1}' /proc/swaps; then
+    mkswap -f /swapfile
+    chmod 600 /swapfile
+    if [ "$(awk 'NR > 1 {total += $3} END {print total + 0}' /proc/swaps)" -eq 0 ]; then
+      if ! swapon /swapfile; then
+        if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+          echo "Skipping active swap enable in test mode"
+        else
+          return 1
+        fi
+      fi
     fi
   fi
   if ! grep -Eq '^[^#]*[[:space:]]/swapfile[[:space:]]' /etc/fstab; then
-    echo "/swapfile none swap sw 0 0" >>/etc/fstab
+    echo " /swapfile none swap sw 0 0" >>/etc/fstab
   fi
 }
 
