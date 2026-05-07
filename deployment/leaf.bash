@@ -80,6 +80,7 @@ TARI_MM_MEMORY_HIGH="${TARI_MM_MEMORY_HIGH:-1200M}"
 TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
+MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR}"
 
 rpc_synced() {
   local url="$1"
@@ -277,7 +278,7 @@ After=network.target
 Environment=MALLOC_ARENA_MAX=2
 SupplementaryGroups=$HUGEPAGES_GROUP
 LimitMEMLOCK=infinity
-ExecStart=/usr/local/src/monero/build/release/bin/monerod --hide-my-port --prune-blockchain --enable-dns-blocklist --no-zmq --out-peers 64 --non-interactive --restricted-rpc --rpc-bind-port=18083 --block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'
+ExecStart=/usr/local/src/monero/build/release/bin/monerod --rpc-bind-ip=127.0.0.1 --rpc-bind-port=18083 --hide-my-port --prune-blockchain --enable-dns-blocklist --no-zmq --out-peers 64 --non-interactive --log-level '$MONERO_LOG_CATEGORIES' --block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'
 Restart=always
 User=monerodaemon
 Nice=10
