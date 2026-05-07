@@ -8,6 +8,8 @@ CERTBOT_EMAIL="${CERTBOT_EMAIL:-support@moneroocean.stream}"
 TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.0}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
+TARI_USER="${TARI_USER:-taridaemon}"
+TARI_HOME="${TARI_HOME:-/home/$TARI_USER}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
 TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
 
@@ -87,6 +89,8 @@ TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-$(default_tari_memory_high)}"
 TARI_MEMORY_SWAP_MAX="${TARI_MEMORY_SWAP_MAX:-768M}"
 TARI_MM_MEMORY_HIGH="${TARI_MM_MEMORY_HIGH:-1200M}"
 TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
+HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
+MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 
 rpc_synced() {
   local url="$1"
@@ -171,8 +175,8 @@ PY
 install_tari_suite() {
   local tmp_zip release_url
   if [ -x "$TARI_INSTALL_DIR/minotari_node" ] && [ -x "$TARI_INSTALL_DIR/minotari_merge_mining_proxy" ]; then
-    if [ ! -f /home/monerodaemon/.tari/mainnet/config/config.toml ]; then
-      sudo -u monerodaemon env HOME=/home/monerodaemon "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
+    if [ ! -f "$TARI_HOME/.tari/mainnet/config/config.toml" ]; then
+      sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
     fi
     return 0
   fi
@@ -184,18 +188,47 @@ install_tari_suite() {
   unzip -q "$tmp_zip" -d "$TARI_INSTALL_DIR"
   rm -f "$tmp_zip"
   chmod 755 "$TARI_INSTALL_DIR"/minotari_*
-  sudo -u monerodaemon env HOME=/home/monerodaemon "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
+  sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
 }
 
 patch_tari_config() {
   local patcher="/usr/local/src/patch-tari-config.sh"
-  local config="/home/monerodaemon/.tari/mainnet/config/config.toml"
+  local config="$TARI_HOME/.tari/mainnet/config/config.toml"
   local args=("$config" "--no-backup")
   retry_command curl -fsSL -o "$patcher" "$TARI_CONFIG_PATCH_URL"
   chmod 755 "$patcher"
   args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
   "$patcher" "${args[@]}"
-  chown monerodaemon:monerodaemon "$config"
+  chown "$TARI_USER:$TARI_USER" "$config"
+}
+
+ensure_tari_user() {
+  id -u "$TARI_USER" >/dev/null 2>&1 || useradd -m -d "$TARI_HOME" -s /bin/sh "$TARI_USER"
+  install -d -m 755 -o "$TARI_USER" -g "$TARI_USER" "$TARI_HOME"
+}
+
+configure_monero_hugepages() {
+  local gid
+  groupadd --system "$HUGEPAGES_GROUP" 2>/dev/null || true
+  usermod -a -G "$HUGEPAGES_GROUP" monerodaemon
+  gid="$(getent group "$HUGEPAGES_GROUP" | cut -d: -f3)"
+  test -n "$gid"
+  install -d -m 755 /etc/sysctl.d
+  cat >/etc/sysctl.d/91-moneroocean-hugepages.conf <<EOF
+vm.nr_hugepages = $MONERO_RANDOMX_HUGEPAGES
+vm.hugetlb_shm_group = $gid
+EOF
+  echo 1 >/proc/sys/vm/compact_memory 2>/dev/null || true
+  if ! sysctl -p /etc/sysctl.d/91-moneroocean-hugepages.conf; then
+    if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+      echo "Skipping active hugepage sysctl apply in test mode"
+      return 0
+    fi
+    return 1
+  fi
+  if [ "$(sysctl -n vm.nr_hugepages)" -lt "$MONERO_RANDOMX_HUGEPAGES" ]; then
+    echo "Warning: requested $MONERO_RANDOMX_HUGEPAGES hugepages but only $(sysctl -n vm.nr_hugepages) are available until reboot or more memory compaction"
+  fi
 }
 
 install -d -m 755 /etc/needrestart/conf.d
@@ -357,13 +390,19 @@ if [ ! -f /root/.moneroocean-wallet-seeds-confirmed ]; then
   touch /root/.moneroocean-wallet-seeds-confirmed
 fi
 
-cat >/lib/systemd/system/monero.service <<'EOF'
+id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
+ensure_tari_user
+configure_monero_hugepages
+
+cat >/lib/systemd/system/monero.service <<EOF
 [Unit]
 Description=Monero Daemon
 After=network.target
 
 [Service]
 Environment=MALLOC_ARENA_MAX=2
+SupplementaryGroups=$HUGEPAGES_GROUP
+LimitMEMLOCK=infinity
 ExecStart=/usr/local/src/monero/build/release/bin/monerod --hide-my-port --prune-blockchain --enable-dns-blocklist --no-zmq --out-peers 64 --non-interactive --restricted-rpc --rpc-bind-port=18083 --block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'
 Restart=always
 User=monerodaemon
@@ -374,7 +413,6 @@ CPUQuota=400%
 WantedBy=multi-user.target
 EOF
 
-id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
 install_tari_suite
 clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
 patch_tari_config
@@ -387,7 +425,8 @@ After=network.target
 [Service]
 ExecStart=/bin/bash -c "(sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142) & (sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142) & /usr/local/src/tari/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
 Restart=always
-User=monerodaemon
+User=$TARI_USER
+Environment=HOME=$TARI_HOME
 Nice=10
 CPUQuota=400%
 MemoryHigh=$TARI_MEMORY_HIGH
@@ -407,7 +446,8 @@ ExecStart=/usr/local/src/tari/minotari_merge_mining_proxy --non-interactive-mode
 Restart=always
 RestartSec=3s
 StartLimitBurst=0
-User=monerodaemon
+User=$TARI_USER
+Environment=HOME=$TARI_HOME
 Nice=10
 CPUQuota=400%
 MemoryHigh=$TARI_MM_MEMORY_HIGH

@@ -168,7 +168,7 @@ async function collectDiagnostics(context) {
         ["ports.txt", "command -v ss >/dev/null 2>&1 && ss -ltnp || true"],
         ["pm2-logs.txt", "if [ -d /home/user/.pm2/logs ]; then for file in /home/user/.pm2/logs/*; do echo \"=== $file ===\"; tail -n 200 \"$file\"; done; fi"],
         ["monerod-log.txt", "if [ -f /home/monerodaemon/.bitmonero/bitmonero.log ]; then tail -n 200 /home/monerodaemon/.bitmonero/bitmonero.log; fi"],
-        ["tari-config.toml", "if [ -f /home/monerodaemon/.tari/mainnet/config/config.toml ]; then cat /home/monerodaemon/.tari/mainnet/config/config.toml; fi"],
+        ["tari-config.toml", "if [ -f /home/taridaemon/.tari/mainnet/config/config.toml ]; then cat /home/taridaemon/.tari/mainnet/config/config.toml; fi"],
         ["leaf-pool.log", "if [ -f /home/user/nodejs-pool/.codex-pool.out ] || [ -f /home/user/nodejs-pool/.codex-pool.err ]; then for file in /home/user/nodejs-pool/.codex-pool.out /home/user/nodejs-pool/.codex-pool.err; do [ -f \"$file\" ] || continue; echo \"=== $file ===\"; tail -n 200 \"$file\"; done; fi"]
     ]) await execInContainer(context.containerName, command, { check: false, logFile: artifactPath(context, file) });
 }
@@ -309,22 +309,27 @@ async function verifyDeployInstall(context) {
         "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
         "/usr/local/src/grpc-json-proxy/base_node.proto",
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
-        "/home/monerodaemon/.tari/mainnet/config/config.toml",
-        "/etc/sysctl.d/90-monero-overcommit.conf", "/swapfile"
+        "/home/taridaemon/.tari/mainnet/config/config.toml",
+        "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
+        "/swapfile"
     ]);
     await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 150$' /etc/sysctl.d/90-monero-overcommit.conf");
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
+    await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");
+    await appendCheckLog(context, "verified Monero hugepage sysctl config");
+    await execInContainer(context.containerName, "grep -q '^User=taridaemon$' /lib/systemd/system/xtm.service && grep -q '^User=taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^SupplementaryGroups=hugepages$' /lib/systemd/system/monero.service && grep -q '^LimitMEMLOCK=infinity$' /lib/systemd/system/monero.service && id -nG monerodaemon | grep -qw hugepages");
+    await appendCheckLog(context, "verified separate Tari user and Monero hugepage access");
     await execInContainer(context.containerName, "test $(stat -c %s /swapfile) -ge 1073741824 && test $(stat -c %a /swapfile) = 600 && grep -Eq '^[^#]*[[:space:]]/swapfile[[:space:]]+none[[:space:]]+swap[[:space:]]' /etc/fstab");
     await appendCheckLog(context, "verified persistent swapfile config");
     await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /var/tmp/blockchain.raw");
     await appendCheckLog(context, "verified Tari install does not create xtm compatibility path");
     await execInContainer(context.containerName, [
-        "grep -q 'grpc_enabled = true' /home/monerodaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'public_addresses = \\[\"/ip4/127.0.0.1/tcp/18189\",\\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/monerodaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/monerodaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'submit_to_origin = false' /home/monerodaemon/.tari/mainnet/config/config.toml"
+        "grep -q 'grpc_enabled = true' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'grpc_address = \"/ip4/127.0.0.1/tcp/18142\"' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'public_addresses = \\[\"/ip4/127.0.0.1/tcp/18189\",\\]' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'submit_to_origin = false' /home/taridaemon/.tari/mainnet/config/config.toml"
     ].join(" && "));
     await appendCheckLog(context, "verified patched Tari config");
 
