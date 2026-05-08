@@ -81,7 +81,10 @@ EOF
     cat >"$dest/Makefile" <<'EOF'
 .PHONY: release
 release:
-	@true
+	@mkdir -p build/release/bin
+	@ln -sf /workspace/repo/tests/deploy/common/fake_monerod.js build/release/bin/monerod
+	@ln -sf /workspace/repo/tests/deploy/common/fake_monerod.js build/release/bin/monero-wallet-cli
+	@ln -sf /workspace/repo/tests/deploy/common/fake_monerod.js build/release/bin/monero-wallet-rpc
 EOF
     for bin in monerod monero-wallet-cli monero-wallet-rpc; do
         ln -sf /workspace/repo/tests/deploy/common/fake_monerod.js "$dest/build/release/bin/$bin"

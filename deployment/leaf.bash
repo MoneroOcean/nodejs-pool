@@ -16,6 +16,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+DEPLOY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
 
 clone_repo_once() {
@@ -201,17 +202,15 @@ patch_tari_config() {
 }
 
 install_monero_patch_files() {
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   install -d -m 755 "$MONERO_PATCH_STAGING_DIR/patches"
-  if [ -f "$script_dir/apply-monero-patches.sh" ]; then
-    install -m 755 "$script_dir/apply-monero-patches.sh" "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh"
+  if [ -f "$DEPLOY_SCRIPT_DIR/apply-monero-patches.sh" ]; then
+    install -m 755 "$DEPLOY_SCRIPT_DIR/apply-monero-patches.sh" "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh"
   else
     retry_command curl -fsSL -o "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh" "$MONERO_PATCH_SCRIPT_URL"
     chmod 755 "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh"
   fi
-  if [ -f "$script_dir/patches/$MONERO_TARI_MM_RESERVE_PATCH" ]; then
-    install -m 644 "$script_dir/patches/$MONERO_TARI_MM_RESERVE_PATCH" "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH"
+  if [ -f "$DEPLOY_SCRIPT_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" ]; then
+    install -m 644 "$DEPLOY_SCRIPT_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH"
   else
     retry_command curl -fsSL -o "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" "$MONERO_TARI_MM_RESERVE_PATCH_URL"
   fi
