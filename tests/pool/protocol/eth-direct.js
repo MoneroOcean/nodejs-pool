@@ -33,6 +33,41 @@ function assertLoginAccepted(reply) {
     assert.equal(reply.replies[0].result.status, "OK");
 }
 
+function patchEthProfile() {
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+        if (port === ETH_PORT) return 102;
+        return originalPortBlobType.call(this, port);
+    };
+    return function restoreEthProfile() {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+    };
+}
+
+function setEasyEthShare(runtime, socket, header) {
+    const state = runtime.getState();
+    const miner = state.activeMiners.get(socket.miner_id);
+    const jobId = miner.ethProxyWorkByHeader.get(String(header).replace(/^0x/, ""));
+    const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+    job.difficulty = 1;
+    job.rewarded_difficulty = 1;
+    job.rewarded_difficulty2 = 1;
+    job.norm_diff = 1;
+    state.activeBlockTemplates.ETH.hash = "34".repeat(32);
+    state.activeBlockTemplates.ETH.difficulty = 1000;
+    return { miner, job };
+}
+
+function expectedEthProxyTarget(coinDiff) {
+    const difficulty = Number(coinDiff);
+    const max = (1n << 256n) - 1n;
+    if (!Number.isFinite(difficulty) || difficulty <= 0) return "0x" + max.toString(16);
+    const scale = 1000000n;
+    const scaledDifficulty = BigInt(Math.max(1, Math.floor(difficulty * Number(scale))));
+    const target = (max * scale) / scaledDifficulty;
+    return "0x" + (target > max ? max : target).toString(16).padStart(64, "0");
+}
+
 async function withLoggedInMiner(id, params, callback) {
     const { runtime } = await startHarness();
     const socket = {};
@@ -462,6 +497,276 @@ test("eth-style template refresh sends mining.notify without repeating mining.se
         assert.equal(authorizeReply.pushes[2].method, "mining.notify");
     } finally {
         global.coinFuncs.portBlobType = originalPortBlobType;
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy login and getWork expose existing eth jobs without push protocol", async () => {
+    const { runtime } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 130,
+            method: "eth_submitLogin",
+            params: [ETH_WALLET, "ethproxy-worker"],
+            portData: global.config.ports[1]
+        });
+        assert.deepEqual(loginReply.replies, [{ error: null, result: true }]);
+        assert.equal(loginReply.pushes.length, 0);
+
+        const getWorkReply = invokePoolMethod({
+            socket,
+            id: 131,
+            method: "eth_getWork",
+            params: [],
+            portData: global.config.ports[1]
+        });
+        assert.equal(getWorkReply.replies[0].error, null);
+        assert.equal(getWorkReply.replies[0].result.length, 3);
+        assert.match(getWorkReply.replies[0].result[0], /^0x[0-9a-f]+$/);
+        assert.match(getWorkReply.replies[0].result[1], /^0x[0-9a-f]+$/);
+        assert.match(getWorkReply.replies[0].result[2], /^0x[0-9a-f]{64}$/);
+
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const jobId = miner.ethProxyWorkByHeader.get(getWorkReply.replies[0].result[0].slice(2));
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        assert.equal(miner.protocol, "ethproxy");
+        assert.equal(miner.eth_extranonce, undefined);
+        assert.equal(miner.ethProxyWorkByHeader.size, 1);
+        assert.equal(getWorkReply.replies[0].result[2], expectedEthProxyTarget(job.difficulty));
+    } finally {
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy getWork before login is rejected as unauthenticated", async () => {
+    const { runtime } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+
+    try {
+        const reply = invokePoolMethod({
+            socket: {},
+            id: 132,
+            method: "eth_getWork",
+            params: [],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "Unauthenticated", timeout: undefined }]);
+    } finally {
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy submitWork with an unknown header is rejected before share validation", async () => {
+    const { runtime, database } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            socket,
+            id: 133,
+            method: "eth_submitLogin",
+            params: [ETH_WALLET, "ethproxy-worker"],
+            portData: global.config.ports[1]
+        });
+
+        const reply = invokePoolMethod({
+            socket,
+            id: 134,
+            method: "eth_submitWork",
+            params: ["0x0000000000000001", `0x${"99".repeat(32)}`, `0x${"22".repeat(32)}`],
+            portData: global.config.ports[1]
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+
+        assert.deepEqual(reply.replies, [{ error: "Invalid job id", result: undefined }]);
+        assert.equal(miner.invalidJobIdCount, 1);
+        assert.equal(database.shares.length, 0);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy submitWork routes through existing share validation and duplicate checks", async () => {
+    const { runtime, database } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const socket = {};
+    let observedNonce = null;
+
+    try {
+        global.coinFuncs.slowHashBuff = function patchedSlowHashBuff(buffer, blockTemplate, nonce, mixhash) {
+            if (blockTemplate.port === ETH_PORT) {
+                observedNonce = nonce;
+                return [Buffer.from("ff".repeat(32), "hex"), Buffer.from("cd".repeat(32), "hex")];
+            }
+            return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 135,
+            method: "eth_submitLogin",
+            params: [ETH_WALLET, "ethproxy-worker"],
+            portData: global.config.ports[1]
+        });
+        const getWorkReply = invokePoolMethod({
+            socket,
+            id: 136,
+            method: "eth_getWork",
+            params: [],
+            portData: global.config.ports[1]
+        });
+        const header = getWorkReply.replies[0].result[0];
+        setEasyEthShare(runtime, socket, header);
+        const nonce = "0x0f34211f05a0f09a";
+
+        const first = invokePoolMethod({
+            socket,
+            id: 137,
+            method: "eth_submitWork",
+            params: [nonce, header, `0x${"22".repeat(32)}`],
+            portData: global.config.ports[1]
+        });
+        await flushShareAccumulator(() => database.shares.length === 1);
+
+        const second = invokePoolMethod({
+            socket,
+            id: 138,
+            method: "eth_submitWork",
+            params: [nonce, header, `0x${"22".repeat(32)}`],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(first.replies, [{ error: null, result: true }]);
+        assert.deepEqual(second.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(observedNonce, nonce.slice(2));
+        assert.equal(database.shares.length, 1);
+        assert.equal(database.invalidShares.length, 1);
+    } finally {
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy submitWork rejects malformed nonces before hashing", async () => {
+    const { runtime, database } = await startHarness({ freeEthExtranonces: [0xff7e] });
+    const restoreEthProfile = patchEthProfile();
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const socket = {};
+    let observedNonce = null;
+
+    try {
+        global.coinFuncs.slowHashBuff = function patchedSlowHashBuff(buffer, blockTemplate, nonce, mixhash) {
+            if (blockTemplate.port === ETH_PORT) {
+                observedNonce = nonce;
+                return [Buffer.from("ff".repeat(32), "hex"), Buffer.from("cd".repeat(32), "hex")];
+            }
+            return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 139,
+            method: "eth_submitLogin",
+            params: [ETH_WALLET, "ethproxy-worker"],
+            portData: global.config.ports[1]
+        });
+        const getWorkReply = invokePoolMethod({
+            socket,
+            id: 140,
+            method: "eth_getWork",
+            params: [],
+            portData: global.config.ports[1]
+        });
+        const header = getWorkReply.replies[0].result[0];
+        setEasyEthShare(runtime, socket, header);
+
+        const reply = invokePoolMethod({
+            socket,
+            id: 141,
+            method: "eth_submitWork",
+            params: ["0x000000000001", header, `0x${"22".repeat(32)}`],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(database.shares.length, 0);
+        assert.equal(database.invalidShares.length, 1);
+        assert.equal(observedNonce, null);
+    } finally {
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy telemetry methods are acknowledged without creating shares", async () => {
+    const { runtime, database } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+    const socket = {};
+
+    try {
+        invokePoolMethod({
+            socket,
+            id: 142,
+            method: "eth_submitLogin",
+            params: [ETH_WALLET, "ethproxy-worker"],
+            portData: global.config.ports[1]
+        });
+        const hashRateReply = invokePoolMethod({
+            socket,
+            id: 143,
+            method: "eth_submitHashrate",
+            params: ["0x0", "worker"],
+            portData: global.config.ports[1]
+        });
+        const miningReply = invokePoolMethod({
+            socket,
+            id: 144,
+            method: "eth_mining",
+            params: [],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(hashRateReply.replies, [{ error: null, result: true }]);
+        assert.deepEqual(miningReply.replies, [{ error: null, result: true }]);
+        assert.equal(database.shares.length, 0);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy telemetry before login is rejected as unauthenticated", async () => {
+    const { runtime } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+
+    try {
+        const reply = invokePoolMethod({
+            socket: {},
+            id: 145,
+            method: "eth_submitHashrate",
+            params: ["0x0", "worker"],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(reply.replies.length, 0);
+        assert.deepEqual(reply.finals, [{ error: "Unauthenticated", timeout: undefined }]);
+    } finally {
+        restoreEthProfile();
         await runtime.stop();
     }
 });
