@@ -539,6 +539,15 @@ test("eth-proxy login and getWork expose existing eth jobs without push protocol
         assert.equal(miner.ethProxyWorkByHeader.size, 1);
         assert.equal(getWorkReply.replies[0].result[2], expectedEthProxyTarget(job.difficulty));
         assert.equal(ETH_WALLET in runtime.getState().proxyMiners, false);
+
+        runtime.setTemplate(createBaseTemplate({
+            coin: "ETH",
+            port: ETH_PORT,
+            idHash: "eth-template-ethproxy-no-push",
+            height: 260
+        }));
+
+        assert.equal(loginReply.pushes.length, 0);
     } finally {
         restoreEthProfile();
         await runtime.stop();

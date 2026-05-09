@@ -20,6 +20,7 @@ const {
     DEFAULT_MOMINER_C29_DEVICE,
     EMBEDDED_ACTIVE_ALGOS,
     SRBMINER_INTEL_ALGORITHM_MAP,
+    SRBMINER_ETH_PROXY_ALGOS,
     MOMINER_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     buildRunId,
@@ -42,6 +43,7 @@ const {
 const {
     buildXmrigMiner,
     buildSrbMiner,
+    buildSrbMinerEthProxy,
     buildMoMiner,
     getActiveAlgorithms,
     buildCoveragePlan
@@ -167,7 +169,11 @@ async function createLivePoolRun(input) {
         logger.event("hardware.intel-gpu.detect", { detected: intelGpuDetected });
 
         if (intelGpuDetected && usesAny(activeAlgorithmSet, Object.keys(SRBMINER_INTEL_ALGORITHM_MAP))) {
-            miners.push(buildSrbMiner((await ensureSrbMinerBinary(config, logger)).binaryPath));
+            const srbMiner = await ensureSrbMinerBinary(config, logger);
+            miners.push(buildSrbMiner(srbMiner.binaryPath));
+            if (usesAny(activeAlgorithmSet, SRBMINER_ETH_PROXY_ALGOS)) {
+                miners.push(buildSrbMinerEthProxy(srbMiner.binaryPath));
+            }
         }
 
         if (intelGpuDetected && usesAny(activeAlgorithmSet, MOMINER_INTEL_ALGOS)) {
@@ -332,7 +338,8 @@ async function runLivePoolSuite(input) {
         for (const plan of run.coveredPlans.filter((entry) => !hasGpuProtocolProbe(entry))) {
             const result = await executeScenario(run, plan, target);
             if (run.config.emitStartLines) {
-                emitLiveStatus(result.success ? "pass" : "fail", `algo ${plan.algorithm}`, result.success ? "" : (result.failureReason || result.error || "failed"));
+                const label = plan.miner ? `algo ${plan.algorithm} ${plan.miner.name}` : `algo ${plan.algorithm}`;
+                emitLiveStatus(result.success ? "pass" : "fail", label, result.success ? "" : (result.failureReason || result.error || "failed"));
             }
             coveredResults.push({ algorithm: plan.algorithm, miner: plan.miner ? plan.miner.name : "protocol-probe", target: result });
         }

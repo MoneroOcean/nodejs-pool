@@ -82,6 +82,7 @@ const XMRIG_ALGO_PERF_SEED = Object.fromEntries(words(`
 `).map((algorithm) => [algorithm, 1]));
 
 const SRBMINER_NICEHASH_STRATUM_ALGOS = new Set(["etchash"]);
+const SRBMINER_ETH_PROXY_ALGOS = new Set(["etchash"]);
 const MOMINER_INTEL_ALGOS = new Set(["c29"]);
 const GPU_PROTOCOL_PROBE_ALGOS = new Set(["autolykos2", "c29", "etchash", "kawpow"]);
 
@@ -402,6 +403,7 @@ module.exports = {
     XMRIG_CPU_ALGOS,
     XMRIG_ALGO_PERF_SEED,
     SRBMINER_NICEHASH_STRATUM_ALGOS,
+    SRBMINER_ETH_PROXY_ALGOS,
     MOMINER_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     stripAnsi,

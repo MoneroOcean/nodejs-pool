@@ -147,7 +147,8 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
         try {
             const minerPlans = state.run.coveredPlans.filter((plan) => plan.miner);
             for (const plan of minerPlans) {
-                await t.test(plan.algorithm, { timeout: state.run.config.timeoutMs + 60 * 1000 }, async (t) => {
+                const testName = `${plan.algorithm} ${plan.miner.name}`;
+                await t.test(testName, { timeout: state.run.config.timeoutMs + 60 * 1000 }, async (t) => {
                     const target = await executeScenario(state.run, plan, state.target);
                     const expectedSkipReason = expectedLiveMinerSkipReason(target);
                     const coveredTarget = expectedSkipReason ? { ...target, skipped: true, skipReason: expectedSkipReason } : target;

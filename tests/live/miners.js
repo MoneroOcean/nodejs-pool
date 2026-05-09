@@ -11,6 +11,7 @@ const {
     XMRIG_CPU_ALGOS,
     XMRIG_ALGO_PERF_SEED,
     SRBMINER_NICEHASH_STRATUM_ALGOS,
+    SRBMINER_ETH_PROXY_ALGOS,
     MOMINER_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     stripAnsi,
@@ -203,7 +204,7 @@ function createSrbMinerParser() {
         accepted: /\b(share|result)\s+accepted\b|\baccepted\s+(share|result)\b/i,
         rejected: /\b(share|result)\s+rejected\b|\brejected\s+(share|result)\b/i,
         invalid: /\binvalid\b.*\bshare\b|\bshare\b.*\binvalid\b/i,
-        error: /\b(no active pools|connect error|connection refused|socket error|network error|failed to resolve|retry|job timeout)\b/i,
+        error: /\b(no active pools|connect error|connection refused|socket error|network error|failed to resolve|retry|job timeout|parse error)\b/i,
         retry: /\bretry\b/i,
         disconnect: /\b(disconnect|connection closed|reconnect)\b/i,
         hashrate: parseSrbMinerHashrate
@@ -300,6 +301,39 @@ function buildSrbMiner(binaryPath) {
             }
 
             return args;
+        }
+    };
+}
+
+function buildSrbMinerEthProxy(binaryPath) {
+    return {
+        name: "srbminer-multi-ethproxy",
+        binaryPath,
+        algorithms: new Set(SRBMINER_ETH_PROXY_ALGOS),
+        parser: createSrbMinerParser(),
+        style: "srbminer",
+        supplementalCoverage: true,
+        buildArgs(context) {
+            return [
+                "--algorithm", SRBMINER_INTEL_ALGORITHM_MAP[context.algorithm] || context.algorithm,
+                "--disable-cpu",
+                "--disable-gpu-amd",
+                "--disable-gpu-nvidia",
+                "--pool", `${context.host}:${context.port}`,
+                "--wallet", context.walletWithDifficulty,
+                "--password", context.password,
+                "--worker", context.worker,
+                "--tls", context.tls ? "true" : "false",
+                "--gpu-id", context.srbMinerGpuId,
+                "--enable-workers-ramp-up",
+                "--api-enable",
+                "--api-port", String(context.srbMinerApiPort),
+                "--api-rig-name", context.worker,
+                "--keepalive", "true",
+                "--max-no-share-sent", String(Math.ceil(context.timeoutMs / 1000)),
+                "--give-up-limit", "1",
+                "--esm", "0"
+            ];
         }
     };
 }
@@ -441,14 +475,24 @@ function getActiveAlgorithms(logger) {
 
 function buildCoveragePlan(algorithms, miners, options = {}) {
     return algorithms.flatMap((definition) => {
-        const miner = miners.find((candidate) => candidate.algorithms.has(definition.algorithm)) || null;
+        const miner = miners.find((candidate) => !candidate.supplementalCoverage && candidate.algorithms.has(definition.algorithm)) || null;
         const suppressProbe = options.suppressGpuProtocolProbes && GPU_PROTOCOL_PROBE_ALGOS.has(definition.algorithm);
-        return [{
+        const plans = [{
             algorithm: definition.algorithm,
             miner,
             protocolProbe: miner || suppressProbe ? "" : (definition.protocolProbe || ""),
             successCriterion: definition.successCriterion || "accepted-share"
         }];
+        for (const supplementalMiner of miners) {
+            if (!supplementalMiner.supplementalCoverage || !supplementalMiner.algorithms.has(definition.algorithm)) continue;
+            plans.push({
+                algorithm: definition.algorithm,
+                miner: supplementalMiner,
+                protocolProbe: "",
+                successCriterion: definition.successCriterion || "accepted-share"
+            });
+        }
+        return plans;
     });
 }
 
@@ -497,6 +541,7 @@ function determineFailureReason(plan, metrics) {
 module.exports = {
     buildXmrigMiner,
     buildSrbMiner,
+    buildSrbMinerEthProxy,
     buildMoMiner,
     writeXmrigSeedConfig,
     getActiveAlgorithms,

@@ -70,6 +70,23 @@ test("socket parser ignores requests missing an RPC id", async () => {
     }
 });
 
+test("socket parser accepts JSON-RPC id zero", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        socket.write(`${JSON.stringify({ id: 0, method: "getjobtemplate", params: {} })}\n`);
+        const reply = await waitForSocketJson(socket);
+
+        assert.equal(reply.id, 0);
+        assert.equal(reply.result, null);
+        assert.equal(reply.error.message, "Unauthenticated");
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
 test("socket parser ignores requests missing an RPC method", async () => {
     const { runtime } = await startHarness();
     const socket = await openRawSocket(MAIN_PORT);

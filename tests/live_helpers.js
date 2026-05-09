@@ -8,6 +8,8 @@ const {
 } = require("./live/shared.js");
 const {
     buildSrbMiner,
+    buildSrbMinerEthProxy,
+    buildCoveragePlan,
     getActiveAlgorithms
 } = require("./live/miners.js");
 const {
@@ -65,6 +67,39 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         assert.equal(args.includes("--enable-workers-ramp-up"), true);
         assert.equal(args.includes("--gpu-disable-interleaving"), false);
         assert.equal(args.includes("--disable-gpu-dual-kernels"), false);
+    });
+
+    test("SRBMiner eth-proxy args force getWork mode for etchash", () => {
+        const miner = buildSrbMinerEthProxy("/tmp/SRBMiner-MULTI");
+        const args = miner.buildArgs({
+            algorithm: "etchash",
+            host: "sg.moneroocean.stream",
+            port: 20001,
+            walletWithDifficulty: "wallet",
+            password: "x~etchash",
+            worker: "worker",
+            tls: true,
+            srbMinerGpuId: "0",
+            srbMinerApiPort: 21550,
+            timeoutMs: 180000
+        });
+
+        assert.equal(miner.supplementalCoverage, true);
+        assert.equal(args[args.indexOf("--esm") + 1], "0");
+        assert.equal(args.includes("--nicehash"), false);
+        assert.equal(args[args.indexOf("--algorithm") + 1], "etchash");
+    });
+
+    test("live coverage keeps regular SRBMiner and adds eth-proxy etchash coverage", () => {
+        const regular = buildSrbMiner("/tmp/SRBMiner-MULTI");
+        const ethProxy = buildSrbMinerEthProxy("/tmp/SRBMiner-MULTI");
+        const plan = buildCoveragePlan([{ algorithm: "etchash" }, { algorithm: "kawpow" }], [regular, ethProxy]);
+
+        assert.deepEqual(plan.map((entry) => [entry.algorithm, entry.miner.name]), [
+            ["etchash", "srbminer-multi"],
+            ["etchash", "srbminer-multi-ethproxy"],
+            ["kawpow", "srbminer-multi"]
+        ]);
     });
 
     test("SRBMiner live default intensity is only conservative for cn/gpu", () => {
