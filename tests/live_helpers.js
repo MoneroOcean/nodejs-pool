@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+    DEFAULT_TIMEOUT_MS,
     DEFAULT_SRBMINER_GPU_INTENSITY,
     DEFAULT_SRBMINER_CN_GPU_INTENSITY
 } = require("./live/shared.js");
@@ -33,13 +34,14 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             srbMinerLogPath: "/tmp/srbminer.log",
             srbMinerGpuIntensity: "8",
             srbMinerApiPort: 21550,
-            timeoutMs: 180000
+            timeoutMs: DEFAULT_TIMEOUT_MS
         });
 
         assert.equal(args[args.indexOf("--log-file") + 1], "/tmp/srbminer.log");
         assert.equal(args[args.indexOf("--log-file-mode") + 1], "0");
         assert.equal(args[args.indexOf("--gpu-intensity") + 1], "8");
         assert.equal(args.includes("--enable-workers-ramp-up"), true);
+        assert.equal(args[args.indexOf("--max-no-share-sent") + 1], String(DEFAULT_TIMEOUT_MS / 1000));
         assert.equal(args.includes("--gpu-disable-interleaving"), true);
         assert.equal(args.includes("--disable-gpu-dual-kernels"), true);
         assert.equal(args.includes("--autotune-no-load"), true);
@@ -60,7 +62,7 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             srbMinerGpuId: "0",
             srbMinerGpuIntensity: "",
             srbMinerApiPort: 21550,
-            timeoutMs: 180000
+            timeoutMs: DEFAULT_TIMEOUT_MS
         });
 
         assert.equal(args.includes("--gpu-intensity"), false);
@@ -81,11 +83,12 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             tls: true,
             srbMinerGpuId: "0",
             srbMinerApiPort: 21550,
-            timeoutMs: 180000
+            timeoutMs: DEFAULT_TIMEOUT_MS
         });
 
         assert.equal(miner.supplementalCoverage, true);
         assert.equal(args[args.indexOf("--esm") + 1], "0");
+        assert.equal(args[args.indexOf("--max-no-share-sent") + 1], String(DEFAULT_TIMEOUT_MS / 1000));
         assert.equal(args.includes("--nicehash"), false);
         assert.equal(args[args.indexOf("--algorithm") + 1], "etchash");
     });
