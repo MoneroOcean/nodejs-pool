@@ -44,17 +44,26 @@ function patchEthProfile() {
     };
 }
 
+function findTemplateForJob(state, job) {
+    const activeTemplate = state.activeBlockTemplates[job.coin];
+    if (activeTemplate && activeTemplate.idHash === job.blockHash) return activeTemplate;
+    return state.pastBlockTemplates[job.coin]?.toarray().find((template) => template.idHash === job.blockHash);
+}
+
 function setEasyEthShare(runtime, socket, header) {
     const state = runtime.getState();
     const miner = state.activeMiners.get(socket.miner_id);
     const jobId = miner.ethProxyWorkByHeader.get(String(header).replace(/^0x/, ""));
     const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+    assert.ok(job);
     job.difficulty = 1;
     job.rewarded_difficulty = 1;
     job.rewarded_difficulty2 = 1;
     job.norm_diff = 1;
-    state.activeBlockTemplates.ETH.hash = "34".repeat(32);
-    state.activeBlockTemplates.ETH.difficulty = 1000;
+    const template = findTemplateForJob(state, job);
+    assert.ok(template);
+    template.hash = "34".repeat(32);
+    template.difficulty = 1000;
     return { miner, job };
 }
 
@@ -664,6 +673,73 @@ test("eth-proxy submitWork routes through existing share validation and duplicat
         assert.equal(observedNonce, nonce.slice(2));
         assert.equal(database.shares.length, 1);
         assert.equal(database.invalidShares.length, 1);
+    } finally {
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy submitWork keeps polled jobs during template churn", async () => {
+    const { runtime, database } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const socket = {};
+
+    try {
+        global.coinFuncs.slowHashBuff = function patchedSlowHashBuff(buffer, blockTemplate, nonce, mixhash) {
+            if (blockTemplate.port === ETH_PORT) return [Buffer.from("ff".repeat(32), "hex"), Buffer.from("cd".repeat(32), "hex")];
+            return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 139,
+            method: "eth_submitLogin",
+            params: [ETH_WALLET, "ethproxy-worker"],
+            portData: global.config.ports[1]
+        });
+        const getWorkReply = invokePoolMethod({
+            socket,
+            id: 140,
+            method: "eth_getWork",
+            params: [],
+            portData: global.config.ports[1]
+        });
+        const header = getWorkReply.replies[0].result[0];
+        const { miner, job } = setEasyEthShare(runtime, socket, header);
+
+        for (let i = 0; i < 10; i += 1) {
+            runtime.setTemplate(createBaseTemplate({
+                coin: "ETH",
+                port: ETH_PORT,
+                idHash: `eth-template-ethproxy-retention-${i}`,
+                height: 300 + i
+            }));
+            invokePoolMethod({
+                socket,
+                id: 141 + i,
+                method: "eth_getWork",
+                params: [],
+                portData: global.config.ports[1]
+            });
+        }
+
+        assert.equal(miner.ethProxyWorkByHeader.has(header.slice(2)), true);
+        assert.equal(miner.validJobs.toarray().some((entry) => entry.id === job.id), true);
+
+        const reply = invokePoolMethod({
+            socket,
+            id: 154,
+            method: "eth_submitWork",
+            params: ["0x0f34211f05a0f09a", header, `0x${"22".repeat(32)}`],
+            portData: global.config.ports[1]
+        });
+        await flushShareAccumulator(() => database.shares.length === 1);
+
+        assert.deepEqual(reply.replies, [{ error: null, result: true }]);
+        assert.equal(database.shares.length, 1);
+        assert.equal(database.invalidShares.length, 0);
     } finally {
         global.coinFuncs.slowHashBuff = originalSlowHashBuff;
         restoreEthProfile();
