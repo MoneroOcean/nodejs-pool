@@ -534,9 +534,11 @@ test("eth-proxy login and getWork expose existing eth jobs without push protocol
         const jobId = miner.ethProxyWorkByHeader.get(getWorkReply.replies[0].result[0].slice(2));
         const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
         assert.equal(miner.protocol, "ethproxy");
+        assert.equal(miner.agent, "[generic_eth_getwork]");
         assert.equal(miner.eth_extranonce, undefined);
         assert.equal(miner.ethProxyWorkByHeader.size, 1);
         assert.equal(getWorkReply.replies[0].result[2], expectedEthProxyTarget(job.difficulty));
+        assert.equal(ETH_WALLET in runtime.getState().proxyMiners, false);
     } finally {
         restoreEthProfile();
         await runtime.stop();
