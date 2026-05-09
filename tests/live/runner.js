@@ -13,6 +13,7 @@ const {
     DEFAULT_THREADS,
     DEFAULT_DIFFICULTY,
     DEFAULT_TARGET_ACCEPTED_SHARES,
+    DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS,
     DEFAULT_SRBMINER_GPU_ID,
     DEFAULT_SRBMINER_GPU_INTENSITY,
     DEFAULT_SRBMINER_CN_GPU_INTENSITY,
@@ -79,7 +80,8 @@ function buildSummary(run, coveredResults) {
             difficulty: run.config.difficulty,
             threads: run.config.threads,
             wallet: run.config.wallet,
-            timeoutMs: run.config.timeoutMs
+            timeoutMs: run.config.timeoutMs,
+            ethProxySuccessObserveMs: run.config.ethProxySuccessObserveMs
         },
         hardware: run.hardware || {},
         minerInventory: run.miners.map((miner) => ({
@@ -266,6 +268,7 @@ function buildConfig(input) {
         threads: DEFAULT_THREADS,
         timeoutMs: DEFAULT_TIMEOUT_MS,
         targetAcceptedShares: DEFAULT_TARGET_ACCEPTED_SHARES,
+        ethProxySuccessObserveMs: DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS,
         srbMinerGpuId: DEFAULT_SRBMINER_GPU_ID,
         srbMinerGpuIntensity: DEFAULT_SRBMINER_GPU_INTENSITY,
         srbMinerCnGpuIntensity: DEFAULT_SRBMINER_CN_GPU_INTENSITY,

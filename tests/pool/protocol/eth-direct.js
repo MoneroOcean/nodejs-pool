@@ -10,6 +10,7 @@ const {
     ETH_WALLET,
     VALID_RESULT,
     JsonLineClient,
+    waitForSocketClose,
     startHarness,
     flushTimers,
     invokePoolMethod,
@@ -510,7 +511,7 @@ test("eth-style template refresh sends mining.notify without repeating mining.se
     }
 });
 
-test("eth-proxy login and getWork expose existing eth jobs without push protocol", async () => {
+test("eth-proxy login, getWork, and template refresh expose getWork-shaped jobs", async () => {
     const { runtime } = await startHarness();
     const restoreEthProfile = patchEthProfile();
     const socket = {};
@@ -552,11 +553,21 @@ test("eth-proxy login and getWork expose existing eth jobs without push protocol
         runtime.setTemplate(createBaseTemplate({
             coin: "ETH",
             port: ETH_PORT,
-            idHash: "eth-template-ethproxy-no-push",
+            idHash: "eth-template-ethproxy-push",
             height: 260
         }));
 
-        assert.equal(loginReply.pushes.length, 0);
+        assert.equal(loginReply.pushes.length, 1);
+        const push = loginReply.pushes[0];
+        assert.equal(push.id, 0);
+        assert.equal(push.jsonrpc, "2.0");
+        assert.match(push.algo, /^eth(?:ash|chash)$/);
+        assert.equal(push.result.length, 3);
+        assert.match(push.result[0], /^0x[0-9a-f]+$/);
+        assert.match(push.result[1], /^0x[0-9a-f]+$/);
+        assert.match(push.result[2], /^0x[0-9a-f]{64}$/);
+        assert.notEqual(push.result[0], getWorkReply.replies[0].result[0]);
+        assert.equal(miner.ethProxyWorkByHeader.has(push.result[0].slice(2)), true);
     } finally {
         restoreEthProfile();
         await runtime.stop();
@@ -742,6 +753,52 @@ test("eth-proxy submitWork keeps polled jobs during template churn", async () =>
         assert.equal(database.invalidShares.length, 0);
     } finally {
         global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        restoreEthProfile();
+        await runtime.stop();
+    }
+});
+
+test("eth-proxy stale submitWork replies before reconnecting the getWork miner", async () => {
+    const { runtime } = await startHarness();
+    const restoreEthProfile = patchEthProfile();
+    const client = new JsonLineClient(ETH_PORT);
+
+    try {
+        await client.connect();
+        const loginReply = await client.request({
+            id: 170,
+            method: "eth_submitLogin",
+            params: [ETH_WALLET, "ethproxy-worker"]
+        });
+        assert.equal(loginReply.error, null);
+        assert.equal(loginReply.result, true);
+
+        const getWorkReply = await client.request({
+            id: 171,
+            method: "eth_getWork",
+            params: []
+        });
+        const header = getWorkReply.result[0];
+
+        for (let height = 0; height < 12; height += 1) {
+            runtime.setTemplate(createBaseTemplate({
+                coin: "ETH",
+                port: ETH_PORT,
+                idHash: `eth-template-ethproxy-expired-${height}`,
+                height: 400 + height
+            }));
+        }
+
+        const submitReply = await client.request({
+            id: 172,
+            method: "eth_submitWork",
+            params: ["0x0f34211f05a0f09a", header, `0x${"22".repeat(32)}`]
+        });
+
+        assert.equal(submitReply.error.message, "Block expired");
+        await waitForSocketClose(client.socket, 1000);
+    } finally {
+        await client.close();
         restoreEthProfile();
         await runtime.stop();
     }

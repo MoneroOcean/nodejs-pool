@@ -17,6 +17,7 @@ const {
     stopProcess,
     summarizeLatency,
     hasMetSuccessCriterion,
+    getSuccessObserveMs,
     determineFailureReason
 } = require("./miners.js");
 const {
@@ -176,12 +177,19 @@ function attachAttemptFileTail(run, plan, target, attempt, name, filePath, onLin
     };
 }
 
-async function waitForMinerAttempt(child, metrics, plan, timeoutMs, getProcessError) {
+async function waitForMinerAttempt(child, metrics, plan, timeoutMs, getProcessError, successObserveMs = 0) {
     const deadline = Date.now() + timeoutMs;
+    let successObservedAt = 0;
     while (Date.now() < deadline) {
         if (getProcessError()) break;
-        if (hasMetSuccessCriterion(plan, metrics)) break;
         if (child.exitCode !== null) break;
+        if (metrics.rejectedShares > 0 || metrics.invalidShares > 0) break;
+        if (hasMetSuccessCriterion(plan, metrics)) {
+            successObservedAt = successObservedAt || Date.now();
+            if (Date.now() - successObservedAt >= successObserveMs) break;
+        } else {
+            successObservedAt = 0;
+        }
         await sleep(1000);
     }
 }
@@ -488,7 +496,7 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         }));
     }
 
-    await waitForMinerAttempt(child, metrics, plan, config.timeoutMs, () => processError);
+    await waitForMinerAttempt(child, metrics, plan, config.timeoutMs, () => processError, getSuccessObserveMs(plan, config));
     await stopProcess(child);
 
     const exitState = await childClosed;

@@ -195,7 +195,7 @@ function createXmrigParser() {
 }
 
 function createSrbMinerParser() {
-    return createMinerParser({
+    const baseParser = createMinerParser({
         connect: /\b(connected|logged in|authorized|subscribed|set difficulty)\b/i,
         job: /\b(new job|job received|job from|set difficulty|difficulty)\b/i,
         jobExclude: /\b(no job|job timeout)\b/i,
@@ -209,6 +209,26 @@ function createSrbMinerParser() {
         disconnect: /\b(disconnect|connection closed|reconnect)\b/i,
         hashrate: parseSrbMinerHashrate
     });
+    return function parseSrbMinerLine(line, metrics) {
+        const matched = baseParser(line, metrics);
+        return parseSrbMinerShareTable(line, metrics) || matched;
+    };
+}
+
+function parseSrbMinerShareTable(line, metrics) {
+    const cleanLine = stripAnsi(line);
+    const match = cleanLine.match(/\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|/);
+    if (!match || !/\b(?:Total|GPU\d+)\b/i.test(cleanLine)) return false;
+    const accepted = Number.parseInt(match[1], 10);
+    const rejected = Number.parseInt(match[2], 10);
+    const invalid = Number.parseInt(match[3], 10);
+    if (Number.isFinite(accepted) && accepted > metrics.acceptedShares) {
+        metrics.acceptedShares = accepted;
+        metrics.firstAcceptedAtMs = metrics.firstAcceptedAtMs || Date.now();
+    }
+    if (Number.isFinite(rejected) && rejected > metrics.rejectedShares) metrics.rejectedShares = rejected;
+    if (Number.isFinite(invalid) && invalid > metrics.invalidShares) metrics.invalidShares = invalid;
+    return true;
 }
 
 function createMoMinerParser() {
@@ -529,6 +549,13 @@ function hasMetSuccessCriterion(plan, metrics) {
     return metrics.acceptedShares >= metrics.targetAcceptedShares && metrics.rejectedShares === 0 && metrics.invalidShares === 0;
 }
 
+function getSuccessObserveMs(plan, config) {
+    const minerName = plan && plan.miner ? String(plan.miner.name || "") : "";
+    if (!/ethproxy/i.test(minerName)) return 0;
+    const configured = Number(config && config.ethProxySuccessObserveMs);
+    return Number.isFinite(configured) && configured > 0 ? configured : 0;
+}
+
 function determineFailureReason(plan, metrics) {
     if (hasMetSuccessCriterion(plan, metrics)) return "";
     if (!metrics.connected) return "connection-failure";
@@ -550,5 +577,6 @@ module.exports = {
     stopProcess,
     summarizeLatency,
     hasMetSuccessCriterion,
+    getSuccessObserveMs,
     determineFailureReason
 };
