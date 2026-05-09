@@ -305,7 +305,7 @@ async function verifyDeployInstall(context) {
         "/root/mysql_pass", "/home/user/nodejs-pool/config.json", "/home/user/wallets/wallet.address.txt",
         "/home/user/wallets/wallet_fee.address.txt", "/lib/systemd/system/monero.service",
         "/lib/systemd/system/xtm.service", "/lib/systemd/system/xtm_mm.service",
-        "/usr/local/src/tari/minotari_node", "/usr/local/src/tari/minotari_merge_mining_proxy",
+        "/usr/local/src/tari/target/release/minotari_node", "/usr/local/src/tari/target/release/minotari_merge_mining_proxy",
         "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
         "/usr/local/src/grpc-json-proxy/base_node.proto",
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
@@ -319,13 +319,8 @@ async function verifyDeployInstall(context) {
     await appendCheckLog(context, "verified Monero hugepage sysctl config");
     await execInContainer(context.containerName, "grep -Fq -- '--rpc-bind-ip=127.0.0.1' /lib/systemd/system/monero.service && grep -Fq -- \"--log-level '*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR'\" /lib/systemd/system/monero.service && ! grep -Fq -- '--restricted-rpc' /lib/systemd/system/monero.service");
     await appendCheckLog(context, "verified local unrestricted Monero RPC service config");
-    await execInContainer(context.containerName, [
-        "test -f /usr/local/src/monero-patches/apply-monero-patches.sh",
-        "test -f /usr/local/src/monero-patches/patches/monero-tari-mm-reserve.patch",
-        "grep -Fq MONEROOCEAN_TARI_MERGE_MINING_DATA_SIZE /usr/local/src/monero/src/rpc/core_rpc_server.cpp",
-        "test -s /usr/local/src/monero/build/release/.moneroocean-tari-mm-reserve.patch.sha256"
-    ].join(" && "));
-    await appendCheckLog(context, "verified Monero Tari merge-mining reserve patch");
+    await execInContainer(context.containerName, "! grep -R -Fq MONEROOCEAN_TARI_MERGE_MINING /usr/local/src/monero/src && test ! -e /usr/local/src/monero/build/release/.moneroocean-tari-mm-reserve.patch.sha256");
+    await appendCheckLog(context, "verified unpatched Monero build");
     await execInContainer(context.containerName, "grep -q '^User=taridaemon$' /lib/systemd/system/xtm.service && grep -q '^User=taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^SupplementaryGroups=hugepages$' /lib/systemd/system/monero.service && grep -q '^LimitMEMLOCK=infinity$' /lib/systemd/system/monero.service && id -nG monerodaemon | grep -qw hugepages");
     await appendCheckLog(context, "verified separate Tari user and Monero hugepage access");
     await execInContainer(context.containerName, "test $(stat -c %s /swapfile) -ge 1073741824 && test $(stat -c %a /swapfile) = 600 && grep -Eq '^[^#]*[[:space:]]/swapfile[[:space:]]+none[[:space:]]+swap[[:space:]]' /etc/fstab");

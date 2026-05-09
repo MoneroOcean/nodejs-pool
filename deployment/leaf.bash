@@ -1,7 +1,8 @@
 #!/bin/bash -ex
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.0}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.1}"
+TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
 TARI_USER="${TARI_USER:-taridaemon}"
@@ -84,10 +85,6 @@ TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR}"
-MONERO_PATCH_STAGING_DIR="${MONERO_PATCH_STAGING_DIR:-/usr/local/src/monero-patches}"
-MONERO_PATCH_SCRIPT_URL="${MONERO_PATCH_SCRIPT_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/apply-monero-patches.sh}"
-MONERO_TARI_MM_RESERVE_PATCH="${MONERO_TARI_MM_RESERVE_PATCH:-monero-tari-mm-reserve.patch}"
-MONERO_TARI_MM_RESERVE_PATCH_URL="${MONERO_TARI_MM_RESERVE_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patches/$MONERO_TARI_MM_RESERVE_PATCH}"
 
 rpc_synced() {
   local url="$1"
@@ -138,54 +135,37 @@ wait_for_tari_sync() {
   return 1
 }
 
-tari_release_arch() {
-  case "${TARI_RELEASE_ARCH:-$(uname -m)}" in
-    x86_64|amd64) echo x86_64 ;;
-    aarch64|arm64) echo arm64 ;;
-    *) echo "Unsupported Tari release architecture: ${TARI_RELEASE_ARCH:-$(uname -m)}" >&2; return 1 ;;
-  esac
+ensure_rust_toolchain() {
+  if [ -s "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+  fi
+  if ! command -v cargo >/dev/null 2>&1; then
+    retry_command bash -lc 'set -o pipefail; curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable'
+    . "$HOME/.cargo/env"
+  fi
+  retry_command rustup update stable
 }
 
-tari_release_url() {
-  local arch version api_url
-  arch="$(tari_release_arch)"
-  version="${TARI_RELEASE_TAG#v}"
-  api_url="https://api.github.com/repos/tari-project/tari/releases/tags/$TARI_RELEASE_TAG"
-  python3 - "$api_url" "$version" "$TARI_NETWORK" "$arch" <<'PY'
-import json
-import re
-import sys
-import urllib.request
-
-api_url, version, network, arch = sys.argv[1:]
-with urllib.request.urlopen(api_url) as response:
-    release = json.load(response)
-pattern = re.compile(rf"^tari_suite-{re.escape(version)}-{re.escape(network)}-[^-]+-linux-{re.escape(arch)}\.zip$")
-matches = [asset for asset in release.get("assets", []) if pattern.match(asset.get("name", ""))]
-if len(matches) != 1:
-    names = ", ".join(asset.get("name", "") for asset in release.get("assets", []))
-    raise SystemExit(f"Expected one Tari {network} linux-{arch} asset for {version}, found {len(matches)}. Assets: {names}")
-print(matches[0]["browser_download_url"])
-PY
+checkout_repo_ref() {
+  local repo="$1"
+  local dest="$2"
+  local ref="$3"
+  if [ -e "$dest" ] && [ ! -d "$dest/.git" ]; then
+    mv "$dest" "$dest.pre-source.$(date +%Y%m%d%H%M%S)"
+  fi
+  clone_repo_once "$repo" "$dest"
+  cd "$dest"
+  retry_command git fetch --tags origin
+  git checkout --force "$ref"
 }
 
 install_tari_suite() {
-  local tmp_zip release_url
-  if [ -x "$TARI_INSTALL_DIR/minotari_node" ] && [ -x "$TARI_INSTALL_DIR/minotari_merge_mining_proxy" ]; then
-    if [ ! -f "$TARI_HOME/.tari/mainnet/config/config.toml" ]; then
-      sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
-    fi
-    return 0
+  ensure_rust_toolchain
+  checkout_repo_ref "$TARI_REPO_URL" "$TARI_INSTALL_DIR" "$TARI_RELEASE_TAG"
+  TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release -p minotari_node -p minotari_merge_mining_proxy
+  if [ ! -f "$TARI_HOME/.tari/mainnet/config/config.toml" ]; then
+    sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/target/release/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
   fi
-  rm -rf "$TARI_INSTALL_DIR"
-  install -d "$TARI_INSTALL_DIR"
-  tmp_zip="$(mktemp)"
-  release_url="$(tari_release_url)"
-  retry_command curl -fsSL -o "$tmp_zip" "$release_url"
-  unzip -q "$tmp_zip" -d "$TARI_INSTALL_DIR"
-  rm -f "$tmp_zip"
-  chmod 755 "$TARI_INSTALL_DIR"/minotari_*
-  sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
 }
 patch_tari_config() {
   local patcher="/usr/local/src/patch-tari-config.sh"
@@ -201,47 +181,12 @@ patch_tari_config() {
   chown "$TARI_USER:$TARI_USER" "$config"
 }
 
-install_monero_patch_files() {
-  install -d -m 755 "$MONERO_PATCH_STAGING_DIR/patches"
-  if [ -f "$DEPLOY_SCRIPT_DIR/apply-monero-patches.sh" ]; then
-    install -m 755 "$DEPLOY_SCRIPT_DIR/apply-monero-patches.sh" "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh"
-  else
-    retry_command curl -fsSL -o "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh" "$MONERO_PATCH_SCRIPT_URL"
-    chmod 755 "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh"
-  fi
-  if [ -f "$DEPLOY_SCRIPT_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" ]; then
-    install -m 644 "$DEPLOY_SCRIPT_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH"
-  else
-    retry_command curl -fsSL -o "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" "$MONERO_TARI_MM_RESERVE_PATCH_URL"
-  fi
-}
-
-apply_monero_patches() {
-  install_monero_patch_files
-  "$MONERO_PATCH_STAGING_DIR/apply-monero-patches.sh" /usr/local/src/monero
-}
-
-monero_patch_hash() {
-  sha256sum "$MONERO_PATCH_STAGING_DIR/patches/$MONERO_TARI_MM_RESERVE_PATCH" | awk '{print $1}'
-}
-
-monero_patch_stamp_file() {
-  echo /usr/local/src/monero/build/release/.moneroocean-tari-mm-reserve.patch.sha256
-}
-
-monero_patch_build_is_current() {
-  [ -x /usr/local/src/monero/build/release/bin/monerod ] &&
-    [ "$(cat "$(monero_patch_stamp_file)" 2>/dev/null || true)" = "$(monero_patch_hash)" ]
-}
-
-record_monero_patch_build() {
-  install -d -m 755 /usr/local/src/monero/build/release
-  monero_patch_hash >"$(monero_patch_stamp_file)"
-}
-
 build_monero_release() {
   USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
-  record_monero_patch_build
+}
+
+monero_build_is_current() {
+  [ -x /usr/local/src/monero/build/release/bin/monerod ]
 }
 
 ensure_tari_user() {
@@ -282,7 +227,7 @@ if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
 else
   retry_command apt-get -o Acquire::Retries=3 full-upgrade -y
 fi
-retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl wget openssl sudo ufw git vim unzip python3 g++ make libc-dev cmake libssl-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev libcap2-bin
+retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl wget openssl sudo ufw git vim unzip python3 g++ make libc-dev cmake pkg-config autoconf automake libtool libssl-dev libsqlite3-dev sqlite3 clang libc++-dev libc++abi-dev libprotobuf-dev protobuf-compiler libncurses5-dev libncursesw5-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev libcap2-bin
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
@@ -311,8 +256,7 @@ clone_repo_once https://github.com/monero-project/monero.git /usr/local/src/mone
 cd /usr/local/src/monero
 git checkout v0.18.4.6
 retry_command git submodule update --init
-apply_monero_patches
-if ! monero_patch_build_is_current; then
+if ! monero_build_is_current; then
   rm -rf build
   build_monero_release
 fi
@@ -353,7 +297,7 @@ Description=Tari Daemon
 After=network.target
 
 [Service]
-ExecStart=/bin/bash -c "(sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142) & (sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142) & /usr/local/src/tari/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
+ExecStart=/bin/bash -c "(sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142) & (sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142) & /usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
 Restart=always
 User=$TARI_USER
 Environment=HOME=$TARI_HOME
@@ -373,7 +317,7 @@ Description=Tari Merge Mining Daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/local/src/tari/minotari_merge_mining_proxy --non-interactive-mode
+ExecStart=/usr/local/src/tari/target/release/minotari_merge_mining_proxy --non-interactive-mode
 Restart=always
 RestartSec=3s
 StartLimitBurst=0
