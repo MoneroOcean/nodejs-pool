@@ -317,6 +317,14 @@ async function verifyDeployInstall(context) {
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");
     await appendCheckLog(context, "verified Monero hugepage sysctl config");
+    await execInContainer(context.containerName, [
+        "grep -Fq 'gzip_vary on;' /etc/nginx/conf.d/moneroocean-gzip.conf",
+        "grep -Fq 'gzip_types text/plain text/css application/json application/javascript application/xml application/xml+rss image/svg+xml text/javascript text/xml;' /etc/nginx/conf.d/moneroocean-gzip.conf",
+        "grep -Fq 'expires 1y;' /etc/nginx/sites-enabled/default",
+        "grep -Fq 'expires -1;' /etc/nginx/sites-enabled/default",
+        "grep -Fq 'root /var/www/mo-pool-ui;' /etc/nginx/sites-enabled/default"
+    ].join(" && "));
+    await appendCheckLog(context, "verified nginx gzip and cache config");
     await execInContainer(context.containerName, "grep -Fq -- '--rpc-bind-ip=127.0.0.1' /lib/systemd/system/monero.service && grep -Fq -- \"--log-level '*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR'\" /lib/systemd/system/monero.service && ! grep -Fq -- '--restricted-rpc' /lib/systemd/system/monero.service");
     await appendCheckLog(context, "verified local unrestricted Monero RPC service config");
     await execInContainer(context.containerName, "! grep -R -Fq MONEROOCEAN_TARI_MERGE_MINING /usr/local/src/monero/src && test ! -e /usr/local/src/monero/build/release/.moneroocean-tari-mm-reserve.patch.sha256");

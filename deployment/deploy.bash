@@ -291,6 +291,14 @@ for dns in "$WWW_DNS" "$API_DNS"; do
     certbot certonly --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --dns-cloudflare --dns-cloudflare-propagation-seconds 30 --dns-cloudflare-credentials /root/dns_cloudflare_api_token.ini -d "$dns"
   fi
 done
+install -d -m 755 /etc/nginx/conf.d
+cat >/etc/nginx/conf.d/moneroocean-gzip.conf <<'EOF'
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 6;
+gzip_min_length 1024;
+gzip_types text/plain text/css application/json application/javascript application/xml application/xml+rss image/svg+xml text/javascript text/xml;
+EOF
 cat >/etc/nginx/sites-enabled/default <<EOF
 server {
 	listen 80;
@@ -328,7 +336,7 @@ server {
 	listen 443 ssl;
 	server_name $WWW_DNS;
 	root /var/www/mo-pool-ui;
-        index index.html;
+	index index.html;
 	gzip on;
 
 	location = /robots.txt {
@@ -336,17 +344,23 @@ server {
 		return 200 "User-agent: *\nAllow: /\n";
 	}
 
+	location ~* \.(?:css|js|mjs|svg|png|jpg|jpeg|gif|webp|ico|woff2?)$ {
+		expires 1y;
+		try_files \$uri =404;
+	}
+
 	location / {
+		expires -1;
 		try_files \$uri \$uri/ /index.html;
 	}
 
-        # The script-src hash allows mo-pool-ui's inline JSON-LD. If that block changes,
-        # rebuild mo-pool-ui and recompute with: ./csp-hash.sh build/index.html
-        add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'sha256-yENZ47wxlUnKLykemLwcnbrHwUk86i6YedHpk5ZL0Kk='; style-src 'self'; img-src 'self' data:; connect-src https://$API_DNS https://stats.uptimerobot.com; font-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests" always;
-        add_header X-Frame-Options "DENY" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), clipboard-write=(self)" always;
+	# The script-src hash allows mo-pool-ui's inline JSON-LD. If that block changes,
+	# rebuild mo-pool-ui and recompute with: ./csp-hash.sh build/index.html
+	add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'sha256-YJwF1S8EFN7IS7+UkTTZIZ2c/qaIbutNwq2bdAhdokc='; style-src 'self'; img-src 'self' data:; connect-src https://$API_DNS https://stats.uptimerobot.com; font-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests" always;
+	add_header X-Frame-Options "DENY" always;
+	add_header X-Content-Type-Options "nosniff" always;
+	add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+	add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), clipboard-write=(self)" always;
 	ssl_certificate /etc/letsencrypt/live/$WWW_DNS/fullchain.pem;
 	ssl_certificate_key /etc/letsencrypt/live/$WWW_DNS/privkey.pem;
 	include /etc/letsencrypt/options-ssl-nginx.conf;
