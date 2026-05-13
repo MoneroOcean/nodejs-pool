@@ -4,7 +4,7 @@ const accountUtils = require("../script_account_utils.js");
 function requireForceConfirmation(options) {
     if (!options || options.force !== true) return;
     if (options.confirmForceDelete === true) return;
-    console.error("Rerun with --confirm-force-delete=true after reviewing the rows and cache keys that will be deleted.");
+    console.error("Rerun with --confirm-force-delete after reviewing the rows and cache keys that will be deleted.");
     process.exit(1);
 }
 

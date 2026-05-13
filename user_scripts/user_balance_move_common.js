@@ -5,7 +5,7 @@ const accountUtils = require("../script_account_utils.js");
 function requireForceConfirmation(options) {
     if (!options || options.force !== true) return;
     if (options.confirmForceMove === true) return;
-    console.error("Rerun with --confirm-force-move=true after reviewing the source and destination balances.");
+    console.error("Rerun with --confirm-force-move after reviewing the source and destination balances.");
     process.exit(1);
 }
 
