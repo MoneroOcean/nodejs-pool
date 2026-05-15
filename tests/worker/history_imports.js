@@ -230,161 +230,35 @@ test.describe("worker history imports", { concurrency: false }, () => {
         delete require.cache[WORKER_HISTORY_PATH];
     });
 
-    test("worker histories import legacy points and continue in v2 format", async () => {
-        const now = Date.now();
-        const address = "4".repeat(95);
-        const workerName = "rigA";
-        const workerKey = address + "_" + workerName;
-        const historyKey = "history:" + workerKey;
-        const state = createFakeEnvironment({
-            cacheEntries: [
-                [historyKey, JSON.stringify({
-                    hashHistory: [
-                        { ts: now - 5 * 60 * 1000, hs: 11, hs2: 5 },
-                        { ts: now - 7 * 60 * 1000, hs: 9, hs2: 4 }
-                    ]
-                })]
-            ],
-            shares: [
-                {
-                    height: 1,
-                    share: createShare({
-                        paymentAddress: address,
-                        identifier: workerName,
-                        rawShares: 600,
-                        shares2: 300,
-                        timestamp: now - 30 * 1000
-                    })
-                },
-                {
-                    height: 0,
-                    share: createShare({
-                        paymentAddress: address,
-                        identifier: "old",
-                        rawShares: 1,
-                        shares2: 0,
-                        timestamp: now - 3 * 60 * 60 * 1000
-                    })
-                }
-            ]
-        });
-        const worker = loadWorker();
+    test("v2 histories are reimported when the configured tier layout changes", () => {
         const workerHistory = loadWorkerHistory();
-        const runtime = worker.createWorkerRuntime();
-
-        await runUpdate(runtime, 1);
-
-        const storedHistory = JSON.parse(state.cacheStore.get(historyKey));
-        assert.equal(storedHistory.v, workerHistory.HISTORY_VERSION);
-        assert.equal(storedHistory.kind, workerHistory.HISTORY_KIND);
-        assert.equal(storedHistory.encoding, workerHistory.HISTORY_ENCODING);
-        assert.equal(Array.isArray(storedHistory.tiers), true);
-        assert.equal(typeof storedHistory.tiers[0].data, "string");
-        assert.equal("points" in storedHistory.tiers[0], false);
-
-        const decoded = workerHistory.toHashHistory(storedHistory);
-        assert.ok(decoded.length >= 3);
-        assert.equal(decoded.some(function (point) { return point.ts === toStoredTimestamp(now - 5 * 60 * 1000); }), true);
-        assert.equal(decoded.some(function (point) { return point.ts === toStoredTimestamp(now - 7 * 60 * 1000); }), true);
-        assert.ok(decoded[0].hs > 0);
-    });
-
-    test("account histories import legacy points and continue in v2 format", async () => {
         const now = Date.now();
-        const address = "4".repeat(95);
-        const historyKey = "history:" + address;
-        const state = createFakeEnvironment({
-            cacheEntries: [
-                [historyKey, JSON.stringify({
-                    hashHistory: [
-                        { ts: now - 11 * 60 * 1000, hs: 17, hs2: 8 },
-                        { ts: now - 13 * 60 * 1000, hs: 13, hs2: 6 }
-                    ]
-                })]
-            ],
-            shares: [
-                {
-                    height: 1,
-                    share: createShare({
-                        paymentAddress: address,
-                        identifier: "rigA",
-                        rawShares: 1200,
-                        shares2: 600,
-                        timestamp: now - 20 * 1000
-                    })
-                },
-                {
-                    height: 0,
-                    share: createShare({
-                        paymentAddress: address,
-                        identifier: "old",
-                        rawShares: 1,
-                        shares2: 0,
-                        timestamp: now - 3 * 60 * 60 * 1000
-                    })
-                }
-            ]
-        });
-        const worker = loadWorker();
-        const workerHistory = loadWorkerHistory();
-        const runtime = worker.createWorkerRuntime();
-
-        await runUpdate(runtime, 1);
-
-        const storedHistory = JSON.parse(state.cacheStore.get(historyKey));
-        assert.equal(storedHistory.v, workerHistory.HISTORY_VERSION);
-        assert.equal(storedHistory.kind, workerHistory.HISTORY_KIND);
-        assert.equal(storedHistory.encoding, workerHistory.HISTORY_ENCODING);
-        assert.equal(Array.isArray(storedHistory.tiers), true);
-        assert.equal(typeof storedHistory.tiers[0].data, "string");
-        assert.equal("points" in storedHistory.tiers[0], false);
-
-        const decoded = workerHistory.toHashHistory(storedHistory);
-        assert.ok(decoded.length >= 3);
-        assert.equal(decoded.some(function (point) { return point.ts === toStoredTimestamp(now - 11 * 60 * 1000); }), true);
-        assert.equal(decoded.some(function (point) { return point.ts === toStoredTimestamp(now - 13 * 60 * 1000); }), true);
-        assert.ok(decoded[0].hs > 0);
-    });
-
-    test("text v2 histories are imported and rewritten in binary form", () => {
-        const workerHistory = loadWorkerHistory();
-        const layout = workerHistory.buildTierLayout(9, 1);
-        const now = Date.now();
-        const oldPointTs = now - 6 * 60 * 1000;
+        const oldLayout = workerHistory.buildTierLayout(9, 1);
+        const newLayout = workerHistory.buildTierLayout(12, 4);
+        const oldPointTs = now - 8 * 60 * 1000;
         const newerPointTs = now - 4 * 60 * 1000;
-        const stalePointTs = now - 60 * 60 * 1000;
         const appendedTs = now;
 
-        const textPayload = {
-            v: workerHistory.HISTORY_VERSION,
-            kind: workerHistory.HISTORY_KIND,
-            baseIntervalSec: layout.baseIntervalSec,
-            tierRatio: layout.tierRatio,
-            capacities: layout.capacities.slice(),
-            tiers: layout.capacities.map(function (capacity, index) {
-                if (index !== 0) return { head: 0, size: 0, points: [] };
-                assert.equal(capacity, 3);
-                return {
-                    head: 1,
-                    size: 2,
-                    points: [
-                        stalePointTs, 1, 1,
-                        oldPointTs, 11, 5,
-                        newerPointTs, 13, 6
-                    ]
-                };
-            })
-        };
-
-        const storedHistory = workerHistory.appendHistorySample(textPayload, layout, {
+        assert.notDeepEqual(oldLayout.capacities, newLayout.capacities);
+        let storedHistory = workerHistory.appendHistorySample(null, oldLayout, {
+            ts: oldPointTs,
+            hs: 11,
+            hs2: 5
+        });
+        storedHistory = workerHistory.appendHistorySample(storedHistory, oldLayout, {
+            ts: newerPointTs,
+            hs: 13,
+            hs2: 6
+        });
+        storedHistory = workerHistory.appendHistorySample(storedHistory, newLayout, {
             ts: appendedTs,
             hs: 17,
             hs2: 8
         });
 
         assert.equal(storedHistory.encoding, workerHistory.HISTORY_ENCODING);
+        assert.deepEqual(storedHistory.capacities, newLayout.capacities);
         assert.equal(typeof storedHistory.tiers[0].data, "string");
-        assert.equal("points" in storedHistory.tiers[0], false);
 
         const decoded = workerHistory.toHashHistory(storedHistory);
         assert.equal(decoded.length, 3);

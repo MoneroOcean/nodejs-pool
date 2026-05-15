@@ -3,6 +3,15 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const LONG_RUNNER_PATH = require.resolve("../lib/long_runner.js");
+const HISTORY_FIXTURE_VALUE = JSON.stringify({
+    v: 2,
+    kind: "worker-history-tiered",
+    encoding: "base64-u32-f32-f32-le",
+    baseIntervalSec: 120,
+    tierRatio: 3,
+    capacities: [1],
+    tiers: [{ head: 0, size: 0, data: Buffer.alloc(12).toString("base64") }]
+});
 
 function loadLongRunner() {
     const previousAutostart = global.__longRunnerAutostart;
@@ -216,26 +225,26 @@ test("cleanCacheDB prunes stale workers, orphan worker families, stale account h
             ["stats:" + address + "_rigB", JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
             ["identifiers:" + address + "-broken", "{not-json"],
             ["stats:" + address, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 8 * 24 * 60 * 60 * 1000, other: 9 })],
-            ["history:" + address, JSON.stringify({ hashHistory: [1, 2, 3] })],
+            ["history:" + address, HISTORY_FIXTURE_VALUE],
             [freshAddress, JSON.stringify({ totalHashes: 12 })],
             ["stats:" + freshAddress, JSON.stringify({ hash: 0, hash2: 0, lastHash: now, other: 7 })],
-            ["history:" + freshAddress, JSON.stringify({ hashHistory: [4, 5] })],
+            ["history:" + freshAddress, HISTORY_FIXTURE_VALUE],
             [staleHistoryAddress, JSON.stringify({ totalHashes: 34 })],
             ["stats:" + staleHistoryAddress, JSON.stringify({ hash: 0, hash2: 0, lastHash: now - 31 * 24 * 60 * 60 * 1000, other: 8 })],
-            ["history:" + staleHistoryAddress, JSON.stringify({ hashHistory: [6, 7] })],
+            ["history:" + staleHistoryAddress, HISTORY_FIXTURE_VALUE],
             [address + "_oldworker", JSON.stringify({ value: 1 })],
-            ["history:" + address + "_oldworker", JSON.stringify({ hashHistory: [1] })],
+            ["history:" + address + "_oldworker", HISTORY_FIXTURE_VALUE],
             ["stats:" + address + "_oldworker", JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
             [address + "_missingHistory", JSON.stringify({ value: 2 })],
             ["stats:" + address + "_missingHistory", JSON.stringify({ lastHash: now })],
             [address + "_missingStats", JSON.stringify({ value: 3 })],
-            ["history:" + address + "_missingStats", JSON.stringify({ hashHistory: [2] })],
+            ["history:" + address + "_missingStats", HISTORY_FIXTURE_VALUE],
             ["stats:" + address + "_orphanStatsOnly", JSON.stringify({ lastHash: now })],
-            ["history:" + address + "_orphanHistoryOnly", JSON.stringify({ hashHistory: [8] })],
+            ["history:" + address + "_orphanHistoryOnly", HISTORY_FIXTURE_VALUE],
             ["stats:" + address + "_orphanFamily", JSON.stringify({ lastHash: now })],
-            ["history:" + address + "_orphanFamily", JSON.stringify({ hashHistory: [9] })],
+            ["history:" + address + "_orphanFamily", HISTORY_FIXTURE_VALUE],
             [address + "_fresh", JSON.stringify({ value: 4 })],
-            ["history:" + address + "_fresh", JSON.stringify({ hashHistory: [3] })],
+            ["history:" + address + "_fresh", HISTORY_FIXTURE_VALUE],
             ["stats:" + address + "_fresh", JSON.stringify({ lastHash: now })],
             ["tiny_old", JSON.stringify({ untouched: true })]
         ]
@@ -297,7 +306,7 @@ test("cleanCacheDB flushes large delete sets in multiple LMDB write transactions
     for (let i = 0; i < 200; ++i) {
         const worker = address + "_stale" + i;
         cacheEntries.push([worker, JSON.stringify({ value: i })]);
-        cacheEntries.push(["history:" + worker, JSON.stringify({ hashHistory: [i] })]);
+        cacheEntries.push(["history:" + worker, HISTORY_FIXTURE_VALUE]);
         cacheEntries.push(["stats:" + worker, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })]);
     }
 
@@ -317,7 +326,7 @@ test("cleanCacheDB ignores MDB_NOTFOUND when a queued key disappears before dele
     const state = createFakeEnvironment({
         cacheEntries: [
             [worker, JSON.stringify({ value: 1 })],
-            ["history:" + worker, JSON.stringify({ hashHistory: [1] })],
+            ["history:" + worker, HISTORY_FIXTURE_VALUE],
             ["stats:" + worker, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })]
         ],
         deleteNotFoundKeys: ["history:" + worker]
