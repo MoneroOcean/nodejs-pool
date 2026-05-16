@@ -481,6 +481,57 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         assert.ok(state.env.writeCommits > writeCommitsAfterFirstRun);
     });
 
+    test("worker stores pool hashrate history with the tiered wallet history format", async () => {
+        const now = 1710003600000;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const previousPoolHistory = [
+            { ts: now - 2 * 60 * 1000, hs: 5 },
+            { ts: now - 4 * 60 * 1000, hs: 4 }
+        ];
+        const state = createFakeEnvironment({
+            cacheEntries: [
+                ["global_stats", JSON.stringify({
+                    hash: 5,
+                    totalHashes: 0,
+                    lastHash: now - 2 * 60 * 1000,
+                    minerCount: 1,
+                    hashHistory: previousPoolHistory,
+                    minerHistory: []
+                })]
+            ],
+            shares: [
+                {
+                    height: 1,
+                    share: createShare({
+                        paymentAddress: address,
+                        identifier: "rigPool",
+                        rawShares: 1200,
+                        shares2: 1200,
+                        timestamp: now - 30 * 1000
+                    })
+                }
+            ],
+            statsBufferLength: 9,
+            statsBufferHours: 1
+        });
+        const worker = loadWorker();
+        const workerHistory = loadWorkerHistory();
+        const runtime = worker.createWorkerRuntime();
+
+        await runUpdate(runtime, 1);
+
+        const globalStats = JSON.parse(state.cacheStore.get("global_stats"));
+        assert.equal(globalStats.hashHistory.kind, workerHistory.HISTORY_KIND);
+        assert.equal(globalStats.hashHistory.encoding, workerHistory.HISTORY_ENCODING);
+
+        const decoded = workerHistory.toHashHistory(globalStats.hashHistory);
+        assert.equal(decoded.length, 3);
+        assert.equal(decoded[0].ts, toStoredTimestamp(now));
+        assert.equal(decoded[1].ts, toStoredTimestamp(now - 2 * 60 * 1000));
+        assert.equal(decoded[2].ts, toStoredTimestamp(now - 4 * 60 * 1000));
+    });
+
     test("worker cache writes flush in batches for large history updates", async () => {
         const now = Date.now();
         const address = "4".repeat(95);

@@ -2,6 +2,7 @@
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
+const workerHistory = require("../../lib/common/worker_history.js");
 
 global.__apiAutostart = false;
 const createApiRuntime = require("../../lib/api.js").createApiRuntime;
@@ -209,11 +210,12 @@ test.describe("api cache and payments", { concurrency: false }, () => {
                 }
             }
         };
+        const poolHashHistory = workerHistory.appendHistorySample(null, workerHistory.buildTierLayout(9, 1), { ts: 2000, hs: 5 });
         const database = createDatabase({
             caches: {
                 pool_stats_global: poolStats,
                 global_stats: {
-                    hashHistory: [{ ts: 2, hs: 5 }],
+                    hashHistory: poolHashHistory,
                     minerHistory: [{ ts: 2, cn: 6 }]
                 },
                 pplns_stats: {
@@ -245,7 +247,7 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             assert.deepEqual(poolStats.minerHistory, [{ ts: 1, miners: 2 }]);
 
             const poolHashrate = await request(port, { path: "/pool/chart/hashrate" });
-            assert.deepEqual(poolHashrate.json, [{ ts: 2, hs: 5 }]);
+            assert.deepEqual(poolHashrate.json, workerHistory.toHashHistory(poolHashHistory));
 
             const poolMiners = await request(port, { path: "/pool/chart/miners" });
             assert.deepEqual(poolMiners.json, [{ ts: 2, cn: 6 }]);
