@@ -212,6 +212,13 @@ test.describe("api cache and payments", { concurrency: false }, () => {
         const database = createDatabase({
             caches: {
                 pool_stats_global: poolStats,
+                global_stats: {
+                    hashHistory: [{ ts: 2, hs: 5 }],
+                    minerHistory: [{ ts: 2, cn: 6 }]
+                },
+                pplns_stats: {
+                    hashHistory: [{ ts: 3, hs: 7 }]
+                },
                 poolPorts: {
                     global: [{ port: 3333, tls: false }],
                     pplns: [{ port: 9000, tls: true }],
@@ -236,6 +243,15 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             assert.equal("minerHistory" in stats.json.pool_statistics, false);
             assert.deepEqual(poolStats.hashHistory, [{ ts: 1, hs: 3 }]);
             assert.deepEqual(poolStats.minerHistory, [{ ts: 1, miners: 2 }]);
+
+            const poolHashrate = await request(port, { path: "/pool/chart/hashrate" });
+            assert.deepEqual(poolHashrate.json, [{ ts: 2, hs: 5 }]);
+
+            const poolMiners = await request(port, { path: "/pool/chart/miners" });
+            assert.deepEqual(poolMiners.json, [{ ts: 2, cn: 6 }]);
+
+            const pplnsHashrate = await request(port, { path: "/pool/chart/hashrate/pplns" });
+            assert.deepEqual(pplnsHashrate.json, [{ ts: 3, hs: 7 }]);
 
             const ports = await request(port, { path: "/pool/ports" });
             assert.deepEqual(ports.json, {
