@@ -165,10 +165,11 @@ test("erg handlers preserve the pre-refactor autolykos share verification and su
     const submitCalls = [];
     let verifyArgs = null;
     const originalSetTimeout = global.setTimeout;
+    const timerReceiver = { timer: true };
 
     try {
         global.setTimeout = function runImmediately(fn, _delay, ...args) {
-            fn(...args);
+            fn.call(timerReceiver, ...args);
             return 0;
         };
 
@@ -214,39 +215,43 @@ test("erg handlers preserve the pre-refactor autolykos share verification and su
         });
 
         let matchedHash = null;
+        const matchedCoinFuncs = {
+            getPortBlockHeaderByID(_port, _height, callback) {
+                assert.equal(this, matchedCoinFuncs);
+                callback(null, {
+                    powSolutions: { pk: "expected-pk" },
+                    id: "erg-block-id"
+                });
+            }
+        };
         ergPool.resolveSubmittedBlockHash({
             blockTemplate: {
                 port: 9053,
                 height: 77,
                 hash2: "expected-pk"
             },
-            coinFuncs: {
-                getPortBlockHeaderByID(_port, _height, callback) {
-                    callback(null, {
-                        powSolutions: { pk: "expected-pk" },
-                        id: "erg-block-id"
-                    });
-                }
-            }
+            coinFuncs: matchedCoinFuncs
         }, function onHash(hash) {
             matchedHash = hash;
         });
 
         let mismatchedHash = null;
+        const mismatchedCoinFuncs = {
+            getPortBlockHeaderByID(_port, _height, callback) {
+                assert.equal(this, mismatchedCoinFuncs);
+                callback(null, {
+                    powSolutions: { pk: "different-pk" },
+                    id: "erg-block-id"
+                });
+            }
+        };
         ergPool.resolveSubmittedBlockHash({
             blockTemplate: {
                 port: 9053,
                 height: 78,
                 hash2: "expected-pk"
             },
-            coinFuncs: {
-                getPortBlockHeaderByID(_port, _height, callback) {
-                    callback(null, {
-                        powSolutions: { pk: "different-pk" },
-                        id: "erg-block-id"
-                    });
-                }
-            }
+            coinFuncs: mismatchedCoinFuncs
         }, function onHash(hash) {
             mismatchedHash = hash;
         });
@@ -297,6 +302,43 @@ test("eth and erg require full submitted nonces to include extranonce", () => {
         { extraNonce: "abcd", options: { requireFullNonceExtraNoncePrefix: true } },
         { extraNonce: "abcd", options: { requireFullNonceExtraNoncePrefix: true } }
     ]);
+});
+
+test("eth submitted block hash lookup preserves coinFuncs receiver when delayed", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ethPool = coinFuncs.getPoolSettings("ETH");
+    const originalSetTimeout = global.setTimeout;
+    const timerReceiver = { timer: true };
+    let resolvedHash = null;
+    const delayedCoinFuncs = {
+        ethBlockFind(port, nonce, callback) {
+            assert.equal(this, delayedCoinFuncs);
+            assert.equal(port, 8645);
+            assert.equal(nonce, "0xnonce");
+            callback("0x" + "ab".repeat(32));
+        }
+    };
+
+    try {
+        global.setTimeout = function runImmediately(fn, _delay, ...args) {
+            fn.call(timerReceiver, ...args);
+            return 0;
+        };
+
+        ethPool.resolveSubmittedBlockHash({
+            blockData: ["0xnonce"],
+            blockTemplate: {
+                port: 8645
+            },
+            coinFuncs: delayedCoinFuncs
+        }, function onHash(hash) {
+            resolvedHash = hash;
+        });
+
+        assert.equal(resolvedHash, "ab".repeat(32));
+    } finally {
+        global.setTimeout = originalSetTimeout;
+    }
 });
 
 test("erg mining.submit parser uses the nonce field even when SRBMiner includes a full nonce field", () => {
