@@ -135,6 +135,14 @@ wait_for_tari_sync() {
   return 1
 }
 
+remove_xtm_mm_healthcheck() {
+  systemctl disable --now xtm-mm-healthcheck.timer xtm-mm-healthcheck.service 2>/dev/null || true
+  rm -f /usr/local/sbin/monerod-rpc-wait \
+        /usr/local/sbin/xtm-mm-healthcheck \
+        /lib/systemd/system/xtm-mm-healthcheck.service \
+        /lib/systemd/system/xtm-mm-healthcheck.timer
+}
+
 ensure_rust_toolchain() {
   if [ -s "$HOME/.cargo/env" ]; then
     . "$HOME/.cargo/env"
@@ -311,10 +319,16 @@ WantedBy=multi-user.target
 EOF
 fi
 
+xtm_mm_dependency_units="monero.service"
+if [ -z "$TARI_EXTERNAL_IP" ]; then
+  xtm_mm_dependency_units="$xtm_mm_dependency_units xtm.service"
+fi
+
 cat >/lib/systemd/system/xtm_mm.service <<EOF
 [Unit]
 Description=Tari Merge Mining Daemon
-After=network.target
+After=network.target $xtm_mm_dependency_units
+PartOf=$xtm_mm_dependency_units
 
 [Service]
 ExecStart=/usr/local/src/tari/target/release/minotari_merge_mining_proxy --non-interactive-mode
@@ -331,6 +345,8 @@ MemorySwapMax=$TARI_MM_MEMORY_SWAP_MAX
 [Install]
 WantedBy=multi-user.target
 EOF
+
+remove_xtm_mm_healthcheck
 
 systemctl daemon-reload
 if [ -z "$TARI_EXTERNAL_IP" ]; then

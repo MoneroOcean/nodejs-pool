@@ -366,8 +366,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
         mysqlQuery(sql) {
             if (sql === "select * from pools where id < 1000 and last_checkin >= NOW() - INTERVAL 10 MINUTE") {
                 return [
-                    { id: 1, ip: "203.0.113.10", blockID: 100, blockIDTime: "2026-01-01 00:00:00", hostname: "node-a" },
-                    { id: 2, ip: "2001:db8::20", blockID: 101, blockIDTime: "2026-01-01 00:01:00", hostname: "node-b" }
+                    { id: 1, ip: "203.0.113.10", blockID: 100, blockIDTime: "2026-01-01 00:00:00", xtmBlockID: 200, xtmBlockIDTime: "2026-01-01 00:00:05", hostname: "node-a" },
+                    { id: 2, ip: "2001:db8::20", blockID: 101, blockIDTime: "2026-01-01 00:01:00", xtmBlockID: 201, xtmBlockIDTime: "2026-01-01 00:01:05", hostname: "node-b" }
                 ];
             }
             if (sql === "select * from ports where hidden = 0 and pool_id < 1000 and lastSeen >= NOW() - INTERVAL 10 MINUTE") {
@@ -396,12 +396,16 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
             ip: "203.0.113.10",
             blockID: 100,
             blockIDTime: "formatted:2026-01-01 00:00:00",
+            xtmBlockID: 200,
+            xtmBlockIDTime: "formatted:2026-01-01 00:00:05",
             hostname: "node-a"
         },
         2: {
             ip: "2001:db8::20",
             blockID: 101,
             blockIDTime: "formatted:2026-01-01 00:01:00",
+            xtmBlockID: 201,
+            xtmBlockIDTime: "formatted:2026-01-01 00:01:05",
             hostname: "node-b"
         }
     });
@@ -411,6 +415,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
                 host: {
                     blockID: 100,
                     blockIDTime: "formatted:2026-01-01 00:00:00",
+                    xtmBlockID: 200,
+                    xtmBlockIDTime: "formatted:2026-01-01 00:00:05",
                     hostname: "pool.example.com"
                 },
                 port: 3333,
@@ -426,6 +432,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
                 host: {
                     blockID: 100,
                     blockIDTime: "formatted:2026-01-01 00:00:00",
+                    xtmBlockID: 200,
+                    xtmBlockIDTime: "formatted:2026-01-01 00:00:05",
                     hostname: "node-a"
                 },
                 port: 3333,
@@ -438,6 +446,8 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
                 host: {
                     blockID: 101,
                     blockIDTime: "formatted:2026-01-01 00:01:00",
+                    xtmBlockID: 201,
+                    xtmBlockIDTime: "formatted:2026-01-01 00:01:05",
                     hostname: "node-b"
                 },
                 port: 3333,

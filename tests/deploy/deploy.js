@@ -311,6 +311,7 @@ async function verifyDeployInstall(context) {
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
+        "/home/user/nodejs-pool/fix_daemon.sh",
         "/swapfile"
     ]);
     await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 150$' /etc/sysctl.d/90-monero-overcommit.conf");
@@ -331,6 +332,11 @@ async function verifyDeployInstall(context) {
     await appendCheckLog(context, "verified unpatched Monero build");
     await execInContainer(context.containerName, "grep -q '^User=taridaemon$' /lib/systemd/system/xtm.service && grep -q '^User=taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^SupplementaryGroups=hugepages$' /lib/systemd/system/monero.service && grep -q '^LimitMEMLOCK=infinity$' /lib/systemd/system/monero.service && id -nG monerodaemon | grep -qw hugepages");
     await appendCheckLog(context, "verified separate Tari user and Monero hugepage access");
+    await execInContainer(context.containerName, "grep -q '^After=network.target monero.service xtm.service$' /lib/systemd/system/xtm_mm.service && grep -q '^PartOf=monero.service xtm.service$' /lib/systemd/system/xtm_mm.service && ! grep -q '^Requires=' /lib/systemd/system/xtm_mm.service && ! grep -q '^ExecStartPre=' /lib/systemd/system/xtm_mm.service");
+    await execInContainer(context.containerName, "test ! -e /usr/local/sbin/monerod-rpc-wait && test ! -e /usr/local/sbin/xtm-mm-healthcheck && test ! -e /lib/systemd/system/xtm-mm-healthcheck.service && test ! -e /lib/systemd/system/xtm-mm-healthcheck.timer");
+    await execInContainer(context.containerName, "test -x /home/user/nodejs-pool/fix_daemon.sh && grep -q 'xmr-lag' /home/user/nodejs-pool/fix_daemon.sh && grep -q 'xtm-lag' /home/user/nodejs-pool/fix_daemon.sh && grep -q 'template-stuck' /home/user/nodejs-pool/fix_daemon.sh");
+    await execInContainer(context.containerName, "/home/user/nodejs-pool/fix_daemon.sh --dry-run template-stuck | grep -q 'DRY-RUN: systemctl restart monero.service'");
+    await appendCheckLog(context, "verified xtm_mm dependencies and pool-driven daemon recovery");
     await execInContainer(context.containerName, "test $(stat -c %s /swapfile) -ge 1073741824 && test $(stat -c %a /swapfile) = 600 && grep -Eq '^[^#]*[[:space:]]/swapfile[[:space:]]+none[[:space:]]+swap[[:space:]]' /etc/fstab");
     await appendCheckLog(context, "verified persistent swapfile config");
     await execInContainer(context.containerName, "test ! -e /usr/local/src/xtm && test ! -e /var/tmp/blockchain.raw");
@@ -341,7 +347,8 @@ async function verifyDeployInstall(context) {
         "grep -q 'public_addresses = \\[\"/ip4/127.0.0.1/tcp/18189\",\\]' /home/taridaemon/.tari/mainnet/config/config.toml",
         "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/taridaemon/.tari/mainnet/config/config.toml",
         "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/taridaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'submit_to_origin = false' /home/taridaemon/.tari/mainnet/config/config.toml"
+        "grep -q 'submit_to_origin = false' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q 'monerod_connection_timeout = 10' /home/taridaemon/.tari/mainnet/config/config.toml"
     ].join(" && "));
     await appendCheckLog(context, "verified patched Tari config");
 

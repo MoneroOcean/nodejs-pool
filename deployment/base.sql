@@ -131,6 +131,8 @@ CREATE TABLE `pools` (
   `active` tinyint(1) NOT NULL,
   `blockID` int(11) DEFAULT NULL,
   `blockIDTime` timestamp NULL DEFAULT NULL,
+  `xtmBlockID` int(11) DEFAULT NULL,
+  `xtmBlockIDTime` timestamp NULL DEFAULT NULL,
   `hostname` varchar(128) DEFAULT NULL,
   `port` int DEFAULT NULL,
   PRIMARY KEY (`id`)
@@ -247,6 +249,10 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'pollInterval', '100', 'int', 'Time in ms between pool daemon checks for new blocks');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'pollBlockInterval', '5000', 'int', 'Time in ms between pool daemon checks for block template updates');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'maxBlockKeepTime', '30', 'int', 'Mix block template update time in seconds on the same height');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateLagBlocks', '5', 'int', 'Blocks behind peer pool nodes before daemon recovery is considered.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateCheckInterval', '60000', 'int', 'Milliseconds between stuck block template checks and pool height check-ins.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateGraceSeconds', '300', 'int', 'Seconds daemon lag must persist before recovery is attempted.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateFixCooldownSeconds', '900', 'int', 'Seconds to wait between daemon recovery attempts for the same stuck chain.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorRYO',  '0', 'float', 'Ryo algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorSUMO',  '0', 'float', 'SUMO algo hash price factor relative to coinHashFactor');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'coinHashFactorLOKI', '0', 'float', 'Loki algo hash price factor relative to coinHashFactor');

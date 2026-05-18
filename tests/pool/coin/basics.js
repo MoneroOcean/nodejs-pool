@@ -1,5 +1,6 @@
 "use strict";
 const assert = require("node:assert/strict");
+const childProcess = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -72,6 +73,39 @@ test("hasTemplateBlob distinguishes hash-only extra-nonce templates from missing
         coinFuncs.hasTemplateBlob({ reserved_offset: 17 }, MAIN_PORT),
         false
     );
+});
+
+test("fixDaemonIssue invokes fix_daemon with structured arguments", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const originalExecFile = childProcess.execFile;
+    const calls = [];
+    childProcess.execFile = function execFile(file, args, callback) {
+        calls.push({ file, args });
+        callback(null, "ok", "");
+    };
+
+    try {
+        coinFuncs.fixDaemonIssue({
+            reason: "xtm-lag",
+            port: 18081,
+            xmrHeight: 500,
+            xtmHeight: 700,
+            expectedXtmHeight: 706
+        });
+
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].file, "./fix_daemon.sh");
+        assert.deepEqual(calls[0].args, [
+            "xtm-lag",
+            "--port", "18081",
+            "--xmr-height", "500",
+            "--xtm-height", "700",
+            "--expected-xtm-height", "706"
+        ]);
+        assert.match(global.support.emails[0].subject, /xtm-lag/);
+    } finally {
+        childProcess.execFile = originalExecFile;
+    }
 });
 
 test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex calls", () => {

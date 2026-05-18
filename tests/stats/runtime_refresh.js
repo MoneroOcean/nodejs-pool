@@ -85,10 +85,10 @@ function createTestEnvironment(options = {}) {
 
     global.config = {
         coin: { name: "Monero" },
-        daemon: {
+        daemon: Object.assign({
             port: options.daemonPort || 18000,
             enableAlgoSwitching: true
-        },
+        }, options.daemon || {}),
         general: {
             cmcKey: "test-key",
             adminEmail: "admin@example.com"
@@ -261,6 +261,155 @@ test.afterEach(() => {
     delete require.cache[POOL_STATS_PATH];
 });
 
+test("monitorNodes fixes persistent XMR lag once and respects cooldown", async () => {
+    const fixes = [];
+    let now = 100000;
+    const originalDateNow = Date.now;
+    createTestEnvironment({
+        daemonPort: 18000,
+        daemon: {
+            stuckTemplateLagBlocks: 5,
+            stuckTemplateGraceSeconds: 300,
+            stuckTemplateFixCooldownSeconds: 900
+        },
+        mysqlQuery(sql) {
+            if (sql === "SELECT blockID, xtmBlockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") {
+                return [
+                    { blockID: 100, xtmBlockID: 200, hostname: "local", ip: "127.0.0.1", port: 18000 },
+                    { blockID: 106, xtmBlockID: 200, hostname: "peer", ip: "203.0.113.10", port: 18000 }
+                ];
+            }
+            throw new Error("Unexpected SQL: " + sql);
+        }
+    });
+    global.coinFuncs.getPortLastBlockHeaderMM = function (_port, callback) {
+        callback(null, { height: 100, mm: { height: 200 } });
+    };
+    global.coinFuncs.fixDaemonIssue = function (issue) {
+        fixes.push(issue);
+    };
+    Date.now = function () { return now; };
+
+    try {
+        const poolStats = loadPoolStats();
+        await poolStats.monitorNodes();
+        now += 301000;
+        await poolStats.monitorNodes();
+        now += 5000;
+        await poolStats.monitorNodes();
+
+        assert.equal(fixes.length, 1);
+        assert.deepEqual(fixes[0], {
+            reason: "xmr-lag",
+            port: 18000,
+            xmrHeight: 100,
+            expectedXmrHeight: 106,
+            xtmHeight: 200,
+            expectedXtmHeight: undefined
+        });
+    } finally {
+        Date.now = originalDateNow;
+    }
+});
+
+test("monitorNodes fixes persistent XTM aux lag with the XTM recovery mode", async () => {
+    const fixes = [];
+    let now = 200000;
+    const originalDateNow = Date.now;
+    createTestEnvironment({
+        daemonPort: 18000,
+        daemon: {
+            stuckTemplateLagBlocks: 5,
+            stuckTemplateGraceSeconds: 300,
+            stuckTemplateFixCooldownSeconds: 900
+        },
+        mysqlQuery(sql) {
+            if (sql === "SELECT blockID, xtmBlockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") {
+                return [
+                    { blockID: 100, xtmBlockID: 200, hostname: "local", ip: "127.0.0.1", port: 18000 },
+                    { blockID: 100, xtmBlockID: 206, hostname: "peer", ip: "203.0.113.10", port: 18000 }
+                ];
+            }
+            throw new Error("Unexpected SQL: " + sql);
+        }
+    });
+    global.coinFuncs.getPortLastBlockHeaderMM = function (_port, callback) {
+        callback(null, { height: 100, mm: { height: 200 } });
+    };
+    global.coinFuncs.fixDaemonIssue = function (issue) {
+        fixes.push(issue);
+    };
+    Date.now = function () { return now; };
+
+    try {
+        const poolStats = loadPoolStats();
+        await poolStats.monitorNodes();
+        now += 301000;
+        await poolStats.monitorNodes();
+
+        assert.equal(fixes.length, 1);
+        assert.deepEqual(fixes[0], {
+            reason: "xtm-lag",
+            port: 18000,
+            xmrHeight: 100,
+            expectedXmrHeight: undefined,
+            xtmHeight: 200,
+            expectedXtmHeight: 206
+        });
+    } finally {
+        Date.now = originalDateNow;
+    }
+});
+
+test("monitorNodes uses one full-stack recovery when XMR and XTM both lag", async () => {
+    const fixes = [];
+    let now = 300000;
+    const originalDateNow = Date.now;
+    createTestEnvironment({
+        daemonPort: 18000,
+        daemon: {
+            stuckTemplateLagBlocks: 5,
+            stuckTemplateGraceSeconds: 300,
+            stuckTemplateFixCooldownSeconds: 900
+        },
+        mysqlQuery(sql) {
+            if (sql === "SELECT blockID, xtmBlockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") {
+                return [
+                    { blockID: 100, xtmBlockID: 200, hostname: "local", ip: "127.0.0.1", port: 18000 },
+                    { blockID: 105, xtmBlockID: 205, hostname: "peer", ip: "203.0.113.10", port: 18000 }
+                ];
+            }
+            throw new Error("Unexpected SQL: " + sql);
+        }
+    });
+    global.coinFuncs.getPortLastBlockHeaderMM = function (_port, callback) {
+        callback(null, { height: 100, mm: { height: 200 } });
+    };
+    global.coinFuncs.fixDaemonIssue = function (issue) {
+        fixes.push(issue);
+    };
+    Date.now = function () { return now; };
+
+    try {
+        const poolStats = loadPoolStats();
+        await poolStats.monitorNodes();
+        now += 301000;
+        await poolStats.monitorNodes();
+
+        assert.equal(fixes.length, 1);
+        assert.deepEqual(fixes[0], {
+            reason: "template-stuck",
+            port: 18000,
+            xmrHeight: 100,
+            expectedXmrHeight: 105,
+            xtmHeight: 200,
+            expectedXtmHeight: 205
+        });
+    } finally {
+        Date.now = originalDateNow;
+    }
+});
+
 test("startPoolStats initializes pool and network caches without waiting for prices", async () => {
     createTestEnvironment({
         daemonPort: "18000",
@@ -281,7 +430,7 @@ test("startPoolStats initializes pool and network caches without waiting for pri
             if (sql === "select * from pools where id < 1000 and last_checkin >= NOW() - INTERVAL 10 MINUTE") return [];
             if (sql === "select * from ports where hidden = 0 and pool_id < 1000 and lastSeen >= NOW() - INTERVAL 10 MINUTE") return [];
             if (sql === "SELECT * FROM port_config WHERE hidden = 0") return [];
-            if (sql === "SELECT blockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") return [];
+            if (sql === "SELECT blockID, xtmBlockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") return [];
             throw new Error("Unexpected SQL: " + sql);
         }
     });
@@ -397,7 +546,7 @@ test("startPoolStats initializes pool and network caches without waiting for pri
     await startPromise;
     assert.deepEqual(
         scheduledTasks.map(function (entry) { return entry.intervalMs; }).sort(function (left, right) { return left - right; }),
-        [30000, 30000, 60000, 300000, 900000]
+        [30000, 30000, 60000, 60000, 900000]
     );
 });
 
