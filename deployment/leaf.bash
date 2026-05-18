@@ -135,14 +135,6 @@ wait_for_tari_sync() {
   return 1
 }
 
-remove_xtm_mm_healthcheck() {
-  systemctl disable --now xtm-mm-healthcheck.timer xtm-mm-healthcheck.service 2>/dev/null || true
-  rm -f /usr/local/sbin/monerod-rpc-wait \
-        /usr/local/sbin/xtm-mm-healthcheck \
-        /lib/systemd/system/xtm-mm-healthcheck.service \
-        /lib/systemd/system/xtm-mm-healthcheck.timer
-}
-
 ensure_rust_toolchain() {
   if [ -s "$HOME/.cargo/env" ]; then
     . "$HOME/.cargo/env"
@@ -345,8 +337,6 @@ MemorySwapMax=$TARI_MM_MEMORY_SWAP_MAX
 [Install]
 WantedBy=multi-user.target
 EOF
-
-remove_xtm_mm_healthcheck
 
 systemctl daemon-reload
 if [ -z "$TARI_EXTERNAL_IP" ]; then

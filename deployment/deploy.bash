@@ -146,14 +146,6 @@ wait_for_tari_sync() {
   return 1
 }
 
-remove_xtm_mm_healthcheck() {
-  systemctl disable --now xtm-mm-healthcheck.timer xtm-mm-healthcheck.service 2>/dev/null || true
-  rm -f /usr/local/sbin/monerod-rpc-wait \
-        /usr/local/sbin/xtm-mm-healthcheck \
-        /lib/systemd/system/xtm-mm-healthcheck.service \
-        /lib/systemd/system/xtm-mm-healthcheck.timer
-}
-
 ensure_rust_toolchain() {
   if [ -s "$HOME/.cargo/env" ]; then
     . "$HOME/.cargo/env"
@@ -477,8 +469,6 @@ MemorySwapMax=$TARI_MM_MEMORY_SWAP_MAX
 WantedBy=multi-user.target
 EOF
 
-remove_xtm_mm_healthcheck
-
 systemctl daemon-reload
 systemctl enable monero xtm xtm_mm
 systemctl start monero
@@ -578,19 +568,6 @@ fi
 if ! $USER_SQL_CMD -e "USE pool" >/dev/null 2>&1; then
   $USER_SQL_CMD <deployment/base.sql
 fi
-if ! $USER_SQL_CMD -Nse "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='pool' AND TABLE_NAME='pools' AND COLUMN_NAME='xtmBlockID'" | grep -qx 1; then
-  $USER_SQL_CMD -e "ALTER TABLE pool.pools ADD COLUMN xtmBlockID int(11) DEFAULT NULL AFTER blockIDTime"
-fi
-if ! $USER_SQL_CMD -Nse "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='pool' AND TABLE_NAME='pools' AND COLUMN_NAME='xtmBlockIDTime'" | grep -qx 1; then
-  $USER_SQL_CMD -e "ALTER TABLE pool.pools ADD COLUMN xtmBlockIDTime timestamp NULL DEFAULT NULL AFTER xtmBlockID"
-fi
-$USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateLagBlocks', '5', 'int', 'Blocks behind peer pool nodes before daemon recovery is considered.')"
-$USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateCheckInterval', '60000', 'int', 'Milliseconds between stuck block template checks and pool height check-ins.')"
-$USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateGraceSeconds', '300', 'int', 'Seconds daemon lag must persist before recovery is attempted.')"
-$USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('daemon', 'stuckTemplateFixCooldownSeconds', '900', 'int', 'Seconds to wait between daemon recovery attempts for the same stuck chain.')"
-$USER_SQL_CMD -e "UPDATE pool.config SET item_value = '60000' WHERE module = 'daemon' AND item = 'stuckTemplateCheckInterval' AND item_value = '5000';"
-$USER_SQL_CMD -e "UPDATE pool.config SET item_value = '300' WHERE module = 'daemon' AND item = 'stuckTemplateGraceSeconds' AND item_value = '15';"
-$USER_SQL_CMD -e "UPDATE pool.config SET item_value = '900' WHERE module = 'daemon' AND item = 'stuckTemplateFixCooldownSeconds' AND item_value = '300';"
 $USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'authKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Auth key sent with all Websocket frames for validation.')"
 $USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'secKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Secret key for signing miner email unsubscribe links.')"
 $USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet.address.txt)' WHERE module = 'pool' and item = 'address';"
