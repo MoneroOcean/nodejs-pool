@@ -95,6 +95,57 @@ test("trusted miners can take the trusted-share fast path", async () => {
     }
 });
 
+test("trusted miners cannot credit all-zero result hashes", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const socket = {};
+
+    try {
+        global.config.pool.trustedMiners = true;
+        crypto.randomBytes = () => Buffer.from([255]);
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 197,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-trusted-zero-hash"
+            }
+        });
+
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        state.walletTrust[MAIN_WALLET] = 1000;
+        miner.trust.trust = 1000;
+        miner.trust.check_height = 0;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 198,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "0000000a",
+                result: ZERO_RESULT
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(runtime.getState().shareStats.trustedShares, 0);
+        assert.equal(runtime.getState().shareStats.normalShares, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        await runtime.stop();
+    }
+});
+
 test("invalid shares clear local trust for same-wallet active miners when wallet trust drops", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
