@@ -385,7 +385,10 @@ test("block-submit test mode stops daemon-first submits once the marker is remov
         assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
 
         const enabledLoginReply = loginMainMiner(socketEnabled, 3003, "worker-block-submit-enabled");
-        const enabledSubmitReply = submitMainBlockCandidate(socketEnabled, 3006, getLoginJobId(enabledLoginReply), { nonce: "0000002b" });
+        const enabledSubmitReply = submitMainBlockCandidate(socketEnabled, 3006, getLoginJobId(enabledLoginReply), {
+            nonce: "0000002b",
+            result: VALID_RESULT
+        });
 
         await new Promise((resolve) => setTimeout(resolve, 120));
         await flushTimers();
