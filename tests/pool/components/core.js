@@ -495,7 +495,7 @@ test("template manager ignores unchanged template refreshes", () => {
         idHash: "same-template",
         height: 101,
         difficulty: 100,
-        coinHashFactor: 1,
+        coinHashFactor: 0,
         isHashFactorChange: false
     });
     const firstTemplate = activeBlockTemplates[""];
@@ -518,6 +518,7 @@ test("template manager ignores unchanged template refreshes", () => {
     assert.equal(activeBlockTemplates[""].extraNonce2, 3);
     assert.equal(activeBlockTemplates[""].sharedNonceSubmissions.has("00000001"), true);
     assert.equal(pastBlockTemplates[""], undefined);
+    assert.equal(templateManager.getCoinJobParams("").coinHashFactor, 0);
 
     templateManager.setNewBlockTemplate({
         coin: "",
