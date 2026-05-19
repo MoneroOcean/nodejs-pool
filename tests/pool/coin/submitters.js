@@ -136,6 +136,10 @@ test("dero block submit handlers preserve the pre-refactor payload and blid reso
         resolvedHash = hash;
     });
 
+    assert.equal(deroPool.acceptSubmittedBlock({ rpcResult: { result: { status: "FAILED", message: "rejected" } } }), false);
+    assert.equal(deroPool.acceptSubmittedBlock({ rpcResult: { result: { status: "OK" } } }), true);
+    assert.equal(deroPool.acceptSubmittedBlock({ rpcResult: { result: { block_id: "submitted-block" } } }), true);
+
     deroPool.submitBlockRpc.call(deroPool, {
         blockData: Buffer.from("bada55", "hex"),
         blockTemplate: {
