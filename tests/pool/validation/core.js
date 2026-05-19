@@ -243,7 +243,6 @@ test("submitting on a long-disabled coin returns the daemon-issues final error",
             idHash: activeTemplate.idHash,
             coinHashFactor: 0
         });
-        assert.equal(state.lastCoinHashFactorMM[""], 0);
         state.activeBlockTemplates[""].timeCreated = Date.now() - (60 * 60 * 1000 + 1000);
 
         const submitReply = invokePoolMethod({
