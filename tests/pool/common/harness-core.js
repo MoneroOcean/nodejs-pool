@@ -415,13 +415,23 @@ function createCoinFuncsStub() {
                 if (this.portBlobType(blockTemplate.port, blockTemplate.block_version) === 102) {
                     return [ETH_RESULT_BUFFER, ETH_MIXHASH_BUFFER];
                 }
+                if (typeof this.__testKawpowComputedMixhash === "string" &&
+                    String(mixhash).toLowerCase() !== this.__testKawpowComputedMixhash.toLowerCase()) {
+                    return false;
+                }
                 return RAVEN_RESULT_BUFFER;
             }
             return Buffer.from(VALID_RESULT_BUFFER);
         },
-        slowHashAsync(buffer, blockTemplate, _wallet, callback) {
+        slowHashAsync(buffer, blockTemplate, _wallet, callback, verifyContext) {
             if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
                 callback(this.slowHashBuff(buffer, blockTemplate).toString("hex"));
+                return;
+            }
+            if (blockTemplate.port === ETH_PORT) {
+                const result = this.slowHashBuff(buffer, blockTemplate, verifyContext && verifyContext.nonce, verifyContext && verifyContext.mixhash);
+                const resultHash = Array.isArray(result) ? result[0] : result;
+                callback(resultHash === false ? false : resultHash.toString("hex"));
                 return;
             }
             callback(VALID_RESULT);

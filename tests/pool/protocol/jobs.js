@@ -98,6 +98,73 @@ test("kawpow submit accepts hex nonce and mixhash values containing alphabetic d
     }
 });
 
+test("kawpow submit verifies the recomputed mixhash before crediting shares", async () => {
+    const { runtime, database } = await startHarness();
+    const client = new JsonLineClient(ETH_PORT);
+    const computedMixhash = "cd".repeat(32);
+
+    try {
+        global.coinFuncs.__testKawpowComputedMixhash = computedMixhash;
+        await client.connect();
+
+        const subscribeReply = await client.request({
+            id: 4501,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+        assert.equal(subscribeReply.error, null);
+
+        const authorizeReply = await client.request({
+            id: 4502,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-kawpow-mixhash-check"]
+        });
+        assert.equal(authorizeReply.error, null);
+        assert.equal(authorizeReply.result, true);
+
+        await client.waitFor((message) => message.method === "mining.set_target");
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+
+        const validSubmitReply = await client.request({
+            id: 4503,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000021",
+                `0x${notifyPush.params[1]}`,
+                `0x${computedMixhash}`
+            ]
+        });
+        await flushShareAccumulator(() => database.shares.length === 1);
+
+        const forgedSubmitReply = await client.request({
+            id: 4504,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000022",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ab".repeat(32)}`
+            ]
+        });
+        await flushShareAccumulator(() => runtime.getState().shareStats.invalidShares === 1);
+
+        assert.equal(validSubmitReply.error, null);
+        assert.equal(validSubmitReply.result, true);
+        assert.equal(forgedSubmitReply.error.message, "Low difficulty share");
+        assert.equal(forgedSubmitReply.result, undefined);
+        assert.equal(database.shares.length, 1);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+    } finally {
+        delete global.coinFuncs.__testKawpowComputedMixhash;
+        await client.close();
+        await runtime.stop();
+    }
+});
+
 test("kawpow submit rejects shares whose header hash does not match the converted blob", async () => {
     const { runtime, database } = await startHarness();
     const client = new JsonLineClient(ETH_PORT);
