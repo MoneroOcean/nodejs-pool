@@ -3,14 +3,12 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-    MAIN_PORT,
     MAIN_WALLET,
     ALT_WALLET,
     THIRD_WALLET,
     VALID_RESULT,
     startHarness,
     invokePoolMethod,
-    createBaseTemplate,
     poolModule
 } = require("../common/harness.js");
 
@@ -231,18 +229,8 @@ test("submitting on a long-disabled coin returns the daemon-issues final error",
         });
         const jobId = loginReply.replies[0].result.job.job_id;
         const state = runtime.getState();
-        const activeTemplate = state.activeBlockTemplates[""];
 
-        runtime.setTemplate({
-            ...createBaseTemplate({
-                coin: "",
-                port: MAIN_PORT,
-                idHash: activeTemplate.idHash,
-                height: activeTemplate.height
-            }),
-            idHash: activeTemplate.idHash,
-            coinHashFactor: 0
-        });
+        poolModule.setTestCoinHashFactor("", 0);
         state.activeBlockTemplates[""].timeCreated = Date.now() - (60 * 60 * 1000 + 1000);
 
         const submitReply = invokePoolMethod({
@@ -263,6 +251,7 @@ test("submitting on a long-disabled coin returns the daemon-issues final error",
             timeout: undefined
         }]);
     } finally {
+        poolModule.setTestCoinHashFactor("", 1);
         await runtime.stop();
     }
 });
