@@ -19,11 +19,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libboost-dev
+          sudo apt-get install -y libboost-date-time-dev libboost-dev libsodium-dev libssl-dev
 
       - name: Install dependencies
         run: npm install --package-lock=false
