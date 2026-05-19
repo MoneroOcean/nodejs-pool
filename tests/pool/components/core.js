@@ -400,6 +400,139 @@ test("template manager rotates templates and notifies miners through the right u
     assert.deepEqual(sendToWorkersCalls, []);
 });
 
+test("template manager ignores unchanged template refreshes", () => {
+    const activeBlockTemplates = {};
+    const pastBlockTemplates = {};
+    const anchorState = { current: 0, previous: 0 };
+
+    global.config = {
+        daemon: { port: 39001 },
+        pool: { trustedMiners: false }
+    };
+    global.support = {
+        circularBuffer(limit) {
+            const values = [];
+            return {
+                enq(value) {
+                    values.unshift(value);
+                    if (values.length > limit) values.pop();
+                },
+                get(index) {
+                    return values[index];
+                },
+                toarray() {
+                    return values.slice();
+                }
+            };
+        }
+    };
+
+    function TestBlockTemplate(template) {
+        Object.assign(this, template);
+        this.extraNonce = 0;
+        this.extraNonce2 = 0;
+    }
+
+    global.coinFuncs = {
+        BlockTemplate: TestBlockTemplate,
+        COIN2PORT() {
+            return 39001;
+        },
+        PORT2COIN() {
+            return "";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
+        },
+        getMM_PORTS() {
+            return {};
+        },
+        getMM_CHILD_PORTS() {
+            return {};
+        },
+        getAuxChainXTM() {
+            return null;
+        },
+        algoShortTypeStr() {
+            return "rx/0";
+        },
+        isMinerSupportAlgo() {
+            return true;
+        }
+    };
+
+    const templateManager = createTemplateManager({
+        cluster: { isMaster: false },
+        debug() {},
+        daemonPollMs: 500,
+        coins: [],
+        activeMiners: new Map(),
+        activeBlockTemplates,
+        pastBlockTemplates,
+        lastBlockHash: {},
+        lastBlockHeight: {},
+        lastBlockHashMM: {},
+        lastBlockHeightMM: {},
+        lastBlockTime: {},
+        lastBlockKeepTime: {},
+        lastBlockReward: {},
+        newCoinHashFactor: { "": 1 },
+        lastCoinHashFactor: { "": 1 },
+        lastCoinHashFactorMM: { "": 1 },
+        anchorState,
+        sendToWorkers() {},
+        getThreadName() {
+            return "(Test) ";
+        },
+        formatCoinPort() {
+            return "XMR/39001";
+        }
+    });
+
+    templateManager.setNewBlockTemplate({
+        coin: "",
+        port: 39001,
+        idHash: "same-template",
+        height: 101,
+        difficulty: 100,
+        coinHashFactor: 1,
+        isHashFactorChange: false
+    });
+    const firstTemplate = activeBlockTemplates[""];
+    activeBlockTemplates[""].extraNonce = 7;
+    activeBlockTemplates[""].extraNonce2 = 3;
+    activeBlockTemplates[""].sharedNonceSubmissions = new Set(["00000001"]);
+
+    templateManager.setNewBlockTemplate({
+        coin: "",
+        port: 39001,
+        idHash: "same-template",
+        height: 101,
+        difficulty: 100,
+        coinHashFactor: 1,
+        isHashFactorChange: false
+    });
+
+    assert.equal(activeBlockTemplates[""], firstTemplate);
+    assert.equal(activeBlockTemplates[""].extraNonce, 7);
+    assert.equal(activeBlockTemplates[""].extraNonce2, 3);
+    assert.equal(activeBlockTemplates[""].sharedNonceSubmissions.has("00000001"), true);
+    assert.equal(pastBlockTemplates[""], undefined);
+    templateManager.setNewBlockTemplate({
+        coin: "",
+        port: 39001,
+        idHash: "new-template",
+        height: 102,
+        difficulty: 100,
+        coinHashFactor: 1,
+        isHashFactorChange: false
+    });
+
+    assert.equal(activeBlockTemplates[""].extraNonce, 0);
+    assert.equal(activeBlockTemplates[""].extraNonce2, 0);
+    assert.equal(activeBlockTemplates[""].sharedNonceSubmissions, undefined);
+});
+
 test("server final replies honor explicit delay windows with random jitter", () => {
     const originalSetTimeout = global.setTimeout;
     const originalClearTimeout = global.clearTimeout;
