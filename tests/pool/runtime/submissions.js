@@ -107,6 +107,79 @@ test("throttled shares do not retain duplicate nonce entries", async () => {
     }
 });
 
+test("throttled trusted miners cannot replay a tracked nonce", async () => {
+    const validVector = RX0_MAIN_SHARE_VECTORS[0];
+    const { runtime } = await startHarness();
+    const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
+    const originalThrottleWindow = global.config.pool.minerThrottleShareWindow;
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const socket = {};
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 1;
+        global.config.pool.minerThrottleShareWindow = 1;
+        global.config.pool.trustedMiners = true;
+        crypto.randomBytes = () => Buffer.from([255]);
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1951,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-throttled-trusted-replay"
+            }
+        });
+
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const threshold = global.config.pool.minerThrottleSharePerSec * global.config.pool.minerThrottleShareWindow;
+        state.walletTrust[MAIN_WALLET] = 1000;
+        state.minerWallets[MAIN_WALLET].last_ver_shares = threshold;
+        miner.trust.trust = 1000;
+        miner.trust.check_height = 0;
+
+        const firstReply = invokePoolMethod({
+            socket,
+            id: 1952,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: validVector.nonce,
+                result: validVector.expected
+            }
+        });
+
+        const replayReply = invokePoolMethod({
+            socket,
+            id: 1953,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: validVector.nonce,
+                result: validVector.expected
+            }
+        });
+
+        await flushTimers();
+        assert.deepEqual(firstReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.deepEqual(replayReply.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(job.submissions.has(validVector.nonce), true);
+        assert.equal(runtime.getState().shareStats.trustedShares, 1);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
+        global.config.pool.minerThrottleShareWindow = originalThrottleWindow;
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        await runtime.stop();
+    }
+});
+
 test("expired shares do not retain unique nonce entries", async () => {
     const { runtime } = await startHarness();
     const socket = {};
