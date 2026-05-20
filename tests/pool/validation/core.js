@@ -130,6 +130,52 @@ test("throttled shares return the explicit increase-difficulty message", async (
     }
 });
 
+test("extreme low-difficulty throttling is eventually invalidated with a high safety multiplier", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 1;
+        global.config.pool.minerThrottleShareWindow = 1;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 132,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-throttle-invalid-lowdiff"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+        runtime.getState().minerWallets[MAIN_WALLET].last_ver_shares = 1000;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 133,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000009",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{
+            error: "Low difficulty share",
+            result: undefined
+        }]);
+        assert.equal(runtime.getState().shareStats.throttledShares, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(database.invalidShares.length, 1);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = 1000;
+        global.config.pool.minerThrottleShareWindow = 10;
+        await runtime.stop();
+    }
+});
+
 test("submit accepts shares when the verifier returns the hash in reverse byte order", async () => {
     const { runtime, database } = await startHarness();
     const socket = {};
