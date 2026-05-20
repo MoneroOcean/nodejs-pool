@@ -7,6 +7,8 @@ const test = require("node:test");
 
 const {
     MAIN_PORT,
+    MAIN_SUBMIT_PORT,
+    DUAL_SUBMIT_PORT,
     ETH_PORT,
     MAIN_WALLET,
     ALT_WALLET,
@@ -274,6 +276,8 @@ module.exports = {
     fs,
     fsp,
     MAIN_PORT,
+    MAIN_SUBMIT_PORT,
+    DUAL_SUBMIT_PORT,
     ETH_PORT,
     MAIN_WALLET,
     ALT_WALLET,
