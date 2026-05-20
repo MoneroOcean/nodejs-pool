@@ -53,8 +53,8 @@ function allocateTestPorts() {
 }
 
 const [MAIN_PORT, ETH_PORT] = allocateTestPorts();
-const MAIN_SUBMIT_PORT = MAIN_PORT + 2;
-const DUAL_SUBMIT_PORT = MAIN_PORT;
+const MAIN_SUBMIT_PORT = 18083;
+const DUAL_SUBMIT_PORT = 18081;
 const MAIN_WALLET = "4".repeat(95);
 const ETH_WALLET = "5".repeat(95);
 const ALT_WALLET = "6".repeat(95);
