@@ -140,6 +140,60 @@ test.describe("recovery submitted", { concurrency: false }, function recoverySub
         assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
     });
 
+
+    test("submitted batches do not finalize when tx hash resolves only to a failed wallet transfer", async () => {
+        const grossAmount = Math.round(0.2 * COIN);
+        const feeAmount = Math.round(0.0001 * COIN);
+        const netAmount = grossAmount - feeAmount;
+        const txHash = "7".repeat(64);
+        const txKey = "8".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: grossAmount, pending_batch_id: 1 }
+            ],
+            paymentBatches: [
+                createBatchRow({
+                    status: "submitted",
+                    submitted_at: "2026-04-17 11:10:05",
+                    tx_hash: txHash,
+                    tx_key: txKey,
+                    total_fee: 300000000,
+                    total_gross: grossAmount,
+                    total_net: netAmount
+                })
+            ],
+            paymentBatchItems: [
+                createBatchItemRow({ gross_amount: grossAmount, net_amount: netAmount, fee_amount: feeAmount })
+            ],
+            walletScript: {
+                get_transfer_by_txid: [function replyFailedTransfer() {
+                    return {
+                        result: {
+                            transfer: txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: netAmount }], {
+                                txid: txHash,
+                                type: "failed",
+                                locked: true,
+                                fee: 300000000
+                            })
+                        }
+                    };
+                }]
+            }
+        });
+
+        const recovered = await harness.runtime.recoverPendingBatches("startup");
+
+        assert.equal(recovered, false);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "submitted");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_attempts, 1);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].reconcile_clean_passes, 1);
+        assert.equal(harness.mysql.state.store.transactions.length, 0);
+        assert.equal(harness.mysql.state.store.payments.length, 0);
+        assert.equal(harness.mysql.state.store.balances[0].pending_batch_id, 1);
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, /is not visible in wallet history yet/);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 1);
+    });
+
     test("ambiguous submitting batches hold during recovery when wallet history is unavailable", async () => {
         const grossAmount = Math.round(0.2 * COIN);
         const feeAmount = Math.round(0.0001 * COIN);
