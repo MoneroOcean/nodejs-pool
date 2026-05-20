@@ -7,6 +7,7 @@ class SpacedSpecReporter extends Transform {
         super({ writableObjectMode: true });
         this.pendingText = "";
         this.lastPrintedNonEmptyLine = "";
+        this.lastPrintedLineWasBlank = false;
         this.reporter = spec();
         this.reporter.on("data", (chunk) => {
             this.push(this.rewriteText(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk)));
@@ -23,8 +24,13 @@ class SpacedSpecReporter extends Transform {
         while (newlineIndex !== -1) {
             let line = this.pendingText.slice(0, newlineIndex + 1);
             this.pendingText = this.pendingText.slice(newlineIndex + 1);
-            if (/^\s*▶ /.test(line) && this.lastPrintedNonEmptyLine) line = "\n" + line;
-            if (line.trim()) this.lastPrintedNonEmptyLine = line.trimEnd();
+            if (/^▶ /.test(line) && this.lastPrintedNonEmptyLine && !this.lastPrintedLineWasBlank) line = "\n" + line;
+            if (line.trim()) {
+                this.lastPrintedNonEmptyLine = line.trimEnd();
+                this.lastPrintedLineWasBlank = false;
+            } else {
+                this.lastPrintedLineWasBlank = true;
+            }
             output += line;
             newlineIndex = this.pendingText.indexOf("\n");
         }
@@ -41,7 +47,7 @@ class SpacedSpecReporter extends Transform {
         this.reporter.once("end", () => {
             if (this.pendingText) {
                 let output = this.pendingText;
-                if (/^\s*▶ /.test(output) && this.lastPrintedNonEmptyLine) output = "\n" + output;
+                if (/^▶ /.test(output) && this.lastPrintedNonEmptyLine && !this.lastPrintedLineWasBlank) output = "\n" + output;
                 this.push(output);
                 this.pendingText = "";
             }

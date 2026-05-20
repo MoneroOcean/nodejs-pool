@@ -9,7 +9,6 @@ const {
     VALID_RESULT,
     startHarness,
     invokePoolMethod,
-    flushTimers,
     poolModule
 } = require("../common/harness.js");
 
@@ -231,10 +230,18 @@ test("submit retries async verifier when verifier result is unknown", async () =
     const socket = {};
     const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
     const originalVerifyRetryConfig = global.config.pool.verifyShareRetry;
+    const originalSetTimeout = global.setTimeout;
     let slowHashCalls = 0;
 
     try {
-        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 0 };
+        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 7 };
+        global.setTimeout = function drainVerifierRetry(callback, delay, ...args) {
+            if (delay === 7) {
+                callback(...args);
+                return 0;
+            }
+            return originalSetTimeout(callback, delay, ...args);
+        };
         global.coinFuncs.slowHashAsync = function unknownThenValidHash(_buffer, _blockTemplate, _wallet, callback) {
             slowHashCalls += 1;
             if (slowHashCalls < 4) return callback(false);
@@ -256,8 +263,9 @@ test("submit retries async verifier when verifier result is unknown", async () =
             params: { id: socket.miner_id, job_id: jobId, nonce: "0000000c", result: VALID_RESULT }
         });
 
-        for (let i = 0; i < 10 && submitReply.replies.length === 0; ++i) {
-            await flushTimers();
+        const deadline = Date.now() + 500;
+        while (submitReply.replies.length === 0 && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
         }
         assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
         assert.equal(slowHashCalls, 4);
@@ -266,6 +274,7 @@ test("submit retries async verifier when verifier result is unknown", async () =
     } finally {
         global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
         global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        global.setTimeout = originalSetTimeout;
         await runtime.stop();
     }
 });
