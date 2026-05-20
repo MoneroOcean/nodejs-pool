@@ -9,6 +9,7 @@ const {
     VALID_RESULT,
     startHarness,
     invokePoolMethod,
+    flushTimers,
     poolModule
 } = require("../common/harness.js");
 
@@ -255,7 +256,9 @@ test("submit retries async verifier when verifier result is unknown", async () =
             params: { id: socket.miner_id, job_id: jobId, nonce: "0000000c", result: VALID_RESULT }
         });
 
-        await new Promise(resolve => setImmediate(resolve));
+        for (let i = 0; i < 10 && submitReply.replies.length === 0; ++i) {
+            await flushTimers();
+        }
         assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
         assert.equal(slowHashCalls, 4);
         assert.equal(runtime.getState().shareStats.invalidShares, 0);
