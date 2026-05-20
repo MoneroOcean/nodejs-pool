@@ -530,7 +530,7 @@ test -x /usr/bin/npm || sudo ln -s "\$(command -v npm)" /usr/bin/npm
 sudo chown -R user:user /usr/local/src/grpc-json-proxy
 cd /usr/local/src/grpc-json-proxy
 if [ ! -d node_modules ]; then
-  retry_command npm install --omit=dev
+  retry_command npm install --omit=dev --min-release-age=7
 fi
 cd /home/user
 if [ ! -d /home/user/nodejs-pool/.git ]; then
@@ -538,9 +538,9 @@ if [ ! -d /home/user/nodejs-pool/.git ]; then
 fi
 cd /home/user/nodejs-pool
 if [ ! -d node_modules ]; then
-  JOBS=$(nproc) retry_command npm install
+  JOBS=$(nproc) retry_command npm ci
 fi
-command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2
+command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2 --min-release-age=7
 retry_command pm2 install pm2-logrotate
 if [ ! -f cert.key ] || [ ! -f cert.pem ]; then
   openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
@@ -591,7 +591,7 @@ if [ ! -d /home/user/mo-pool-ui/.git ]; then
 fi
 cd mo-pool-ui
 if [ ! -d node_modules ]; then
-  retry_command npm install
+  retry_command npm ci
 fi
 if [ -r /etc/os-release ]; then
   . /etc/os-release
@@ -607,4 +607,4 @@ EOF
 systemctl start xtm xtm_mm
 wait_for_tari_sync
 
-echo 'Frontend is installed in /home/user/mo-pool-ui and deployed to /var/www/mo-pool-ui. To rebuild it later, log in as "user" and run: cd ~/mo-pool-ui && npm install && npm run build'
+echo 'Frontend is installed in /home/user/mo-pool-ui and deployed to /var/www/mo-pool-ui. To rebuild it later, log in as "user" and run: cd ~/mo-pool-ui && npm ci && npm run build'
