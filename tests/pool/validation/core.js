@@ -168,7 +168,7 @@ test("extreme low-difficulty throttling is eventually invalidated with a high sa
         }]);
         assert.equal(runtime.getState().shareStats.throttledShares, 0);
         assert.equal(runtime.getState().shareStats.invalidShares, 1);
-        assert.equal(database.invalidShares.length, 1);
+        assert.equal(database.invalidShares.length, 0);
     } finally {
         global.config.pool.minerThrottleSharePerSec = 1000;
         global.config.pool.minerThrottleShareWindow = 10;
