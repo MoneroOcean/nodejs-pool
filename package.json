@@ -9,7 +9,8 @@
     "url": "https://github.com/MoneroOcean/nodejs-pool/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.9.0",
+    "npm": ">=11.10.0"
   },
   "scripts": {
     "test": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/all.js",
