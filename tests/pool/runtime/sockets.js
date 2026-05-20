@@ -320,6 +320,44 @@ test("per-subnet connection limits close excess sockets independently from the p
     }
 });
 
+
+test("rejected per-IP sockets do not reduce active subnet counts", async () => {
+    const { runtime } = await startHarness();
+    const originalMaxConnectionsPerIP = global.config.pool.maxConnectionsPerIP;
+    const originalMaxConnectionsPerSubnet = global.config.pool.maxConnectionsPerSubnet;
+    const first = await openRawSocket(MAIN_PORT, { localAddress: "127.0.0.10" });
+    const second = await openRawSocket(MAIN_PORT, { localAddress: "127.0.0.11" });
+    let rejectedByIp;
+    let secondRejectedByIp;
+    let rejectedBySubnet;
+
+    try {
+        global.config.pool.maxConnectionsPerIP = 1;
+        global.config.pool.maxConnectionsPerSubnet = 2;
+        rejectedByIp = await openRawSocket(MAIN_PORT, { localAddress: "127.0.0.10" });
+        await waitForSocketClose(rejectedByIp, 1000);
+
+        secondRejectedByIp = await openRawSocket(MAIN_PORT, { localAddress: "127.0.0.10" });
+        await waitForSocketClose(secondRejectedByIp, 1000);
+
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], 2);
+
+        rejectedBySubnet = await openRawSocket(MAIN_PORT, { localAddress: "127.0.0.12" });
+        await waitForSocketClose(rejectedBySubnet, 1000);
+        await assertNoSocketData(first);
+        await assertNoSocketData(second);
+    } finally {
+        global.config.pool.maxConnectionsPerIP = originalMaxConnectionsPerIP;
+        global.config.pool.maxConnectionsPerSubnet = originalMaxConnectionsPerSubnet;
+        first.destroy();
+        second.destroy();
+        if (rejectedByIp) rejectedByIp.destroy();
+        if (secondRejectedByIp) secondRejectedByIp.destroy();
+        if (rejectedBySubnet) rejectedBySubnet.destroy();
+        await runtime.stop();
+    }
+});
+
 test("closing a miner socket removes it from the active miner map", async () => {
     const { runtime } = await startHarness();
     const client = new JsonLineClient(MAIN_PORT);
