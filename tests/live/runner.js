@@ -86,7 +86,7 @@ function buildSummary(run, coveredResults) {
         hardware: run.hardware || {},
         minerInventory: run.miners.map((miner) => ({
             name: miner.name,
-            binaryPath: miner.scriptPath || miner.binaryPath,
+            binaryPath: miner.binaryPath,
             algorithms: Array.from(miner.algorithms).sort()
         })),
         coveragePlan: run.coveragePlan.map((entry) => ({
@@ -180,7 +180,7 @@ async function createLivePoolRun(input) {
 
         if (intelGpuDetected && usesAny(activeAlgorithmSet, MOMINER_INTEL_ALGOS)) {
             const mominer = await ensureMoMinerRoot(config, logger);
-            miners.push(buildMoMiner(mominer.rootDir, mominer.scriptPath));
+            miners.push(buildMoMiner(mominer.rootDir, mominer.binaryPath));
         }
 
         miners.push(buildXmrigMiner((await ensureXmrigBinary(config, logger)).binaryPath));

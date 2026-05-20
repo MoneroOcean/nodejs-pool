@@ -334,17 +334,23 @@ async function ensureMoMinerRoot(config, logger) {
         downloadPrefix: MOMINER_DOWNLOAD_PREFIX,
         includeUnzipOnWindows: false,
         async locate(extractDir) {
-            const scriptPath = await findNamedFile(extractDir, "mominer.js");
-            return scriptPath ? { rootDir: path.dirname(scriptPath), scriptPath } : null;
+            const binaryPath = await findNamedFile(extractDir, "mominer");
+            return binaryPath ? { rootDir: path.dirname(binaryPath), binaryPath } : null;
         },
         missingAsset(release) {
             return `No MoMiner Linux x64 archive asset is available in ${release.tag_name || "latest release"}`;
         },
         missingExtracted(asset) {
-            return `Could not find mominer.js after extracting ${asset.name}`;
+            return `Could not find mominer executable after extracting ${asset.name}`;
         },
         logPayload(located, release, asset) {
-            return { miner: "mominer", release: release.tag_name, asset: asset.name, rootDir: located.rootDir };
+            return {
+                miner: "mominer",
+                release: release.tag_name,
+                asset: asset.name,
+                rootDir: located.rootDir,
+                binaryPath: located.binaryPath
+            };
         },
         result(located, release, asset, source) {
             return { ...located, source, release, asset };
