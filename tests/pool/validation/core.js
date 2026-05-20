@@ -225,6 +225,48 @@ test("submit accepts shares when the verifier returns the hash in reverse byte o
     }
 });
 
+test("submit retries async verifier when verifier result is unknown", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalVerifyRetryConfig = global.config.pool.verifyShareRetry;
+    let slowHashCalls = 0;
+
+    try {
+        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 0 };
+        global.coinFuncs.slowHashAsync = function unknownThenValidHash(_buffer, _blockTemplate, _wallet, callback) {
+            slowHashCalls += 1;
+            if (slowHashCalls < 4) return callback(false);
+            callback(VALID_RESULT);
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 134,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "worker-remote-retry" }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 135,
+            method: "submit",
+            params: { id: socket.miner_id, job_id: jobId, nonce: "0000000c", result: VALID_RESULT }
+        });
+
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(slowHashCalls, 4);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
 test("wallet bans propagated through messageHandler reject later logins", async () => {
     const { runtime } = await startHarness();
     const cluster = require("cluster");
