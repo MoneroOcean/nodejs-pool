@@ -423,6 +423,12 @@ function createCoinFuncsStub() {
             }
             return Buffer.from(VALID_RESULT_BUFFER);
         },
+        kawpowQuickHash() {
+            if (typeof this.__testKawpowQuickResult === "string") {
+                return Buffer.from(this.__testKawpowQuickResult, "hex");
+            }
+            return RAVEN_RESULT_BUFFER;
+        },
         slowHashAsync(buffer, blockTemplate, _wallet, callback, verifyContext) {
             if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
                 callback(this.slowHashBuff(buffer, blockTemplate).toString("hex"));
