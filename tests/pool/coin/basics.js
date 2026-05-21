@@ -170,6 +170,61 @@ test("BlockTemplate uses the SAL blob marker when daemon reserved offset is stal
     assert.equal(blockTemplate.reserved_offset, prefix.length + 2);
 });
 
+test("BTC-style block rewards only credit coinbase outputs paid to the pool address", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const cases = [
+        { coin: "RTM", port: 9998, addressKey: "address_9998", multiplier: 0xFFFFFFFF },
+        { coin: "BTRM", port: 10225, addressKey: "address_10225", multiplier: 0xFFFFFFFF },
+        { coin: "RVN", port: 8766, addressKey: "address_8766" },
+        { coin: "XNA", port: 19001, addressKey: "address_19001" }
+    ];
+    const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
+
+    try {
+        for (const entry of cases) {
+            const poolAddress = "POOL_" + entry.coin + "_ADDRESS";
+            global.config.pool[entry.addressKey] = poolAddress;
+            global.support.rpcPortDaemon2 = function rpcPortDaemon2(port, method, params, callback) {
+                assert.equal(port, entry.port);
+                assert.equal(method, "");
+                assert.deepEqual(params, { method: "getblock", params: [entry.coin.toLowerCase() + "-block", 2] });
+                callback({
+                    result: {
+                        difficulty: 2,
+                        tx: [{
+                            vout: [
+                                { n: 0, value: 12.5, scriptPubKey: { addresses: [poolAddress] } },
+                                { n: 1, value: 1.25, scriptPubKey: { addresses: ["NON_POOL_REWARD"] } },
+                                { n: 2, value: 3, scriptPubKey: { address: poolAddress } },
+                                { n: 3, value: 100, scriptPubKey: { addresses: ["GOVERNANCE_ADDRESS"] } }
+                            ]
+                        }]
+                    }
+                });
+            };
+
+            try {
+                const header = await new Promise((resolve, reject) => {
+                    coinFuncs.getPortAnyBlockHeaderByHash(entry.port, entry.coin.toLowerCase() + "-block", true, (err, body) => {
+                        if (err) return reject(new Error("unexpected " + entry.coin + " block header error"));
+                        return resolve(body);
+                    });
+                });
+
+                assert.equal(header.reward, 1550000000);
+                if (entry.multiplier) assert.equal(header.difficulty, 2 * entry.multiplier);
+            } finally {
+                delete global.config.pool[entry.addressKey];
+            }
+        }
+    } finally {
+        global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
+        cases.forEach(function clearAddress(entry) {
+            delete global.config.pool[entry.addressKey];
+        });
+    }
+});
+
 test("BlockTemplate derives dual-main candidate difficulty from the lowest chain difficulty", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const originalGetAuxChainXTM = global.coinFuncs.getAuxChainXTM;
