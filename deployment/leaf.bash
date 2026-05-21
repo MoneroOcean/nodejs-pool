@@ -9,7 +9,7 @@ TARI_USER="${TARI_USER:-taridaemon}"
 TARI_HOME="${TARI_HOME:-/home/$TARI_USER}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
 TARI_EXTERNAL_IP="${TARI_EXTERNAL_IP:-}"
-TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
+TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -175,6 +175,10 @@ patch_tari_config() {
   chmod 755 "$patcher"
   if [ -n "$TARI_EXTERNAL_IP" ]; then
     args+=("--base-node-grpc-ip" "$TARI_EXTERNAL_IP")
+  fi
+  if [ -z "$TARI_WALLET_PAYMENT_ADDRESS" ]; then
+    echo "TARI_WALLET_PAYMENT_ADDRESS must be set to your Tari wallet payment address" >&2
+    return 1
   fi
   args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
   "$patcher" "${args[@]}"

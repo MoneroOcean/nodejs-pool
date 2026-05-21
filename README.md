@@ -94,9 +94,11 @@ pm2 save
 For a leaf-only install:
 
 ```bash
-curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash -x
+TARI_WALLET_PAYMENT_ADDRESS=<your_tari_wallet_address> \
+  curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash -x
 ```
 
+`TARI_WALLET_PAYMENT_ADDRESS` is required so Tari merge-mining rewards are paid to a wallet you control.
 Set `TARI_RELEASE_TAG` before `bash -x` to use a different Tari source tag on leaf nodes.
 
 After install, update the leaf config so it points at the main pool infrastructure, then start the `pool` module on that node.
