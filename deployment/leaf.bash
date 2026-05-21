@@ -365,7 +365,7 @@ if [ -d /usr/local/src/grpc-json-proxy ]; then
   sudo chown -R user:user /usr/local/src/grpc-json-proxy
   cd /usr/local/src/grpc-json-proxy
   if [ ! -d node_modules ]; then
-    retry_command npm install --omit=dev
+    retry_command npm install --omit=dev --min-release-age=7
   fi
 fi
 cd /home/user
@@ -374,9 +374,9 @@ if [ ! -d /home/user/nodejs-pool/.git ]; then
 fi
 cd /home/user/nodejs-pool
 if [ ! -d node_modules ]; then
-  JOBS=$(nproc) retry_command npm install
+  JOBS=$(nproc) retry_command npm ci
 fi
-command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2
+command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2 --min-release-age=7
 retry_command pm2 install pm2-logrotate
 if [ ! -f cert.key ] || [ ! -f cert.pem ]; then
   openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500

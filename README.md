@@ -107,7 +107,7 @@ The Docker-based setup and the optional `lib2` altblock stack live in [`lib2/REA
 
 ## Manual / Dev Notes
 
-- `package.json` currently requires Node `>=18`
+- `package.json` currently requires Node `>=22.9.0`
 - `config_example.json` provides the base local config shape
 - The SQL schema is in [`deployment/base.sql`](deployment/base.sql)
 - Run the test suite with:
@@ -119,7 +119,7 @@ npm test
 ## Operational Notes
 
 - The deploy script starts most services for you, but leaves `pool` to be started after config review.
-- To redeploy the frontend after a UI update, run `cd ~/mo-pool-ui && npm install && npm run build` as the `user` account.
+- To redeploy the frontend after a UI update, run `cd ~/mo-pool-ui && npm ci && npm run build` as the `user` account.
 - The default SQL schema is XMR-oriented; adapt SQL-backed config if you are building for something else.
 - Mining ports are not hardcoded in `config.json`; they are read from MySQL table `pool.port_config`.
 - If LMDB appears stuck or the API stops moving, start with `mdb_stat -fear ~/pool_db/` and then review PM2 service state.

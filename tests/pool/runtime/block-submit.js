@@ -43,6 +43,8 @@ const {
     requestRawJson
 } = require("../common/runtime-helpers.js");
 
+const HIGH_DIFF_ETH_RESULT = "00".repeat(31) + "01";
+
 test.describe("pool runtime: block submit", { concurrency: false }, () => {
 test("successful main-chain block candidates are stored as blocks", async () => {
     const { runtime, database } = await startHarness({
@@ -382,7 +384,7 @@ test("block-submit test mode lets a fresh wallet reach daemon submit without sen
             };
 
             const loginReply = loginMainMiner(socket, 3001, "worker-block-submit-test-mode");
-            const submitReply = submitMainBlockCandidate(socket, 3002, getLoginJobId(loginReply));
+            const submitReply = submitMainBlockCandidate(socket, 3002, getLoginJobId(loginReply), { result: VALID_RESULT });
 
             await flushTimers();
             await new Promise((resolve) => setTimeout(resolve, 120));
@@ -421,7 +423,7 @@ test("block-submit test mode lets eth-style submits reach daemon with an appende
             };
 
             const notifyPush = authorizeEthMiner(socket, 3004, "worker-block-submit-eth");
-            const submitReply = submitEthBlockCandidate(socket, 3005, notifyPush);
+            const submitReply = submitEthBlockCandidate(socket, 3005, notifyPush, HIGH_DIFF_ETH_RESULT);
 
             await flushTimers();
             assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);

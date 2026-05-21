@@ -167,9 +167,9 @@ class JsonLineClient {
     }
 }
 
-async function openRawSocket(port) {
+async function openRawSocket(port, options = {}) {
     return await new Promise((resolve, reject) => {
-        const socket = net.createConnection({ host: "127.0.0.1", port }, () => resolve(socket));
+        const socket = net.createConnection({ host: "127.0.0.1", port, ...options }, () => resolve(socket));
         socket.setEncoding("utf8");
         socket.once("error", reject);
     });

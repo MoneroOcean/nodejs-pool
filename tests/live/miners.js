@@ -2,7 +2,6 @@
 const path = require("node:path");
 
 const {
-    DEFAULT_MOMINER_DOCKER_IMAGE,
     DIFF_SCALE,
     HASHRATE_SCALE,
     EMBEDDED_ACTIVE_ALGOS,
@@ -18,11 +17,8 @@ const {
     sleep,
     sanitizeName,
     shortAlgoName,
-    commandExists,
-    fileExistsSync,
     writeJson
 } = require("./shared.js");
-const { runCommand } = require("./downloads.js");
 
 function parseDiffToken(token) {
     if (!token) return null;
@@ -389,19 +385,11 @@ function buildMoMinerNoBenchConfig(context) {
     };
 }
 
-function buildMoMiner(rootDir, scriptPath) {
-    const dockerfilePath = path.join(rootDir, "deploy.dockerfile");
-    const useDocker = process.platform === "linux" && commandExists("docker") && fileExistsSync(dockerfilePath);
-
+function buildMoMiner(rootDir, binaryPath) {
     return {
         name: "mominer",
-        binaryPath: useDocker ? "docker" : process.execPath,
+        binaryPath,
         rootDir,
-        scriptPath,
-        dockerfilePath,
-        dockerImage: DEFAULT_MOMINER_DOCKER_IMAGE,
-        dockerPrepared: false,
-        useDocker,
         algorithms: new Set(MOMINER_INTEL_ALGOS),
         parser: createMoMinerParser(),
         style: "mominer",
@@ -410,40 +398,11 @@ function buildMoMiner(rootDir, scriptPath) {
             await writeJson(configPath, buildMoMinerNoBenchConfig(context));
             context.moMinerConfigPath = configPath;
             context.moMinerConfigArg = configPath;
-
-            if (!this.useDocker) return;
-            if (!this.dockerPrepared) {
-                await runCommand("docker", ["build", "-q", "-t", this.dockerImage, "-f", this.dockerfilePath, this.rootDir], {
-                    cwd: this.rootDir
-                });
-                this.dockerPrepared = true;
-            }
-
-            context.moMinerContainerName = sanitizeName(`mominer-${context.worker}`).slice(0, 63);
-            context.moMinerConfigArg = "/root/mominer-live/mominer-config.json";
         },
         buildArgs(context) {
-            const args = ["mine", context.moMinerConfigArg];
-            if (!this.useDocker) return [this.scriptPath, ...args];
-
-            context.moMinerContainerName = context.moMinerContainerName || sanitizeName(`mominer-${context.worker}`).slice(0, 63);
-            return [
-                "run",
-                "--privileged",
-                "--rm",
-                "--name", context.moMinerContainerName,
-                "--hostname", context.moMinerContainerName,
-                "--mount", `type=bind,source=${this.rootDir},target=/root/mominer`,
-                "--mount", `type=bind,source=${context.attemptDir},target=/root/mominer-live`,
-                "--workdir", "/root/mominer",
-                this.dockerImage,
-                "node",
-                "mominer.js",
-                ...args
-            ];
+            return ["mine", context.moMinerConfigArg];
         },
         buildEnv(context) {
-            if (this.useDocker) return {};
             return {
                 LD_LIBRARY_PATH: [
                     this.rootDir,
@@ -453,10 +412,6 @@ function buildMoMiner(rootDir, scriptPath) {
                 ].filter(Boolean).join(":"),
                 MOMINER_CONFIG_DIR: context.attemptDir
             };
-        },
-        async cleanup(context) {
-            if (!this.useDocker || !context.moMinerContainerName) return;
-            await runCommand("docker", ["rm", "-f", context.moMinerContainerName]).catch(() => {});
         }
     };
 }

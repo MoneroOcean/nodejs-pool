@@ -11,7 +11,6 @@ const {
     MAIN_WALLET,
     ALT_WALLET,
     ETH_WALLET,
-    VALID_RESULT,
     JsonLineClient,
     openRawSocket,
     waitForSocketClose,
@@ -42,6 +41,8 @@ const {
     withCapturedConsoleError,
     requestRawJson
 } = require("../common/runtime-helpers.js");
+
+const HIGH_DIFF_ETH_RESULT = "00".repeat(31) + "01";
 
 test.describe("pool runtime: eth submits", { concurrency: false }, () => {
 test("accepted block submits with unresolved zero hashes are dropped before storage and alert admin", async () => {
@@ -252,7 +253,7 @@ test("eth-style false submit results are treated as direct failures without retr
             await withBlockSubmitTestMode(async () => {
                 runtime.getState().activeBlockTemplates.ETH.hash = "34".repeat(32);
                 const notifyPush = authorizeEthMiner(socket, 225, "worker-block-false-result");
-                const submitReply = submitEthBlockCandidate(socket, 226, notifyPush);
+                const submitReply = submitEthBlockCandidate(socket, 226, notifyPush, HIGH_DIFF_ETH_RESULT);
 
                 await flushTimers();
                 assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);

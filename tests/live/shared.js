@@ -26,7 +26,6 @@ const DEFAULT_SRBMINER_CN_GPU_INTENSITY = process.env.NODEJS_POOL_LIVE_SRBMINER_
     || "1";
 const DEFAULT_SRBMINER_API_PORT = 21550;
 const DEFAULT_MOMINER_C29_DEVICE = "gpu1*1";
-const DEFAULT_MOMINER_DOCKER_IMAGE = "mominer-deploy";
 
 const XMRIG_RELEASE_API = "https://api.github.com/repos/MoneroOcean/xmrig/releases/latest";
 const SRBMINER_RELEASE_API = "https://api.github.com/repos/doktor83/SRBMiner-Multi/releases/latest";
@@ -387,7 +386,6 @@ module.exports = {
     DEFAULT_SRBMINER_CN_GPU_INTENSITY,
     DEFAULT_SRBMINER_API_PORT,
     DEFAULT_MOMINER_C29_DEVICE,
-    DEFAULT_MOMINER_DOCKER_IMAGE,
     XMRIG_RELEASE_API,
     SRBMINER_RELEASE_API,
     SRBMINER_DOWNLOAD_PREFIX,

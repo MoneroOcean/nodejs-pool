@@ -9,7 +9,8 @@
     "url": "https://github.com/MoneroOcean/nodejs-pool/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.9.0",
+    "npm": ">=11.10.0"
   },
   "scripts": {
     "test": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/all.js",
@@ -42,7 +43,7 @@
     "express": "4.22.1",
     "node-blocktemplate": "git+https://github.com/MoneroOcean/node-blocktemplate.git#v15.8.19",
     "node-lmdb": "0.10.1",
-    "node-powhash": "github:MoneroOcean/node-powhash#v29.2.0",
+    "node-powhash": "github:MoneroOcean/node-powhash#v29.2.1",
     "promise-mysql": "3.0.0",
     "protocol-buffers": "5.0.0"
   },

@@ -3,14 +3,12 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-    MAIN_PORT,
     MAIN_WALLET,
     ALT_WALLET,
     THIRD_WALLET,
     VALID_RESULT,
     startHarness,
     invokePoolMethod,
-    createBaseTemplate,
     poolModule
 } = require("../common/harness.js");
 
@@ -132,6 +130,52 @@ test("throttled shares return the explicit increase-difficulty message", async (
     }
 });
 
+test("extreme low-difficulty throttling is eventually invalidated with a high safety multiplier", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 1;
+        global.config.pool.minerThrottleShareWindow = 1;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 132,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-throttle-invalid-lowdiff"
+            }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+        runtime.getState().minerWallets[MAIN_WALLET].last_ver_shares = 1000;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 133,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000009",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(submitReply.replies, [{
+            error: "Low difficulty share",
+            result: undefined
+        }]);
+        assert.equal(runtime.getState().shareStats.throttledShares, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = 1000;
+        global.config.pool.minerThrottleShareWindow = 10;
+        await runtime.stop();
+    }
+});
+
 test("submit accepts shares when the verifier returns the hash in reverse byte order", async () => {
     const { runtime, database } = await startHarness();
     const socket = {};
@@ -177,6 +221,60 @@ test("submit accepts shares when the verifier returns the hash in reverse byte o
     } finally {
         global.coinFuncs.slowHashBuff = originalSlowHashBuff;
         global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
+test("submit retries async verifier when verifier result is unknown", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalVerifyRetryConfig = global.config.pool.verifyShareRetry;
+    const originalSetTimeout = global.setTimeout;
+    let slowHashCalls = 0;
+
+    try {
+        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 7 };
+        global.setTimeout = function drainVerifierRetry(callback, delay, ...args) {
+            if (delay === 7) {
+                callback(...args);
+                return 0;
+            }
+            return originalSetTimeout(callback, delay, ...args);
+        };
+        global.coinFuncs.slowHashAsync = function unknownThenValidHash(_buffer, _blockTemplate, _wallet, callback) {
+            slowHashCalls += 1;
+            if (slowHashCalls < 4) return callback(false);
+            callback(VALID_RESULT);
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 134,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "worker-remote-retry" }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 135,
+            method: "submit",
+            params: { id: socket.miner_id, job_id: jobId, nonce: "0000000c", result: VALID_RESULT }
+        });
+
+        const deadline = Date.now() + 500;
+        while (submitReply.replies.length === 0 && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(slowHashCalls, 4);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        global.setTimeout = originalSetTimeout;
         await runtime.stop();
     }
 });
@@ -231,18 +329,8 @@ test("submitting on a long-disabled coin returns the daemon-issues final error",
         });
         const jobId = loginReply.replies[0].result.job.job_id;
         const state = runtime.getState();
-        const activeTemplate = state.activeBlockTemplates[""];
 
-        runtime.setTemplate({
-            ...createBaseTemplate({
-                coin: "",
-                port: MAIN_PORT,
-                idHash: activeTemplate.idHash,
-                height: activeTemplate.height
-            }),
-            idHash: activeTemplate.idHash,
-            coinHashFactor: 0
-        });
+        poolModule.setTestCoinHashFactor("", 0);
         state.activeBlockTemplates[""].timeCreated = Date.now() - (60 * 60 * 1000 + 1000);
 
         const submitReply = invokePoolMethod({
@@ -263,6 +351,7 @@ test("submitting on a long-disabled coin returns the daemon-issues final error",
             timeout: undefined
         }]);
     } finally {
+        poolModule.setTestCoinHashFactor("", 1);
         await runtime.stop();
     }
 });
@@ -303,7 +392,7 @@ test("proxy submits without worker and pool nonces are rejected as invalid share
     }
 });
 
-test("xmrig-proxy connections are not banned by the proxy worker limit path", async () => {
+test("xmrig-proxy connections are limited by the proxy worker limit path", async () => {
     const { runtime } = await startHarness();
 
     try {
@@ -330,10 +419,12 @@ test("xmrig-proxy connections are not banned by the proxy worker limit path", as
             }
         });
 
-        assert.equal(first.finals.length, 0);
-        assert.equal(second.finals.length, 0);
         assert.equal(first.replies[0].error, null);
-        assert.equal(second.replies[0].error, null);
+        assert.equal(second.replies.length, 0);
+        assert.deepEqual(second.finals, [{
+            error: "Temporary (one hour max) mining ban since you connected too many workers. Please use proxy (https://github.com/MoneroOcean/xmrig-proxy)",
+            timeout: 600
+        }]);
     } finally {
         global.config.pool.workerMax = 20;
         await runtime.stop();

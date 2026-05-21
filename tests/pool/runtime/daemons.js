@@ -7,6 +7,8 @@ const {
     fs,
     fsp,
     MAIN_PORT,
+    MAIN_SUBMIT_PORT,
+    DUAL_SUBMIT_PORT,
     ETH_PORT,
     MAIN_WALLET,
     ALT_WALLET,
@@ -385,7 +387,10 @@ test("block-submit test mode stops daemon-first submits once the marker is remov
         assert.equal(poolModule.refreshBlockSubmitTestMode(), true);
 
         const enabledLoginReply = loginMainMiner(socketEnabled, 3003, "worker-block-submit-enabled");
-        const enabledSubmitReply = submitMainBlockCandidate(socketEnabled, 3006, getLoginJobId(enabledLoginReply), { nonce: "0000002b" });
+        const enabledSubmitReply = submitMainBlockCandidate(socketEnabled, 3006, getLoginJobId(enabledLoginReply), {
+            nonce: "0000002b",
+            result: VALID_RESULT
+        });
 
         await new Promise((resolve) => setTimeout(resolve, 120));
         await flushTimers();
@@ -498,7 +503,7 @@ test("wallet trust enables daemon-first block submit for a new same-wallet sessi
         await flushTimers();
         assert.deepEqual(candidateSubmitReply.replies, [{ error: null, result: { status: "OK" } }]);
         assert.equal(global.support.rpcPortDaemonCalls.length, 1);
-        assert.equal(global.support.rpcPortDaemonCalls[0].port, MAIN_PORT + 2);
+        assert.equal(global.support.rpcPortDaemonCalls[0].port, MAIN_SUBMIT_PORT);
     } finally {
         await runtime.stop();
     }
@@ -611,7 +616,7 @@ test("main-chain candidates that only satisfy the XMR threshold submit only to t
 
         await flushTimers();
         assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
-        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_PORT + 2]);
+        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_SUBMIT_PORT]);
         assert.equal(database.blocks.length, 1);
         assert.equal(database.altBlocks.length, 0);
     } finally {
@@ -662,7 +667,7 @@ test("main-chain candidates that satisfy both thresholds submit to both XMR and 
 
         await flushTimers();
         assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
-        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_PORT + 2, MAIN_PORT]);
+        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_SUBMIT_PORT, DUAL_SUBMIT_PORT]);
         assert.equal(database.blocks.length, 1);
         assert.equal(database.altBlocks.length, 1);
         assert.equal(database.altBlocks[0].payload.port, 18144);
@@ -715,7 +720,7 @@ test("low-diff main-port block candidates still submit to both daemons and notif
 
         await flushTimers();
         assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
-        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_PORT + 2, MAIN_PORT]);
+        assert.deepEqual(global.support.rpcPortDaemonCalls.map((entry) => entry.port), [MAIN_SUBMIT_PORT, DUAL_SUBMIT_PORT]);
         assert.equal(global.support.emails.some((entry) => entry.subject.includes("low diff block")), true);
         assert.equal(database.blocks.length, 1);
         assert.equal(database.altBlocks.length, 1);
