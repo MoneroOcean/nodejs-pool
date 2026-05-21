@@ -333,6 +333,55 @@ test("wallet reward selectors stay on the coin profiles for asset-aware chains",
     }), 7);
 });
 
+
+test("raven-style reward accounting only credits coinbase outputs paid to the pool address", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const rvnRpc = coinFuncs.getRpcSettings("RVN");
+    const poolAddress = "RPoolRewardAddress111111111111111111";
+    const thirdPartyAddress = "RThirdPartyAddress1111111111111111";
+    let callbackArgs = null;
+
+    await new Promise((resolve) => {
+        rvnRpc.getAnyBlockHeaderByHash({
+            blockHash: "aa".repeat(32),
+            callback(err, body) {
+                callbackArgs = { err, body };
+                resolve();
+            },
+            isOurBlock: true,
+            noErrorReport: true,
+            port: 8766,
+            profile: coinFuncs.getPoolProfile("RVN"),
+            runtime: {
+                getPoolAddress() { return poolAddress; },
+                support: {
+                    rpcPortDaemon2(_port, _method, params, callback) {
+                        assert.deepEqual(params, { method: "getblock", params: ["aa".repeat(32), 2] });
+                        callback({
+                            result: {
+                                hash: "aa".repeat(32),
+                                height: 123,
+                                difficulty: 456,
+                                tx: [{
+                                    vout: [
+                                        { value: 50, scriptPubKey: { addresses: [poolAddress] } },
+                                        { value: 12.5, scriptPubKey: { addresses: [thirdPartyAddress] } },
+                                        { value: 25, scriptPubKey: { address: poolAddress } },
+                                        { value: 1, scriptPubKey: { addresses: [] } }
+                                    ]
+                                }]
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    });
+
+    assert.equal(callbackArgs.err, null);
+    assert.equal(callbackArgs.body.reward, 7500000000);
+});
+
 test("eth-style hash lookups preserve hex block heights when deriving canonical headers", async () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const etcRpc = coinFuncs.getRpcSettings("ETC");
