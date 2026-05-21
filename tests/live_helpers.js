@@ -16,10 +16,14 @@ const {
     getSuccessObserveMs
 } = require("./live/miners.js");
 const {
+    buildDefaultBlockSubmitPayload,
     buildEthBlockSubmitParams,
+    CRYPTONOTE_HIGH_DIFF_RESULT_HEX,
+    ETHASH_HIGH_DIFF_RESULT_HEX,
     matchesBlockSubmitExpectation,
     summarizeBlockSubmitLog
 } = require("./live/protocol.js");
+const { BLOCK_SUBMIT_LIVE_CASES } = require("./live/block_submit.js");
 
 test.describe("live miner helpers", { concurrency: false }, () => {
     test("SRBMiner cn/gpu args include conservative stability controls", () => {
@@ -180,6 +184,43 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             () => buildEthBlockSubmitParams("wallet", "job-1", "aa".repeat(32), ""),
             /Eth subscribe did not return an extranonce/
         );
+    });
+
+    test("default block-submit payload carries an explicit synthetic result", () => {
+        const payload = buildDefaultBlockSubmitPayload({
+            result: {
+                id: "miner-1",
+                job: { job_id: "job-1" }
+            }
+        }, CRYPTONOTE_HIGH_DIFF_RESULT_HEX);
+
+        assert.equal(payload.result, CRYPTONOTE_HIGH_DIFF_RESULT_HEX);
+        assert.equal(payload.block_submit_test_result, CRYPTONOTE_HIGH_DIFF_RESULT_HEX);
+    });
+
+    test("block-submit synthetic high-difficulty hashes are non-zero and endian-specific", () => {
+        assert.equal(CRYPTONOTE_HIGH_DIFF_RESULT_HEX, "01" + "00".repeat(31));
+        assert.equal(ETHASH_HIGH_DIFF_RESULT_HEX, "00".repeat(31) + "01");
+        assert.notEqual(CRYPTONOTE_HIGH_DIFF_RESULT_HEX, "00".repeat(32));
+        assert.notEqual(ETHASH_HIGH_DIFF_RESULT_HEX, "00".repeat(32));
+    });
+
+    test("live block-submit fixed candidates avoid all-zero synthetic hashes", () => {
+        const zeroResult = "00".repeat(32);
+        const fixedCases = new Set([
+            "xmr-main-dual",
+            "cryptonote-submitblock",
+            "btc-submitblock",
+            "xtm-c-submitblock",
+            "eth-submitwork",
+            "erg-submitblock"
+        ]);
+
+        for (const testCase of BLOCK_SUBMIT_LIVE_CASES.filter((entry) => fixedCases.has(entry.name))) {
+            const candidates = testCase.buildCandidates({});
+            assert.ok(candidates.length > 0, testCase.name);
+            assert.equal(candidates.some((candidate) => candidate.resultHex === zeroResult), false, testCase.name);
+        }
     });
 
     test("xmr dual block-submit expectation allows daemon retry outcomes", () => {

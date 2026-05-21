@@ -140,21 +140,21 @@ class JsonLineSocketClient {
         }
     }
 
-    async request(payload, timeoutMs, predicate) {
+    async request(payload, timeoutMs, predicate, description) {
         const matcher = predicate || ((message) => message && message.id === payload.id);
-        const responsePromise = this.waitFor(matcher, timeoutMs);
+        const responsePromise = this.waitFor(matcher, timeoutMs, description || `response id=${payload.id}`);
         sendProtocolJson(this.socket, this.logStream, payload);
         return await responsePromise;
     }
 
-    waitFor(predicate, timeoutMs) {
+    waitFor(predicate, timeoutMs, description) {
         const existingIndex = this.messages.findIndex(predicate);
         if (existingIndex !== -1) {
             const [message] = this.messages.splice(existingIndex, 1);
             return Promise.resolve(message);
         }
 
-        return awaitableWait(predicate, timeoutMs, this);
+        return awaitableWait(predicate, timeoutMs, this, description);
     }
 
     async close() {
@@ -169,14 +169,14 @@ class JsonLineSocketClient {
     }
 }
 
-function awaitableWait(predicate, timeoutMs, client) {
+function awaitableWait(predicate, timeoutMs, client, description) {
     return new Promise((resolve, reject) => {
         const waiter = {
             predicate,
             resolve,
             timer: setTimeout(() => {
                 client.waiters = client.waiters.filter((entry) => entry !== waiter);
-                reject(new Error(`Timed out waiting for protocol message from ${client.target.host}:${client.target.port}`));
+                reject(new Error(`Timed out waiting for ${description || "protocol message"} from ${client.target.host}:${client.target.port}`));
             }, timeoutMs)
         };
         client.waiters.push(waiter);
@@ -245,6 +245,8 @@ async function isPoolEndpointReachable(host, port, useTls, timeoutMs = 1500) {
 
 const hasGpuProtocolProbe = (plan) => !plan.miner && !!plan.protocolProbe;
 const BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS = 15000;
+const CRYPTONOTE_HIGH_DIFF_RESULT_HEX = "01" + "00".repeat(31);
+const ETHASH_HIGH_DIFF_RESULT_HEX = "00".repeat(31) + "01";
 
 function escapeRegExp(value) { return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
@@ -421,7 +423,8 @@ function buildDefaultBlockSubmitPayload(loginReply, resultHex) {
         id: loginId,
         job_id: job.job_id,
         nonce: "00000001",
-        result: resultHex
+        result: resultHex,
+        block_submit_test_result: resultHex
     };
 }
 
@@ -492,6 +495,8 @@ module.exports = {
     isPoolEndpointReachable,
     hasGpuProtocolProbe,
     BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS,
+    CRYPTONOTE_HIGH_DIFF_RESULT_HEX,
+    ETHASH_HIGH_DIFF_RESULT_HEX,
     parseLatestTemplateSnapshot,
     buildCandidateMatrix,
     buildXmrOnlyResultHexes,
