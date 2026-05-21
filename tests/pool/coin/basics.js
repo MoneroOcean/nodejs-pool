@@ -303,17 +303,49 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const perf = coinFuncs.convertAlgosToCoinPerf({
         "rx/0": 100,
-        "cn-pico/trtl": 200,
+        "argon2/chukwav2": 200,
         c29: 300,
         kawpow4: 400,
         etchash: 500
     });
 
     assert.equal(perf[""], 100);
+    assert.equal(perf.TRTL, 200);
+    assert.equal(perf.LTHN, 200);
     assert.equal(perf["SAL"], 100);
     assert.equal(perf["XTM-C"], 300);
     assert.equal(perf["XNA"], 400);
     assert.equal(perf["ETC"], 500);
+});
+
+test("TRTL profile verifies shares with Argon2/Chukwa variant 2", () => {
+    const loadRegistry = require("../../../lib/coins/core/registry.js");
+    const profile = loadRegistry().profilesByPort[11898];
+    const calls = [];
+    const runtime = {
+        powHash: {
+            argon2(buffer, variant) {
+                calls.push({ algorithm: "argon2", buffer: Buffer.from(buffer), variant });
+                return Buffer.from("11".repeat(32), "hex");
+            },
+            cryptonight_pico() {
+                throw new Error("TRTL must not verify shares with cryptonight_pico");
+            }
+        }
+    };
+
+    assert.equal(profile.algo, "argon2/chukwav2");
+    assert.equal(profile.pow.variant, 2);
+    assert.deepEqual(profile.perf.aliases, ["argon2/chukwav2", "chukwav2"]);
+
+    const convertedBlob = Buffer.from("aabbccdd", "hex");
+    const hash = profile.pow.hashBuff({ convertedBlob, runtime });
+
+    assert.equal(hash.toString("hex"), "11".repeat(32));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].algorithm, "argon2");
+    assert.equal(calls[0].variant, 2);
+    assert.deepEqual(calls[0].buffer, convertedBlob);
 });
 
 test("shared blob types no longer collapse to the last loaded coin profile", () => {
