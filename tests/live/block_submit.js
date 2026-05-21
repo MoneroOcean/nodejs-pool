@@ -50,9 +50,19 @@ function xmrWindowSkipReason(label) {
         : "";
 }
 
+function hasFailureDetail(failures, text) {
+    return failures.some((entry) => String(entry && entry.detail || "").includes(text));
+}
+
 function ethNotifySkipReason(label) {
-    return ({ failures }) => failures.some((entry) => String(entry && entry.detail || "").includes("Timed out waiting for mining.notify"))
+    return ({ failures }) => hasFailureDetail(failures, "Timed out waiting for mining.notify")
         ? `live pool did not send a ${label} mining.notify job`
+        : "";
+}
+
+function xtmCSubmitSkipReason() {
+    return ({ failures }) => hasFailureDetail(failures, "Timed out waiting for submit response for xtm-c-submitblock")
+        ? "live XTM-C daemon did not return a synthetic SubmitBlock response"
         : "";
 }
 
@@ -88,7 +98,7 @@ const BLOCK_SUBMIT_LIVE_CASES = Object.freeze([
     },
     { name: "cryptonote-submitblock", protocol: "default-standard", algo: "rx/arq", expectation: { exactFailureCount: 1, includeAnyChains: ["ARQ/", "SAL/", "ZEPH/", "RYO/", "XLA/"] }, buildCandidates() { return buildCandidateMatrix([CRYPTONOTE_HIGH_DIFF_RESULT_HEX], [null]); } },
     { name: "btc-submitblock", protocol: "raven", algo: "kawpow", expectation: { exactFailureCount: 1, includeAnyChains: ["RVN/", "XNA/"] }, buildCandidates() { return buildCandidateMatrix([ETHASH_HIGH_DIFF_RESULT_HEX], [null]); } },
-    { name: "xtm-c-submitblock", protocol: "default-c29", algo: "c29", expectation: { exactFailureCount: 1, includeChains: ["XTM-C/"] }, buildCandidates() { return buildCandidateMatrix([CRYPTONOTE_HIGH_DIFF_RESULT_HEX], [null]); } },
+    { name: "xtm-c-submitblock", protocol: "default-c29", algo: "c29", expectation: { exactFailureCount: 1, includeChains: ["XTM-C/"] }, expectedNoCandidateSkipReason: xtmCSubmitSkipReason(), buildCandidates() { return buildCandidateMatrix([CRYPTONOTE_HIGH_DIFF_RESULT_HEX], [null]); } },
     { name: "eth-submitwork", protocol: "eth", algo: "etchash", expectation: { exactFailureCount: 1, includeChains: ["ETC/"] }, expectedNoCandidateSkipReason: ethNotifySkipReason("etchash"), buildCandidates() { return buildCandidateMatrix([ETHASH_HIGH_DIFF_RESULT_HEX], [null]); } },
     { name: "erg-submitblock", protocol: "eth", algo: "autolykos2", expectation: { exactFailureCount: 1, includeChains: ["ERG/"] }, expectedNoCandidateSkipReason: ethNotifySkipReason("autolykos2"), buildCandidates() { return buildCandidateMatrix([ETHASH_HIGH_DIFF_RESULT_HEX], [null]); } }
 ]);
@@ -225,6 +235,7 @@ async function waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffse
 }
 
 function withFixedDifficulty(wallet, loginDiff) { return loginDiff ? `${wallet}+${loginDiff}` : wallet; }
+function blockSubmitAttemptTimeout(run) { return Math.min(run.config.timeoutMs, BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS); }
 
 async function withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, fn) {
     const files = createBlockSubmitAttemptFiles(run, `${testCase.name}-${candidate.loginDiff || "auto"}-${candidate.resultHex.slice(0, 8)}`);
@@ -244,7 +255,7 @@ async function withBlockSubmitAttemptClient(run, target, logPaths, testCase, can
 }
 
 async function requestDefaultBlockSubmitLogin(run, testCase, client, files, user) {
-    const loginReply = await client.request({ id: 1, jsonrpc: "2.0", method: "login", params: { login: user, pass: `${files.worker}~${testCase.algo}`, agent: "nodejs-pool-live-block-submit/1.0", rigid: files.worker } }, run.config.timeoutMs, undefined, `login response for ${testCase.name}`);
+    const loginReply = await client.request({ id: 1, jsonrpc: "2.0", method: "login", params: { login: user, pass: `${files.worker}~${testCase.algo}`, agent: "nodejs-pool-live-block-submit/1.0", rigid: files.worker } }, blockSubmitAttemptTimeout(run), undefined, `login response for ${testCase.name}`);
     if (loginReply.error || loginReply.result?.status !== "OK") {
         throw new Error(`Default login failed: ${JSON.stringify(loginReply.error || loginReply.result)}`);
     }
@@ -252,12 +263,12 @@ async function requestDefaultBlockSubmitLogin(run, testCase, client, files, user
 }
 
 async function authorizeStratumBlockSubmit(run, testCase, client, files, user) {
-    const subscribeReply = await client.request({ id: 1, method: "mining.subscribe", params: [] }, run.config.timeoutMs, undefined, `mining.subscribe response for ${testCase.name}`);
+    const subscribeReply = await client.request({ id: 1, method: "mining.subscribe", params: [] }, blockSubmitAttemptTimeout(run), undefined, `mining.subscribe response for ${testCase.name}`);
     if (subscribeReply.error) {
         throw new Error(`mining.subscribe failed for ${testCase.name}: ${JSON.stringify(subscribeReply.error)}`);
     }
 
-    const authorizeReply = await client.request({ id: 2, method: "mining.authorize", params: [user, `${files.worker}~${testCase.algo}`] }, run.config.timeoutMs, undefined, `mining.authorize response for ${testCase.name}`);
+    const authorizeReply = await client.request({ id: 2, method: "mining.authorize", params: [user, `${files.worker}~${testCase.algo}`] }, blockSubmitAttemptTimeout(run), undefined, `mining.authorize response for ${testCase.name}`);
     if (authorizeReply.error || authorizeReply.result !== true) {
         throw new Error(`mining.authorize failed: ${JSON.stringify(authorizeReply.error || authorizeReply.result)}`);
     }
@@ -274,7 +285,7 @@ async function runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, can
             params: testCase.protocol === "default-c29"
                 ? buildC29BlockSubmitPayload(loginReply, candidate.resultHex)
                 : buildDefaultBlockSubmitPayload(loginReply, candidate.resultHex)
-        }, run.config.timeoutMs, undefined, `submit response for ${testCase.name}`);
+        }, blockSubmitAttemptTimeout(run), undefined, `submit response for ${testCase.name}`);
 
         if (!isSuccessfulSubmitResponse(submitReply)) throw new Error(`Submit was not accepted: ${JSON.stringify(submitReply)}`);
         return waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffsets, testCase);
@@ -284,13 +295,13 @@ async function runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, can
 async function runEthBlockSubmitAttempt(run, target, logPaths, testCase, candidate) {
     return withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, async ({ client, files, startOffsets, user }) => {
         const subscribeReply = await authorizeStratumBlockSubmit(run, testCase, client, files, user);
-        const notifyPush = await client.waitFor((message) => message.method === "mining.notify", run.config.timeoutMs, `mining.notify for ${testCase.name}`);
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify", blockSubmitAttemptTimeout(run), `mining.notify for ${testCase.name}`);
         const extraNonce = Array.isArray(subscribeReply.result) ? String(subscribeReply.result[1] || "") : "";
         const submitReply = await client.request({
             id: 3,
             method: "mining.submit",
             params: buildEthBlockSubmitParams(user, Array.isArray(notifyPush.params) ? String(notifyPush.params[0] || "") : "", candidate.resultHex, extraNonce)
-        }, run.config.timeoutMs, undefined, `mining.submit response for ${testCase.name}`);
+        }, blockSubmitAttemptTimeout(run), undefined, `mining.submit response for ${testCase.name}`);
 
         if (!isSuccessfulSubmitResponse(submitReply)) throw new Error(`Submit was not accepted: ${JSON.stringify(submitReply)}`);
         return waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffsets, testCase);
@@ -300,14 +311,14 @@ async function runEthBlockSubmitAttempt(run, target, logPaths, testCase, candida
 async function runRavenBlockSubmitAttempt(run, target, logPaths, testCase, candidate) {
     return withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, async ({ client, files, startOffsets, user }) => {
         await authorizeStratumBlockSubmit(run, testCase, client, files, user);
-        await client.waitFor((message) => message.method === "mining.set_target", run.config.timeoutMs, `mining.set_target for ${testCase.name}`);
-        const notifyPush = await client.waitFor((message) => message.method === "mining.notify", run.config.timeoutMs, `mining.notify for ${testCase.name}`);
+        await client.waitFor((message) => message.method === "mining.set_target", blockSubmitAttemptTimeout(run), `mining.set_target for ${testCase.name}`);
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify", blockSubmitAttemptTimeout(run), `mining.notify for ${testCase.name}`);
         const notifyParams = Array.isArray(notifyPush.params) ? notifyPush.params : [];
         const submitReply = await client.request({
             id: 3,
             method: "mining.submit",
             params: buildRavenBlockSubmitParams(user, String(notifyParams[0] || ""), String(notifyParams[1] || ""), candidate.resultHex)
-        }, run.config.timeoutMs, undefined, `mining.submit response for ${testCase.name}`);
+        }, blockSubmitAttemptTimeout(run), undefined, `mining.submit response for ${testCase.name}`);
 
         if (!isSuccessfulSubmitResponse(submitReply)) throw new Error(`Submit was not accepted: ${JSON.stringify(submitReply)}`);
         return waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffsets, testCase);

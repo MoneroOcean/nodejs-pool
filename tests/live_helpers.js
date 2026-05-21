@@ -223,6 +223,19 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         }
     });
 
+    test("xtm-c block-submit coverage skips live SubmitBlock response stalls", () => {
+        const testCase = BLOCK_SUBMIT_LIVE_CASES.find((entry) => entry.name === "xtm-c-submitblock");
+        assert.ok(testCase);
+        assert.equal(
+            testCase.expectedNoCandidateSkipReason({
+                failures: [{
+                    detail: "Error: Timed out waiting for submit response for xtm-c-submitblock from localhost:20001"
+                }]
+            }),
+            "live XTM-C daemon did not return a synthetic SubmitBlock response"
+        );
+    });
+
     test("xmr dual block-submit expectation allows daemon retry outcomes", () => {
         const worker = "itest-worker";
         const logText = [
