@@ -126,6 +126,76 @@ test("pool state thread names use short master and worker prefixes", () => {
     }
 });
 
+
+test("RTM block rewards only credit outputs paid to the configured pool address", async () => {
+    const originalConfig = global.config;
+    const originalSupport = global.support;
+    const originalCoinFuncs = global.coinFuncs;
+    const originalDatabase = global.database;
+
+    try {
+        global.config = {
+            daemon: { port: 18081 },
+            general: { testnet: false },
+            pool: {
+                address: "48A1PoolAddress",
+                address_9998: "POOL_RTM_WALLET_CONFIGURED_FOR_9998"
+            },
+            pool_id: 1
+        };
+        global.database = {};
+        global.support = {
+            rpcPortDaemon2(port, _path, request, callback, suppressErrorLog) {
+                assert.equal(port, 9998);
+                assert.equal(request.method, "getblock");
+                assert.equal(suppressErrorLog, true);
+
+                const blockHash = request.params[0];
+                const vout = blockHash === "pool-output" ? [
+                    { value: 12.5, scriptPubKey: { addresses: ["POOL_RTM_WALLET_CONFIGURED_FOR_9998"] } },
+                    { value: 50, scriptPubKey: { addresses: ["NON_POOL_RECIPIENT"] } },
+                    { value: 1.25, scriptPubKey: { addresses: ["POOL_RTM_WALLET_CONFIGURED_FOR_9998"] } }
+                ] : [
+                    { value: 37.5, scriptPubKey: { addresses: ["NON_POOL_RECIPIENT"] } }
+                ];
+
+                callback({
+                    result: {
+                        hash: blockHash,
+                        height: 100,
+                        difficulty: 1,
+                        tx: [{ vout }]
+                    }
+                });
+            }
+        };
+
+        const coinFuncs = new Coin({});
+        global.coinFuncs = coinFuncs;
+
+        const poolRewardHeader = await new Promise(function getPoolReward(resolve) {
+            coinFuncs.getPortBlockHeaderByHash(9998, "pool-output", function onHeader(err, header) {
+                assert.equal(err, null);
+                resolve(header);
+            }, true);
+        });
+        assert.equal(poolRewardHeader.reward, 1375000000);
+
+        const noPoolRewardHeader = await new Promise(function getNoPoolReward(resolve) {
+            coinFuncs.getPortBlockHeaderByHash(9998, "no-pool-output", function onHeader(err, header) {
+                assert.equal(err, null);
+                resolve(header);
+            }, true);
+        });
+        assert.equal(noPoolRewardHeader.reward, 0);
+    } finally {
+        global.config = originalConfig;
+        global.support = originalSupport;
+        global.coinFuncs = originalCoinFuncs;
+        global.database = originalDatabase;
+    }
+});
+
 test("cryptonote block-header reward lookup preserves suppress flags and wallet error detail", (t, done) => {
     const originalConfig = global.config;
     const originalSupport = global.support;
