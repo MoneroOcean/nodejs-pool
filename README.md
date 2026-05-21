@@ -56,7 +56,7 @@ Run the installer as `root`:
 
 ```bash
 curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/deploy.bash | \
-WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudflare API Token" CERTBOT_EMAIL=ops@example.com bash -x
+WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudflare API Token" CERTBOT_EMAIL=ops@example.com bash -s
 ```
 
 `WWW_DNS`, `API_DNS`, and `CERTBOT_EMAIL` default to the MoneroOcean production values if omitted. Set them explicitly for any non-production install.
@@ -94,10 +94,10 @@ pm2 save
 For a leaf-only install:
 
 ```bash
-curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash -x
+curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash
 ```
 
-Set `TARI_RELEASE_TAG` before `bash -x` to use a different Tari source tag on leaf nodes.
+Set `TARI_RELEASE_TAG` before `bash` to use a different Tari source tag on leaf nodes.
 
 After install, update the leaf config so it points at the main pool infrastructure, then start the `pool` module on that node.
 

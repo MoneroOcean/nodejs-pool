@@ -1,4 +1,4 @@
-#!/bin/bash -ex
+#!/bin/bash -e
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 WWW_DNS="${WWW_DNS:-moneroocean.stream}"

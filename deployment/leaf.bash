@@ -1,4 +1,4 @@
-#!/bin/bash -ex
+#!/bin/bash -e
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.1}"
