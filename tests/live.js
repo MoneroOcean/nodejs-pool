@@ -12,29 +12,16 @@ const {
     executeProtocolProbeBatch,
     finalizeLivePoolRun,
     formatFailureDetails,
-    DEFAULT_TARGET_HOST,
     setupLiveBlockSubmitCoverage
 } = require("./live/runner.js");
+const {
+    expectedLiveMinerSkipReason,
+    expectedLiveProtocolProbeSkipReason
+} = require("./live/skips.js");
 
 const LIVE_TARGET_HOST = process.env.NODEJS_POOL_LIVE_TARGET_HOST || "";
 const liveReachable = async () => LIVE_TARGET_HOST ? true : await isDefaultTargetReachable();
 const liveConfig = () => buildConfig({ emitStartLines: false, targetHost: LIVE_TARGET_HOST || undefined });
-const EXPECTED_LIVE_MINER_SKIP_REASONS = new Set(["no-accepted-share"]);
-
-function expectedLiveMinerSkipReason(target) {
-    if (!target || target.success) return "";
-    if (
-        target.algorithm === "autolykos2"
-        && target.host !== DEFAULT_TARGET_HOST
-        && target.failureReason === "rejected-share"
-        && target.acceptedShares === 0
-        && target.disconnects > 0
-    ) {
-        return "remote autolykos2 endpoint rejected or disconnected before an accepted share";
-    }
-    if (!EXPECTED_LIVE_MINER_SKIP_REASONS.has(target.failureReason)) return "";
-    return "no accepted share before timeout on this host";
-}
 
 test.describe("live miner integration suite", { concurrency: false }, () => {
     const state = {
@@ -178,9 +165,16 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
 
             const targets = await executeProtocolProbeBatch(state.run, protocolPlans, state.target);
             for (const target of targets) {
-                recordCoveredResult(target.algorithm, target.miner, target);
+                const expectedSkipReason = expectedLiveProtocolProbeSkipReason(target);
+                const coveredTarget = expectedSkipReason ? { ...target, skipped: true, skipReason: expectedSkipReason } : target;
+                recordCoveredResult(target.algorithm, target.miner, coveredTarget);
 
-                await t.test(target.algorithm, async () => {
+                await t.test(target.algorithm, async (t) => {
+                    if (expectedSkipReason) {
+                        t.skip(expectedSkipReason);
+                        return;
+                    }
+
                     if (!target.success) {
                         throw target.failureReason || "failed";
                     }

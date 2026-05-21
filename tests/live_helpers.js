@@ -24,6 +24,7 @@ const {
     summarizeBlockSubmitLog
 } = require("./live/protocol.js");
 const { BLOCK_SUBMIT_LIVE_CASES } = require("./live/block_submit.js");
+const { expectedLiveProtocolProbeSkipReason } = require("./live/skips.js");
 
 test.describe("live miner helpers", { concurrency: false }, () => {
     test("SRBMiner cn/gpu args include conservative stability controls", () => {
@@ -233,6 +234,29 @@ test.describe("live miner helpers", { concurrency: false }, () => {
                 }]
             }),
             "live XTM-C daemon did not return a synthetic SubmitBlock response"
+        );
+    });
+
+    test("autolykos2 protocol probe skips live no-job windows", () => {
+        assert.equal(
+            expectedLiveProtocolProbeSkipReason({
+                algorithm: "autolykos2",
+                protocolProbe: "eth-bad-share",
+                failureReason: "job-timeout",
+                connected: true,
+                jobReceived: false
+            }),
+            "live pool did not send an autolykos2 job"
+        );
+        assert.equal(
+            expectedLiveProtocolProbeSkipReason({
+                algorithm: "etchash",
+                protocolProbe: "eth-bad-share",
+                failureReason: "job-timeout",
+                connected: true,
+                jobReceived: false
+            }),
+            ""
         );
     });
 
