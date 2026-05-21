@@ -9,7 +9,7 @@ TARI_USER="${TARI_USER:-taridaemon}"
 TARI_HOME="${TARI_HOME:-/home/$TARI_USER}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
 TARI_EXTERNAL_IP="${TARI_EXTERNAL_IP:-}"
-TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
+TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -82,6 +82,19 @@ TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-$(default_tari_memory_high)}"
 TARI_MEMORY_SWAP_MAX="${TARI_MEMORY_SWAP_MAX:-768M}"
 TARI_MM_MEMORY_HIGH="${TARI_MM_MEMORY_HIGH:-1200M}"
 TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
+validate_systemd_memory_limit() {
+  local value="$1"
+  local name="$2"
+  if [[ ! "$value" =~ ^(infinity|max|[0-9]+([.][0-9]+)?[KMGTPE]?)$ ]]; then
+    echo "Invalid $name value: $value" >&2
+    exit 1
+  fi
+}
+
+validate_systemd_memory_limit "$TARI_MEMORY_HIGH" TARI_MEMORY_HIGH
+validate_systemd_memory_limit "$TARI_MEMORY_SWAP_MAX" TARI_MEMORY_SWAP_MAX
+validate_systemd_memory_limit "$TARI_MM_MEMORY_HIGH" TARI_MM_MEMORY_HIGH
+validate_systemd_memory_limit "$TARI_MM_MEMORY_SWAP_MAX" TARI_MM_MEMORY_SWAP_MAX
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR}"
@@ -175,6 +188,10 @@ patch_tari_config() {
   chmod 755 "$patcher"
   if [ -n "$TARI_EXTERNAL_IP" ]; then
     args+=("--base-node-grpc-ip" "$TARI_EXTERNAL_IP")
+  fi
+  if [ -z "$TARI_WALLET_PAYMENT_ADDRESS" ]; then
+    echo "TARI_WALLET_PAYMENT_ADDRESS must be set to your Tari wallet payment address" >&2
+    return 1
   fi
   args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
   "$patcher" "${args[@]}"
