@@ -82,6 +82,19 @@ TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-$(default_tari_memory_high)}"
 TARI_MEMORY_SWAP_MAX="${TARI_MEMORY_SWAP_MAX:-768M}"
 TARI_MM_MEMORY_HIGH="${TARI_MM_MEMORY_HIGH:-1200M}"
 TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
+validate_systemd_memory_limit() {
+  local value="$1"
+  local name="$2"
+  if [[ ! "$value" =~ ^(infinity|max|[0-9]+([.][0-9]+)?[KMGTPE]?)$ ]]; then
+    echo "Invalid $name value: $value" >&2
+    exit 1
+  fi
+}
+
+validate_systemd_memory_limit "$TARI_MEMORY_HIGH" TARI_MEMORY_HIGH
+validate_systemd_memory_limit "$TARI_MEMORY_SWAP_MAX" TARI_MEMORY_SWAP_MAX
+validate_systemd_memory_limit "$TARI_MM_MEMORY_HIGH" TARI_MM_MEMORY_HIGH
+validate_systemd_memory_limit "$TARI_MM_MEMORY_SWAP_MAX" TARI_MM_MEMORY_SWAP_MAX
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR}"
