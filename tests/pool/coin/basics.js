@@ -170,6 +170,45 @@ test("BlockTemplate uses the SAL blob marker when daemon reserved offset is stal
     assert.equal(blockTemplate.reserved_offset, prefix.length + 2);
 });
 
+test("RTM/BTRM block reward uses only coinbase outputs paid to the pool address", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const poolAddress = "POOL_RTM_ADDRESS";
+    const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
+    global.config.pool.address_9998 = poolAddress;
+    global.support.rpcPortDaemon2 = function rpcPortDaemon2(port, method, params, callback) {
+        assert.equal(port, 9998);
+        assert.equal(method, "");
+        assert.deepEqual(params, { method: "getblock", params: ["rtm-block", 2] });
+        callback({
+            result: {
+                difficulty: 2,
+                tx: [{
+                    vout: [
+                        { n: 0, value: 12.5, scriptPubKey: { addresses: [poolAddress] } },
+                        { n: 1, value: 1.25, scriptPubKey: { addresses: ["SMARTNODE_ADDRESS"] } },
+                        { n: 3, value: 100, scriptPubKey: { addresses: ["GOVERNANCE_ADDRESS"] } }
+                    ]
+                }]
+            }
+        });
+    };
+
+    try {
+        const header = await new Promise((resolve, reject) => {
+            coinFuncs.getPortAnyBlockHeaderByHash(9998, "rtm-block", true, (err, body) => {
+                if (err) return reject(new Error("unexpected RTM block header error"));
+                return resolve(body);
+            });
+        });
+
+        assert.equal(header.reward, 1250000000);
+        assert.equal(header.difficulty, 2 * 0xFFFFFFFF);
+    } finally {
+        global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
+        delete global.config.pool.address_9998;
+    }
+});
+
 test("BlockTemplate derives dual-main candidate difficulty from the lowest chain difficulty", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const originalGetAuxChainXTM = global.coinFuncs.getAuxChainXTM;
