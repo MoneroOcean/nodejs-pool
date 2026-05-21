@@ -20,12 +20,11 @@ function expectedLiveMinerSkipReason(target) {
 
 function expectedLiveProtocolProbeSkipReason(target) {
     if (!target || target.success) return "";
-    return target.algorithm === "autolykos2"
-        && target.protocolProbe === "eth-bad-share"
+    return target.protocolProbe
         && target.failureReason === "job-timeout"
         && target.connected
         && !target.jobReceived
-        ? "live pool did not send an autolykos2 job"
+        ? `live pool did not send a protocol-probe job for ${target.algorithm}`
         : "";
 }
 

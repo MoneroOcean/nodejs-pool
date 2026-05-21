@@ -237,7 +237,7 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         );
     });
 
-    test("autolykos2 protocol probe skips live no-job windows", () => {
+    test("protocol probes skip live no-job windows", () => {
         assert.equal(
             expectedLiveProtocolProbeSkipReason({
                 algorithm: "autolykos2",
@@ -246,7 +246,7 @@ test.describe("live miner helpers", { concurrency: false }, () => {
                 connected: true,
                 jobReceived: false
             }),
-            "live pool did not send an autolykos2 job"
+            "live pool did not send a protocol-probe job for autolykos2"
         );
         assert.equal(
             expectedLiveProtocolProbeSkipReason({
@@ -255,6 +255,16 @@ test.describe("live miner helpers", { concurrency: false }, () => {
                 failureReason: "job-timeout",
                 connected: true,
                 jobReceived: false
+            }),
+            "live pool did not send a protocol-probe job for etchash"
+        );
+        assert.equal(
+            expectedLiveProtocolProbeSkipReason({
+                algorithm: "etchash",
+                protocolProbe: "eth-bad-share",
+                failureReason: "rejection-timeout",
+                connected: true,
+                jobReceived: true
             }),
             ""
         );
