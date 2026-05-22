@@ -94,8 +94,8 @@ pm2 save
 For a leaf-only install:
 
 ```bash
-TARI_WALLET_PAYMENT_ADDRESS=<your_tari_wallet_address> \
-  curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash | bash -x
+curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash \
+  | TARI_WALLET_PAYMENT_ADDRESS=<your_tari_wallet_address> bash -x
 ```
 
 `TARI_WALLET_PAYMENT_ADDRESS` is required so Tari merge-mining rewards are paid to a wallet you control.
