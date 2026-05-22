@@ -453,12 +453,59 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         ]);
     });
 
+    test("worker stopped email clears pending guard on cancellation and no-email lookup", async () => {
+        const now = 1710000000000;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const canceledMiner = address + "_rigCancel";
+        const noEmailMiner = address + "_rigNoEmail";
+
+        createFakeEnvironment();
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        runtime.state.workersStartedHashingTime[canceledMiner] = now - 60 * 1000;
+        runtime.state.workersStoppedHashingTime[canceledMiner] = now - 10 * 60 * 1000;
+        runtime.delayedSendWorkerStoppedHashingEmail(canceledMiner, now - 10 * 60 * 1000);
+
+        assert.equal(canceledMiner in runtime.state.workersStartedHashingTime, false);
+        assert.equal(canceledMiner in runtime.state.workersStoppedHashingTime, false);
+
+        runtime.state.workersStoppedHashingTime[noEmailMiner] = now;
+        runtime.delayedSendWorkerStoppedHashingEmail(noEmailMiner, now);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(noEmailMiner in runtime.state.workersStoppedHashingTime, false);
+        assert.equal(noEmailMiner in runtime.state.workersStoppedHashingEmailTime, false);
+    });
+
+    test("worker prunes stale pending stopped-worker guards", () => {
+        const now = 1710000000000;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const staleMiner = address + "_rigStale";
+        const freshMiner = address + "_rigFresh";
+
+        createFakeEnvironment();
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        runtime.state.workersStoppedHashingTime[staleMiner] = now - 21 * 60 * 1000;
+        runtime.state.workersStoppedHashingTime[freshMiner] = now - 19 * 60 * 1000;
+
+        runtime.pruneTransientState();
+
+        assert.equal(staleMiner in runtime.state.workersStoppedHashingTime, false);
+        assert.equal(freshMiner in runtime.state.workersStoppedHashingTime, true);
+    });
+
     test("worker stopped email uses SQL templates with masked wallet, UTC time, and pool signature", async () => {
         const originalRequest = http.request;
         const originalSetTimeout = global.setTimeout;
         let capturedPayload = null;
         const currentTime = Date.UTC(2026, 3, 25, 21, 22, 0);
         const address = "48abcd" + "e".repeat(85) + "7xYz";
+        const miner = address + "_rig01";
 
         createFakeEnvironment();
         global.config.hostname = "us.moneroocean.stream";
@@ -518,11 +565,14 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         try {
             const worker = loadWorker();
             const runtime = worker.createWorkerRuntime();
-            runtime.delayedSendWorkerStoppedHashingEmail(address + "_rig01", currentTime);
+            runtime.state.workersStoppedHashingTime[miner] = currentTime;
+            runtime.delayedSendWorkerStoppedHashingEmail(miner, currentTime);
             await new Promise((resolve) => setImmediate(resolve));
             await new Promise((resolve) => setImmediate(resolve));
             await new Promise((resolve) => setImmediate(resolve));
 
+            assert.equal(miner in runtime.state.workersStoppedHashingTime, false);
+            assert.equal(miner in runtime.state.workersStoppedHashingEmailTime, true);
             assert.equal(capturedPayload.subject, "MoneroOcean: Workers stopped hashing");
             assert.match(capturedPayload.text, /^Hello,\n\nWorker status changed\n\nPool: MoneroOcean\nStatus: stopped\nWorker: rig01\nWallet: 48abcd\.\.\.7xYz\nTime \(UTC\): 2026-04-25 21:22:00\nNotice delay: 10 minutes without submitted hashes/);
             assert.match(capturedPayload.text, /\n\nUnsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/[A-Za-z0-9_-]+\n\nThank you,/);
