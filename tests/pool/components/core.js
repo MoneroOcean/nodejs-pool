@@ -533,7 +533,7 @@ test("template manager ignores unchanged template refreshes", () => {
     assert.equal(activeBlockTemplates[""].sharedNonceSubmissions, undefined);
 });
 
-test("server final replies delay only authenticated sockets with random jitter", () => {
+test("server final replies honor explicit delay windows with random jitter", () => {
     const originalSetTimeout = global.setTimeout;
     const originalClearTimeout = global.clearTimeout;
     const originalMathRandom = Math.random;
@@ -578,6 +578,91 @@ test("server final replies delay only authenticated sockets with random jitter",
         },
         removeMiner() {}
     });
+    const socket = new EventEmitter();
+    socket.remoteAddress = "127.0.0.2";
+    socket.writable = true;
+    socket.destroyed = false;
+    socket.finalizing = false;
+    socket.setKeepAlive = function setKeepAlive() {};
+    socket.setEncoding = function setEncoding() {};
+    socket.end = function end(payload) {
+        socket.writable = false;
+        socket.endedPayload = payload;
+    };
+    socket.destroy = function destroy() {
+        socket.writable = false;
+        socket.destroyed = true;
+    };
+
+    try {
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+        handleSocket(socket);
+        socket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
+
+        const delayedTimer = timers.find(function findReplyTimer(timer) {
+            return timer.delay === 5000 && timer.cleared === false;
+        });
+
+        assert.ok(delayedTimer);
+        assert.equal(socket.endedPayload, undefined);
+
+        delayedTimer.callback(...delayedTimer.args);
+
+        assert.equal(typeof socket.endedPayload, "string");
+        assert.equal(JSON.parse(socket.endedPayload).error.message, "Delayed ban reply");
+    } finally {
+        global.setTimeout = originalSetTimeout;
+        global.clearTimeout = originalClearTimeout;
+        Math.random = originalMathRandom;
+    }
+});
+
+test("server final replies allow one delayed socket per ip", () => {
+    const originalSetTimeout = global.setTimeout;
+    const originalClearTimeout = global.clearTimeout;
+    const originalMathRandom = Math.random;
+    const timers = [];
+
+    global.config = {
+        pool: {
+            socketAuthTimeout: 15,
+            maxConnectionsPerIP: 256,
+            maxConnectionsPerSubnet: 1024,
+            protocolErrorLimit: 4
+        }
+    };
+    global.setTimeout = function captureTimeout(callback, delay, ...args) {
+        const timer = { callback, delay, args, cleared: false };
+        timers.push(timer);
+        return timer;
+    };
+    global.clearTimeout = function markCleared(timer) {
+        if (timer) timer.cleared = true;
+    };
+    Math.random = function fixedRandom() {
+        return 0.5;
+    };
+
+    const state = {
+        threadName: "(Test) ",
+        activeConnectionsByIP: {},
+        activeConnectionsBySubnet: {},
+        activeMiners: new Map(),
+        activeMinerSockets: new Map(),
+        freeEthExtranonces: []
+    };
+    const serverFactory = createServerFactory({
+        debug() {},
+        fs: require("node:fs"),
+        net: require("node:net"),
+        tls: require("node:tls"),
+        state,
+        handleMinerData(_socket, _id, _method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
+            sendReplyFinal("Delayed ban reply", 10);
+        },
+        removeMiner() {}
+    });
+
     function createSocket(remoteAddress) {
         const socket = new EventEmitter();
         socket.remoteAddress = remoteAddress;
@@ -589,41 +674,40 @@ test("server final replies delay only authenticated sockets with random jitter",
         socket.end = function end(payload) {
             socket.writable = false;
             socket.endedPayload = payload;
+            socket.emit("close");
         };
         socket.destroy = function destroy() {
             socket.writable = false;
             socket.destroyed = true;
+            socket.emit("close");
         };
         return socket;
     }
 
     try {
         const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
-        const unauthenticatedSocket = createSocket("127.0.0.2");
-        handleSocket(unauthenticatedSocket);
-        unauthenticatedSocket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
+        const firstSocket = createSocket("127.0.0.9");
+        const secondSocket = createSocket("127.0.0.9");
+        handleSocket(firstSocket);
+        handleSocket(secondSocket);
 
-        assert.equal(timers.some((timer) => timer.delay === 5000), false);
-        assert.equal(typeof unauthenticatedSocket.endedPayload, "string");
-        assert.equal(JSON.parse(unauthenticatedSocket.endedPayload).error.message, "Delayed ban reply");
+        firstSocket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
+        secondSocket.emit("data", `${JSON.stringify({ id: 2, method: "login", params: { login: "wallet" } })}\n`);
 
-        const authenticatedSocket = createSocket("127.0.0.3");
-        handleSocket(authenticatedSocket);
-        authenticatedSocket.miner_id = "authenticated-miner";
-        state.activeMiners.set("authenticated-miner", {});
-        authenticatedSocket.emit("data", `${JSON.stringify({ id: 2, method: "keepalived", params: {} })}\n`);
-
-        const delayedTimer = timers.find(function findReplyTimer(timer) {
+        const delayedTimers = timers.filter(function findReplyTimer(timer) {
             return timer.delay === 5000 && timer.cleared === false;
         });
+        assert.equal(delayedTimers.length, 1);
+        assert.equal(firstSocket.endedPayload, undefined);
+        assert.equal(secondSocket.destroyed, true);
+        assert.equal(secondSocket.destroyReason, "delayed-final-limit");
+        assert.equal(state.delayedFinalSocketsByIP.get("127.0.0.9"), firstSocket);
 
-        assert.ok(delayedTimer);
-        assert.equal(authenticatedSocket.endedPayload, undefined);
+        delayedTimers[0].callback(...delayedTimers[0].args);
 
-        delayedTimer.callback(...delayedTimer.args);
-
-        assert.equal(typeof authenticatedSocket.endedPayload, "string");
-        assert.equal(JSON.parse(authenticatedSocket.endedPayload).error.message, "Delayed ban reply");
+        assert.equal(typeof firstSocket.endedPayload, "string");
+        assert.equal(JSON.parse(firstSocket.endedPayload).error.message, "Delayed ban reply");
+        assert.equal(state.delayedFinalSocketsByIP.has("127.0.0.9"), false);
     } finally {
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
