@@ -450,40 +450,61 @@ test("closing an eth stratum socket releases its extranonce for reuse", async ()
     }
 });
 
-test("subscribe previews do not consume extranonces before authorize", async () => {
-    const { runtime } = await startHarness({ freeEthExtranonces: [7] });
-    const firstClient = new JsonLineClient(ETH_PORT);
-    const secondClient = new JsonLineClient(ETH_PORT);
+test("eth subscribe reserves unique extranonces before authorize", async () => {
+    const { runtime } = await startHarness({ freeEthExtranonces: [7, 8] });
+    const victimSocket = {};
+    const attackerSocket = {};
 
     try {
-        await firstClient.connect();
-        const firstSubscribe = await firstClient.request({
+        const victimSubscribe = invokePoolMethod({
+            socket: victimSocket,
             id: 57,
             method: "mining.subscribe",
-            params: ["HarnessEthMiner/1.0"]
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
         });
-        assert.equal(firstSubscribe.error, null);
-        const previewExtranonce = firstSubscribe.result[1];
-
-        await secondClient.connect();
-        const secondSubscribe = await secondClient.request({
+        const attackerSubscribe = invokePoolMethod({
+            socket: attackerSocket,
             id: 58,
             method: "mining.subscribe",
-            params: ["HarnessEthMiner/1.0"]
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
         });
-        assert.equal(secondSubscribe.error, null);
-        assert.equal(secondSubscribe.result[1], previewExtranonce);
 
-        const authorizeReply = await secondClient.request({
+        assert.equal(victimSubscribe.replies[0].error, null);
+        assert.equal(attackerSubscribe.replies[0].error, null);
+        assert.notEqual(victimSubscribe.replies[0].result[1], attackerSubscribe.replies[0].result[1]);
+        assert.equal(victimSubscribe.replies[0].result[1], "0008");
+        assert.equal(attackerSubscribe.replies[0].result[1], "0007");
+        assert.equal(victimSocket.eth_extranonce_preview_id, 8);
+        assert.equal(attackerSocket.eth_extranonce_preview_id, 7);
+        assert.equal(victimSocket.eth_extranonce_id, undefined);
+        assert.equal(attackerSocket.eth_extranonce_id, undefined);
+
+        const attackerAuthorize = invokePoolMethod({
+            socket: attackerSocket,
             id: 59,
             method: "mining.authorize",
-            params: [ETH_WALLET, "eth-worker-preview"]
+            params: [ETH_WALLET, "eth-worker-attacker"],
+            portData: global.config.ports[1]
         });
-        assert.equal(authorizeReply.error, null);
-        assert.equal(authorizeReply.result, true);
+        const victimAuthorize = invokePoolMethod({
+            socket: victimSocket,
+            id: 60,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-worker-victim"],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(attackerAuthorize.replies, [{ error: null, result: true }]);
+        assert.deepEqual(victimAuthorize.replies, [{ error: null, result: true }]);
+        assert.equal(attackerSocket.eth_extranonce_preview_id, undefined);
+        assert.equal(victimSocket.eth_extranonce_preview_id, undefined);
+        assert.equal(attackerSocket.eth_extranonce_id, 7);
+        assert.equal(victimSocket.eth_extranonce_id, 8);
+        assert.equal(runtime.getState().activeMiners.get(attackerSocket.miner_id).eth_extranonce, "0007");
+        assert.equal(runtime.getState().activeMiners.get(victimSocket.miner_id).eth_extranonce, "0008");
     } finally {
-        await firstClient.close();
-        await secondClient.close();
         await runtime.stop();
     }
 });
