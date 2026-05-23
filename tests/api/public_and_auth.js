@@ -347,6 +347,48 @@ test.describe("api public and auth", { concurrency: false }, () => {
         });
     });
 
+    test("email subscription throttle does not let a mismatched email block a valid update", async () => {
+        let updateCalls = 0;
+        const mysql = createMysql(async function handler(sql, params) {
+            if (sql.startsWith("UPDATE users SET enable_email = ?, email = ? WHERE username = ? AND email = ?")) {
+                updateCalls += 1;
+                assert.equal(params[2], "wallet");
+                if (params[3] === "attacker@example.com") return { affectedRows: 0 };
+                assert.deepEqual(params, [1, "new@example.com", "wallet", "old@example.com"]);
+                return { affectedRows: 1 };
+            }
+            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+        });
+
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: createConfig(),
+            database: createDatabase({ caches: {} }),
+            mysql: mysql,
+            now: () => 0,
+            support: createSupport()
+        }, async (port) => {
+            const attackerFailure = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 1,
+                from: "attacker@example.com",
+                to: "bad@example.com"
+            });
+            assert.equal(attackerFailure.statusCode, 401);
+            assert.deepEqual(attackerFailure.json, { error: "FROM email does not match" });
+
+            const validUpdate = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 1,
+                from: "old@example.com",
+                to: "new@example.com"
+            });
+            assert.equal(validUpdate.statusCode, 200);
+            assert.deepEqual(validUpdate.json, { msg: "Email preferences were updated" });
+            assert.equal(updateCalls, 2);
+        });
+    });
+
     test("public threshold updates still work and missing worker cache rows fail safely", async () => {
         const mysql = createMysql(async function handler(sql) {
             if (sql.startsWith("SELECT id FROM users WHERE username = ? AND payout_threshold_lock = '1'")) return [];
