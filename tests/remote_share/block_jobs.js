@@ -399,6 +399,81 @@ test("pending block jobs retry until a reward is available and then store the bl
     }
 });
 
+test("pending block jobs do not orphan wallet reward lookup misses", () => {
+    const restore = installRemoteShareGlobals();
+    const { database, stores } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    const logs = [];
+    const originalDateNow = Date.now;
+    let fakeNow = 1000;
+
+    Date.now = () => fakeNow;
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback, suppressErrorLog) {
+            assert.equal(suppressErrorLog, true);
+            callback(true, {
+                error: { message: "Transaction not found." },
+                errorSource: "wallet_reward_lookup"
+            });
+        },
+        getPoolProfile() {
+            return { pool: {} };
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log(message) { logs.push(message); } },
+        retryDelayMs: 1,
+        orphanGraceMs: 1,
+        storage
+    });
+
+    try {
+        const block = {
+            hash: "bc".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: fakeNow,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true
+        };
+        pendingJobs.enqueueBlock(12, PROTOS.Block.encode(block), block);
+
+        pendingJobs.processDueJobs();
+        let retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.lastError, "waiting_block_header");
+
+        fakeNow = 2000;
+        pendingJobs.processDueJobs();
+        retryJob = Array.from(storage.jobs.values())[0];
+
+        assert.equal(storage.jobs.size, 1);
+        assert.equal(stores.blockDB.size, 0);
+        assert.equal(retryJob.lastError, "waiting_block_header");
+        assert.equal(logs.some((line) =>
+            line.includes("Pending block:") &&
+            line.includes("status=waiting-header-reward") &&
+            line.includes('detail=\"Transaction not found.\"')
+        ), true);
+        assert.equal(logs.some((line) =>
+            line.includes("status=waiting-orphan-confirmation") ||
+            line.includes("status=orphan-finalized")
+        ), false);
+    } finally {
+        Date.now = originalDateNow;
+        pendingJobs.close();
+        restore();
+    }
+});
+
 test("pending altblock jobs keep orphan detail in module logs and suppress raw daemon logs", () => {
     const restore = installRemoteShareGlobals();
     const { database } = createPendingJobDatabase();
@@ -453,6 +528,84 @@ test("pending altblock jobs keep orphan detail in module logs and suppress raw d
             line.includes('detail=\"Transaction not found.\"')
         ), true);
     } finally {
+        pendingJobs.close();
+        restore();
+    }
+});
+
+test("pending altblock jobs do not orphan wallet reward lookup misses", () => {
+    const restore = installRemoteShareGlobals();
+    const { database, stores } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    const logs = [];
+    const originalDateNow = Date.now;
+    let fakeNow = 1000;
+
+    Date.now = () => fakeNow;
+    global.coinFuncs = {
+        getPortBlockHeaderByHash(_port, _hash, callback, suppressErrorLog) {
+            assert.equal(suppressErrorLog, true);
+            callback(true, {
+                error: { message: "Transaction not found." },
+                errorSource: "wallet_reward_lookup"
+            });
+        },
+        getPoolProfile() {
+            return { rpc: { unlockConfirmationDepth: 5 } };
+        },
+        PORT2COIN() {
+            return "WOW";
+        },
+        PORT2COIN_FULL() {
+            return "WOW";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log(message) { logs.push(message); } },
+        retryDelayMs: 1,
+        orphanGraceMs: 1,
+        storage
+    });
+
+    try {
+        const altBlock = {
+            hash: "de".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: fakeNow,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true,
+            port: 19994,
+            height: 1001,
+            anchor_height: 1000
+        };
+        pendingJobs.enqueueAltBlock(26, PROTOS.AltBlock.encode(altBlock), altBlock);
+
+        pendingJobs.processDueJobs();
+        let retryJob = Array.from(storage.jobs.values())[0];
+        assert.equal(retryJob.lastError, "waiting_altblock_header");
+
+        fakeNow = 2000;
+        pendingJobs.processDueJobs();
+        retryJob = Array.from(storage.jobs.values())[0];
+
+        assert.equal(storage.jobs.size, 1);
+        assert.equal(stores.altblockDB.size, 0);
+        assert.equal(retryJob.lastError, "waiting_altblock_header");
+        assert.equal(logs.some((line) =>
+            line.includes("Pending altblock:") &&
+            line.includes("status=waiting-header-reward") &&
+            line.includes('detail=\"Transaction not found.\"')
+        ), true);
+        assert.equal(logs.some((line) =>
+            line.includes("status=waiting-orphan-confirmation") ||
+            line.includes("status=orphan-finalized")
+        ), false);
+    } finally {
+        Date.now = originalDateNow;
         pendingJobs.close();
         restore();
     }

@@ -420,6 +420,69 @@ test("wallet reward selectors stay on the coin profiles for asset-aware chains",
     }), 7);
 });
 
+test("cryptonote wallet reward lookup errors keep wallet source markers", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const rpc = coinFuncs.getRpcSettings("");
+    const calls = [];
+
+    const result = await new Promise((resolve) => {
+        rpc.getAnyBlockHeaderByHash({
+            blockHash: "aa".repeat(32),
+            callback(err, header) {
+                resolve({ err, header });
+            },
+            isOurBlock: true,
+            noErrorReport: true,
+            port: MAIN_PORT,
+            runtime: {
+                support: {
+                    rpcPortDaemon(port, method, params, callback, suppressErrorLog) {
+                        calls.push({ port, method, params, suppressErrorLog });
+                        callback({
+                            result: {
+                                miner_tx_hash: "bb".repeat(32),
+                                block_header: {
+                                    hash: "aa".repeat(32),
+                                    height: 100,
+                                    difficulty: 10,
+                                    reward: 0
+                                },
+                                json: JSON.stringify({
+                                    miner_tx: {
+                                        vout: [{ amount: 25 }]
+                                    }
+                                })
+                            }
+                        });
+                    },
+                    rpcPortWalletShort(port, method, params, callback, suppressErrorLog) {
+                        calls.push({ port, method, params, suppressErrorLog });
+                        callback({ error: { code: -8, message: "Transaction not found." } });
+                    }
+                }
+            }
+        });
+    });
+
+    assert.equal(result.err, true);
+    assert.equal(result.header.errorSource, "wallet_reward_lookup");
+    assert.deepEqual(result.header.error, { code: -8, message: "Transaction not found." });
+    assert.deepEqual(calls, [
+        {
+            port: MAIN_PORT,
+            method: "getblock",
+            params: { hash: "aa".repeat(32) },
+            suppressErrorLog: true
+        },
+        {
+            port: MAIN_PORT + 1,
+            method: "get_transfer_by_txid",
+            params: { txid: "bb".repeat(32) },
+            suppressErrorLog: true
+        }
+    ]);
+});
+
 test("eth-style hash lookups preserve hex block heights when deriving canonical headers", async () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const etcRpc = coinFuncs.getRpcSettings("ETC");
