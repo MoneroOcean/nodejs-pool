@@ -179,8 +179,8 @@ async function createLivePoolRun(input) {
         }
 
         if (intelGpuDetected && usesAny(activeAlgorithmSet, MOMINER_INTEL_ALGOS)) {
-            const mominer = await ensureMoMinerRoot(config, logger);
-            miners.push(buildMoMiner(mominer.rootDir, mominer.binaryPath));
+            const moMiner = await ensureMoMinerRoot(config, logger);
+            miners.push(buildMoMiner(moMiner.rootDir, moMiner.binaryPath));
         }
 
         miners.push(buildXmrigMiner((await ensureXmrigBinary(config, logger)).binaryPath));

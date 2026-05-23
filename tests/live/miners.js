@@ -387,14 +387,14 @@ function buildMoMinerNoBenchConfig(context) {
 
 function buildMoMiner(rootDir, binaryPath) {
     return {
-        name: "mominer",
+        name: "mo-miner",
         binaryPath,
         rootDir,
         algorithms: new Set(MOMINER_INTEL_ALGOS),
         parser: createMoMinerParser(),
-        style: "mominer",
+        style: "mo-miner",
         async prepare(context) {
-            const configPath = path.join(context.attemptDir, "mominer-config.json");
+            const configPath = path.join(context.attemptDir, "mo-miner-config.json");
             await writeJson(configPath, buildMoMinerNoBenchConfig(context));
             context.moMinerConfigPath = configPath;
             context.moMinerConfigArg = configPath;

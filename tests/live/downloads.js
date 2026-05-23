@@ -204,7 +204,8 @@ function resolveMoMinerAsset(release) {
     const candidates = release.assets || [];
     if (process.platform !== "linux" || process.arch !== "x64") return null;
     return pickAsset(candidates, [
-        (asset) => /mominer/i.test(String(asset.name || "")) && /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || "")),
+        (asset) => /^mo-miner-v.*-lin\.(tar\.gz|tgz)$/i.test(String(asset.name || "")),
+        (asset) => /mo-miner/i.test(String(asset.name || "")) && /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || "")),
         (asset) => /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || ""))
     ]);
 }
@@ -326,26 +327,26 @@ async function ensureSrbMinerBinary(config, logger) {
 
 async function ensureMoMinerRoot(config, logger) {
     return await ensureReleaseAsset(config, logger, {
-        miner: "mominer",
-        cacheKey: "mominer",
+        miner: "mo-miner",
+        cacheKey: "mo-miner",
         releaseApi: MOMINER_RELEASE_API,
         resolveAsset: resolveMoMinerAsset,
         archiveSuffixPattern: /(\.tar\.(gz|xz|bz2)|\.tgz|\.txz|\.tbz2)$/i,
         downloadPrefix: MOMINER_DOWNLOAD_PREFIX,
         includeUnzipOnWindows: false,
         async locate(extractDir) {
-            const binaryPath = await findNamedFile(extractDir, "mominer");
+            const binaryPath = await findNamedFile(extractDir, "mo-miner");
             return binaryPath ? { rootDir: path.dirname(binaryPath), binaryPath } : null;
         },
         missingAsset(release) {
-            return `No MoMiner Linux x64 archive asset is available in ${release.tag_name || "latest release"}`;
+            return `No mo-miner Linux x64 archive asset is available in ${release.tag_name || "latest release"}`;
         },
         missingExtracted(asset) {
-            return `Could not find mominer executable after extracting ${asset.name}`;
+            return `Could not find mo-miner executable after extracting ${asset.name}`;
         },
         logPayload(located, release, asset) {
             return {
-                miner: "mominer",
+                miner: "mo-miner",
                 release: release.tag_name,
                 asset: asset.name,
                 rootDir: located.rootDir,

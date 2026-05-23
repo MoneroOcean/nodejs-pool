@@ -30,8 +30,8 @@ const DEFAULT_MOMINER_C29_DEVICE = "gpu1*1";
 const XMRIG_RELEASE_API = "https://api.github.com/repos/MoneroOcean/xmrig/releases/latest";
 const SRBMINER_RELEASE_API = "https://api.github.com/repos/doktor83/SRBMiner-Multi/releases/latest";
 const SRBMINER_DOWNLOAD_PREFIX = "https://github.com/doktor83/SRBMiner-Multi/releases/download/";
-const MOMINER_RELEASE_API = "https://api.github.com/repos/MoneroOcean/mominer/releases/latest";
-const MOMINER_DOWNLOAD_PREFIX = "https://github.com/MoneroOcean/mominer/releases/download/";
+const MOMINER_RELEASE_API = "https://api.github.com/repos/MoneroOcean/mo-miner/releases/latest";
+const MOMINER_DOWNLOAD_PREFIX = "https://github.com/MoneroOcean/mo-miner/releases/download/";
 
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
 const USER_AGENT = "nodejs-pool-live-tests";
