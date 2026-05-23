@@ -12,6 +12,7 @@ const createRemoteShareRuntime = require("../../lib/remote_share.js").createRemo
 delete global.__remoteShareAutostart;
 
 const PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "..", "lib", "common", "data.proto")));
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -145,11 +146,22 @@ function createMapStorage() {
             jobs.delete(key);
         },
         loadDueJobs(now, limit) {
-            return Array.from(jobs.values())
+            let nextDueAt = null;
+            const dueJobs = [];
+            for (const job of jobs.values()) {
+                if (job.nextAttemptAt <= now) {
+                    dueJobs.push(job);
+                } else if (typeof job.nextAttemptAt === "number" && (nextDueAt === null || job.nextAttemptAt < nextDueAt)) {
+                    nextDueAt = job.nextAttemptAt;
+                }
+            }
+            const loadedJobs = dueJobs
                 .filter((job) => job.nextAttemptAt <= now)
                 .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt || left.createdAt - right.createdAt)
                 .slice(0, limit)
                 .map((job) => ({ ...job }));
+            loadedJobs.nextDueAt = nextDueAt;
+            return loadedJobs;
         },
         loadAllJobs() {
             return Array.from(jobs.values()).map((job) => ({ ...job }));
@@ -670,6 +682,196 @@ test("pending altblock jobs do not orphan wallet reward lookup misses", () => {
             line.includes("status=waiting-orphan-confirmation") ||
             line.includes("status=orphan-finalized")
         ), false);
+    } finally {
+        Date.now = originalDateNow;
+        pendingJobs.close();
+        restore();
+    }
+});
+
+test("pending blocks send a daily FYI when stuck over the stale age", () => {
+    const sentEmails = [];
+    const restore = installRemoteShareGlobals(() => {
+        global.support = {
+            sendAdminFyi(key, subject, body, options) {
+                sentEmails.push({ key, subject, body, options });
+                return true;
+            }
+        };
+    });
+    const { database } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    const logs = [];
+    const originalDateNow = Date.now;
+    let fakeNow = 1000;
+
+    Date.now = () => fakeNow;
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback) {
+            callback(true, null);
+        },
+        getPortBlockHeaderByHash(_port, _hash, callback) {
+            callback(true, null);
+        },
+        getPoolProfile() {
+            return { rpc: { unlockConfirmationDepth: 5 }, pool: {} };
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL(port) {
+            return port === 19994 ? "WOW" : "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log(message) { logs.push(message); } },
+        retryDelayMs: 1,
+        stalePendingBlockAlertCheckMs: DAY_MS,
+        stalePendingBlockAgeMs: 30 * DAY_MS,
+        stalePendingBlockRetryDelayMs: 6 * 60 * 60 * 1000,
+        storage
+    });
+
+    try {
+        const block = {
+            hash: "11".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: fakeNow,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true
+        };
+        const altBlock = {
+            hash: "22".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: fakeNow,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true,
+            port: 19994,
+            height: 1001,
+            anchor_height: 1000
+        };
+        pendingJobs.enqueueBlock(31, PROTOS.Block.encode(block), block);
+        pendingJobs.enqueueAltBlock(32, PROTOS.AltBlock.encode(altBlock), altBlock);
+
+        fakeNow = 20 * DAY_MS;
+        const youngBlock = Object.assign({}, block, { hash: "33".repeat(32), timestamp: fakeNow });
+        pendingJobs.enqueueBlock(33, PROTOS.Block.encode(youngBlock), youngBlock);
+
+        fakeNow = 31 * DAY_MS + 1000;
+        pendingJobs.processDueJobs();
+
+        assert.equal(sentEmails.length, 1);
+        assert.equal(sentEmails[0].key, "remote_share:stale-pending-blocks");
+        assert.equal(sentEmails[0].subject, "FYI: Pending blocks not verified for over a month");
+        assert.equal(sentEmails[0].options.cooldownMs, DAY_MS);
+        assert.match(sentEmails[0].body, /2 pending block\(s\) older than 30 days/);
+        assert.match(sentEmails[0].body, /type=block chain=XMR\/18081 blockId=31/);
+        assert.match(sentEmails[0].body, /type=altblock chain=WOW\/19994 height=1001/);
+        assert.equal(sentEmails[0].body.includes("33".repeat(32)), false);
+
+        fakeNow += 60 * 60 * 1000;
+        pendingJobs.processDueJobs();
+        assert.equal(sentEmails.length, 1);
+
+        fakeNow += DAY_MS;
+        pendingJobs.processDueJobs();
+        assert.equal(sentEmails.length, 2);
+    } finally {
+        Date.now = originalDateNow;
+        pendingJobs.close();
+        restore();
+    }
+});
+
+test("stale pending blocks use a small processing budget and longer retry delay", () => {
+    const restore = installRemoteShareGlobals();
+    const { database } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    const logs = [];
+    const originalDateNow = Date.now;
+    const staleRetryDelayMs = 6 * 60 * 60 * 1000;
+    let fakeNow = 1000;
+    let headerCalls = 0;
+
+    Date.now = () => fakeNow;
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback) {
+            headerCalls += 1;
+            callback(true, null);
+        },
+        getPoolProfile() {
+            return { pool: {} };
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log(message) { logs.push(message); } },
+        retryDelayMs: 10,
+        maxRetryDelayMs: 10,
+        stalePendingBlockAgeMs: 30 * DAY_MS,
+        stalePendingBlockProcessLimit: 2,
+        stalePendingBlockRetryDelayMs: staleRetryDelayMs,
+        storage
+    });
+
+    try {
+        for (let index = 0; index < 7; index += 1) {
+            const block = {
+                hash: index.toString(16).padStart(64, "0"),
+                difficulty: 100,
+                shares: 0,
+                timestamp: fakeNow,
+                poolType: PROTOS.POOLTYPE.PPLNS,
+                unlocked: false,
+                valid: true
+            };
+            pendingJobs.enqueueBlock(100 + index, PROTOS.Block.encode(block), block);
+        }
+
+        fakeNow = 31 * DAY_MS;
+        const freshBlock = {
+            hash: "ff".repeat(32),
+            difficulty: 100,
+            shares: 0,
+            timestamp: fakeNow,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true
+        };
+        pendingJobs.enqueueBlock(200, PROTOS.Block.encode(freshBlock), freshBlock);
+
+        pendingJobs.processDueJobs();
+
+        assert.equal(headerCalls, 3);
+        const jobs = Array.from(storage.jobs.values());
+        const throttled = jobs.filter((job) => job.lastError === "stale_pending_throttled");
+        const staleRetried = jobs.filter((job) => job.lastError === "waiting_block_header" && job.blockId < 200);
+        const freshRetried = jobs.find((job) => job.blockId === 200);
+
+        assert.equal(throttled.length, 5);
+        assert.equal(staleRetried.length, 2);
+        assert.equal(freshRetried.lastError, "waiting_block_header");
+        assert.equal(freshRetried.nextAttemptAt, fakeNow + 10);
+        for (const job of throttled.concat(staleRetried)) {
+            assert.equal(job.nextAttemptAt, fakeNow + staleRetryDelayMs);
+        }
+        assert.equal(logs.some((line) =>
+            line.includes("Pending job:") &&
+            line.includes("status=stale-throttled")
+        ), true);
     } finally {
         Date.now = originalDateNow;
         pendingJobs.close();
