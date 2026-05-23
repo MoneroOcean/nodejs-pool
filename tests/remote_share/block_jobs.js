@@ -161,7 +161,13 @@ function createMapStorage() {
 function createPendingJobDatabase() {
     const stores = {
         blockDB: new Map(),
-        altblockDB: new Map()
+        altblockDB: new Map(),
+        namedDbs: new Map()
+    };
+    const dbHandles = new Map();
+    const lmdbState = {
+        cursorReads: 0,
+        cursorCloses: 0
     };
     const resets = [];
 
@@ -171,10 +177,64 @@ function createPendingJobDatabase() {
         throw new Error("Unknown DB handle");
     }
 
+    function getStringStore(db) {
+        if (db && stores.namedDbs.has(db.name)) return stores.namedDbs.get(db.name);
+        throw new Error("Unknown string DB handle");
+    }
+
+    function sortEntries(entries) {
+        return Array.from(entries).sort(function byKey(left, right) {
+            return String(left[0]).localeCompare(String(right[0]));
+        });
+    }
+
+    class Cursor {
+        constructor(_txn, db) {
+            this.entries = sortEntries(getStringStore(db).entries());
+            this.index = -1;
+        }
+
+        goToFirst() {
+            this.index = this.entries.length > 0 ? 0 : -1;
+            return this.index === -1 ? null : this.entries[this.index][0];
+        }
+
+        goToNext() {
+            if (this.index === -1 || this.index + 1 >= this.entries.length) {
+                this.index = -1;
+                return null;
+            }
+            this.index += 1;
+            return this.entries[this.index][0];
+        }
+
+        getCurrentString(callback) {
+            if (this.index === -1) return null;
+            const entry = this.entries[this.index];
+            lmdbState.cursorReads += 1;
+            callback(entry[0], entry[1]);
+            return entry[1];
+        }
+
+        close() {
+            lmdbState.cursorCloses += 1;
+        }
+    }
+
     const database = {
         blockDB: { name: "blockDB" },
         altblockDB: { name: "altblockDB" },
+        lmdb: { Cursor },
         env: {
+            openDbi(options) {
+                const name = options.name || "";
+                if (!stores.namedDbs.has(name)) {
+                    if (options.create === false) throw new Error("DB not found");
+                    stores.namedDbs.set(name, new Map());
+                    dbHandles.set(name, { name, close() {} });
+                }
+                return dbHandles.get(name);
+            },
             beginTxn() {
                 return {
                     getBinary(db, key) {
@@ -182,6 +242,12 @@ function createPendingJobDatabase() {
                     },
                     putBinary(db, key, value) {
                         getStore(db).set(key, Buffer.from(value));
+                    },
+                    putString(db, key, value) {
+                        getStringStore(db).set(key, value);
+                    },
+                    del(db, key) {
+                        getStringStore(db).delete(key);
                     },
                     abort() {},
                     commit() {}
@@ -204,7 +270,7 @@ function createPendingJobDatabase() {
         }
     };
 
-    return { database, resets, stores };
+    return { database, resets, stores, lmdbState };
 }
 
 test.describe("remote share block jobs", { concurrency: false }, () => {
@@ -606,6 +672,58 @@ test("pending altblock jobs do not orphan wallet reward lookup misses", () => {
         ), false);
     } finally {
         Date.now = originalDateNow;
+        pendingJobs.close();
+        restore();
+    }
+});
+
+test("lmdb pending job polling stops cursor after due job limit", () => {
+    const restore = installRemoteShareGlobals();
+    const { database, stores, lmdbState } = createPendingJobDatabase();
+
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback) {
+            callback(null, { reward: 25 });
+        },
+        getPoolProfile() {
+            return { pool: {} };
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log() {} }
+    });
+
+    try {
+        for (let index = 0; index < 150; index += 1) {
+            const hash = index.toString(16).padStart(64, "0");
+            const block = {
+                hash,
+                difficulty: 100,
+                shares: 0,
+                timestamp: Date.now(),
+                poolType: PROTOS.POOLTYPE.PPLNS,
+                unlocked: false,
+                valid: true
+            };
+            pendingJobs.enqueueBlock(1000 + index, PROTOS.Block.encode(block), block);
+        }
+
+        lmdbState.cursorReads = 0;
+        pendingJobs.processDueJobs();
+
+        assert.equal(lmdbState.cursorReads, 100);
+        assert.equal(lmdbState.cursorCloses, 1);
+        assert.equal(stores.namedDbs.get("pending_blocks").size, 50);
+        assert.equal(stores.blockDB.size, 100);
+    } finally {
         pendingJobs.close();
         restore();
     }
