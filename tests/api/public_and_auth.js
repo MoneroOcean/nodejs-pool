@@ -347,7 +347,8 @@ test.describe("api public and auth", { concurrency: false }, () => {
         });
     });
 
-    test("email subscription throttle does not let a mismatched email block a valid update", async () => {
+    test("email subscription throttle cannot be bypassed by changing email fields", async () => {
+        let nowValue = 0;
         let updateCalls = 0;
         const mysql = createMysql(async function handler(sql, params) {
             if (sql.startsWith("UPDATE users SET enable_email = ?, email = ? WHERE username = ? AND email = ?")) {
@@ -365,7 +366,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
             config: createConfig(),
             database: createDatabase({ caches: {} }),
             mysql: mysql,
-            now: () => 0,
+            now: () => nowValue,
             support: createSupport()
         }, async (port) => {
             const attackerFailure = await requestJson(port, "POST", "/user/subscribeEmail", {
@@ -377,6 +378,17 @@ test.describe("api public and auth", { concurrency: false }, () => {
             assert.equal(attackerFailure.statusCode, 401);
             assert.deepEqual(attackerFailure.json, { error: "FROM email does not match" });
 
+            const variedGuess = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet",
+                enabled: 0,
+                from: "old@example.com",
+                to: "new@example.com"
+            });
+            assert.equal(variedGuess.statusCode, 429);
+            assert.match(variedGuess.json.msg, /Too many attempts/);
+            assert.equal(updateCalls, 1);
+
+            nowValue += 2001;
             const validUpdate = await requestJson(port, "POST", "/user/subscribeEmail", {
                 username: "wallet",
                 enabled: 1,
