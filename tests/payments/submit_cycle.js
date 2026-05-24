@@ -156,6 +156,104 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
         assert.equal(harness.mysql.state.store.transactions[0].transaction_hash, txHash);
     });
 
+    test("accepted wallet transfer finalizes when the submitted tx is still pending", async () => {
+        const transferFee = 300000000;
+        const txHash = "3".repeat(64);
+        const txKey = "4".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ],
+            walletScript: {
+                transfer: [{
+                    result: {
+                        fee: transferFee,
+                        tx_hash: txHash,
+                        tx_key: txKey
+                    }
+                }],
+                get_transfer_by_txid: [function replyPendingTransfer() {
+                    const transfer = txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                        fee: transferFee,
+                        locked: true,
+                        txid: txHash,
+                        type: "pending"
+                    });
+                    return {
+                        result: {
+                            transfer,
+                            transfers: [transfer]
+                        }
+                    };
+                }]
+            }
+        });
+        const plannedBatches = await harness.runtime.planBatches();
+        const transferItemAmount = plannedBatches[0].items[0].netAmount;
+
+        await harness.runtime.runCycle();
+
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, txHash);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, txKey);
+        assert.equal(harness.mysql.state.store.transactions.length, 1);
+        assert.equal(harness.mysql.state.store.payments.length, 1);
+        assert.equal(harness.sentEmails.some(function hasFyi(entry) { return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation"; }), false);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
+    });
+
+    test("submitted tx visibility falls back to recent transfers after a blank txid lookup error", async () => {
+        const transferFee = 300000000;
+        const txHash = "5".repeat(64);
+        const txKey = "6".repeat(64);
+        const harness = createHarness({
+            balances: [
+                { id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }
+            ],
+            walletScript: {
+                transfer: [{
+                    result: {
+                        fee: transferFee,
+                        tx_hash: txHash,
+                        tx_key: txKey
+                    }
+                }],
+                get_transfer_by_txid: [{ error: { code: 0, message: "" }, id: "0", jsonrpc: "2.0" }],
+                get_transfers: [function replyTransfers() {
+                    return {
+                        result: {
+                            out: [],
+                            pending: [txTransferRecord(harness.clock, [{ address: STANDARD_A, amount: transferItemAmount }], {
+                                fee: transferFee,
+                                locked: true,
+                                txid: txHash,
+                                type: "pending"
+                            })],
+                            pool: []
+                        }
+                    };
+                }]
+            }
+        });
+        const plannedBatches = await harness.runtime.planBatches();
+        const transferItemAmount = plannedBatches[0].items[0].netAmount;
+
+        await harness.runtime.runCycle();
+
+        assert.equal(harness.mysql.state.store.paymentBatches[0].status, "finalized");
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_hash, txHash);
+        assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, txKey);
+        assert.equal(harness.mysql.state.store.transactions.length, 1);
+        assert.equal(harness.mysql.state.store.payments.length, 1);
+        assert.equal(harness.sentEmails.some(function hasFyi(entry) { return entry.subject === "FYI: Payment batch 1 awaiting wallet confirmation"; }), false);
+        assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfer_by_txid"; }).length, 1);
+        assert.equal(harness.wallet.calls.filter(function isHeights(call) { return call.method === "get_height"; }).length, 0);
+        const historyCalls = harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; });
+        assert.equal(historyCalls.length, 1);
+        assert.deepEqual(historyCalls[0].params, { out: true, pending: true, pool: true });
+    });
+
     test("reserve transaction failure rolls back cleanly and does not update lastPaymentCycle", async () => {
         const harness = createHarness({
             balances: [
