@@ -224,6 +224,132 @@ test("kawpow submit rejects low-difficulty finalizer results before full mixhash
     }
 });
 
+test("kawpow submit does not invalidate shares dropped by verifier queue timeout", async () => {
+    const { runtime, database } = await startHarness();
+    const client = new JsonLineClient(ETH_PORT);
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    let slowHashAsyncCalls = 0;
+
+    try {
+        global.coinFuncs.slowHashAsync = function queueTimeoutSlowHash(_buffer, _blockTemplate, _wallet, callback) {
+            slowHashAsyncCalls += 1;
+            callback(null, "verify-queue-timeout");
+        };
+
+        await client.connect();
+
+        const subscribeReply = await client.request({
+            id: 4514,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+        assert.equal(subscribeReply.error, null);
+
+        const authorizeReply = await client.request({
+            id: 4515,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-kawpow-queue-timeout"]
+        });
+        assert.equal(authorizeReply.error, null);
+        assert.equal(authorizeReply.result, true);
+
+        await client.waitFor((message) => message.method === "mining.set_target");
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+
+        const submitReply = await client.request({
+            id: 4516,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000024",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ab".repeat(32)}`
+            ]
+        });
+
+        assert.equal(submitReply.error.message, "Throttled down share submission (please increase difficulty)");
+        assert.equal(submitReply.result, undefined);
+        assert.equal(database.shares.length, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(slowHashAsyncCalls, 1);
+    } finally {
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await client.close();
+        await runtime.stop();
+    }
+});
+
+test("kawpow submit retries verifier host errors without local fallback", async () => {
+    const { runtime, database } = await startHarness();
+    const client = new JsonLineClient(ETH_PORT);
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalVerifyRetryConfig = global.config.pool.verifyShareRetry;
+    const originalSetTimeout = global.setTimeout;
+    let slowHashAsyncCalls = 0;
+
+    try {
+        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 7 };
+        global.setTimeout = function drainVerifierRetry(callback, delay, ...args) {
+            if (delay === 7) {
+                callback(...args);
+                return 0;
+            }
+            return originalSetTimeout(callback, delay, ...args);
+        };
+        global.coinFuncs.slowHashAsync = function hostErrorThenValidHash(...args) {
+            slowHashAsyncCalls += 1;
+            const callback = args[3];
+            if (slowHashAsyncCalls < 4) return callback(false, "verify-host-error");
+            return originalSlowHashAsync.apply(this, args);
+        };
+
+        await client.connect();
+
+        const subscribeReply = await client.request({
+            id: 4517,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"]
+        });
+        assert.equal(subscribeReply.error, null);
+
+        const authorizeReply = await client.request({
+            id: 4518,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-kawpow-host-retry"]
+        });
+        assert.equal(authorizeReply.error, null);
+        assert.equal(authorizeReply.result, true);
+
+        await client.waitFor((message) => message.method === "mining.set_target");
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+
+        const submitReply = await client.request({
+            id: 4519,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000025",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ab".repeat(32)}`
+            ]
+        });
+        await flushShareAccumulator(() => database.shares.length === 1);
+
+        assert.equal(submitReply.error, null);
+        assert.equal(submitReply.result, true);
+        assert.equal(slowHashAsyncCalls, 4);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+    } finally {
+        global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        global.setTimeout = originalSetTimeout;
+        await client.close();
+        await runtime.stop();
+    }
+});
+
 test("trusted kawpow submit uses the same trusted-share fast path as other algos", async () => {
     const { runtime, database } = await startHarness();
     const client = new JsonLineClient(ETH_PORT);

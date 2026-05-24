@@ -244,7 +244,7 @@ test("submit retries async verifier when verifier result is unknown", async () =
         };
         global.coinFuncs.slowHashAsync = function unknownThenValidHash(_buffer, _blockTemplate, _wallet, callback) {
             slowHashCalls += 1;
-            if (slowHashCalls < 4) return callback(false);
+            if (slowHashCalls < 4) return callback(false, "verify-host-error");
             callback(VALID_RESULT);
         };
 
@@ -275,6 +275,142 @@ test("submit retries async verifier when verifier result is unknown", async () =
         global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
         global.coinFuncs.slowHashAsync = originalSlowHashAsync;
         global.setTimeout = originalSetTimeout;
+        await runtime.stop();
+    }
+});
+
+test("submit does not retry verifier queue timeout", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalVerifyRetryConfig = global.config.pool.verifyShareRetry;
+    let slowHashCalls = 0;
+
+    try {
+        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 7 };
+        global.coinFuncs.slowHashAsync = function queueTimeout(_buffer, _blockTemplate, _wallet, callback) {
+            slowHashCalls += 1;
+            callback(null, "verify-queue-timeout");
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 136,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "worker-queue-timeout" }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 137,
+            method: "submit",
+            params: { id: socket.miner_id, job_id: jobId, nonce: "0000000d", result: VALID_RESULT }
+        });
+
+        assert.deepEqual(submitReply.replies, [{
+            error: "Throttled down share submission (please increase difficulty)",
+            result: undefined
+        }]);
+        assert.equal(slowHashCalls, 1);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
+test("submit invalidates verifier failures after retry limit is exhausted", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalVerifyRetryConfig = global.config.pool.verifyShareRetry;
+    const originalSetTimeout = global.setTimeout;
+    let slowHashCalls = 0;
+
+    try {
+        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 7 };
+        global.setTimeout = function drainVerifierRetry(callback, delay, ...args) {
+            if (delay === 7) {
+                callback(...args);
+                return 0;
+            }
+            return originalSetTimeout(callback, delay, ...args);
+        };
+        global.coinFuncs.slowHashAsync = function hostError(_buffer, _blockTemplate, _wallet, callback) {
+            slowHashCalls += 1;
+            callback(false, "verify-host-error");
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 138,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "worker-host-error" }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 139,
+            method: "submit",
+            params: { id: socket.miner_id, job_id: jobId, nonce: "0000000e", result: VALID_RESULT }
+        });
+
+        const deadline = Date.now() + 500;
+        while (submitReply.replies.length === 0 && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(slowHashCalls, 4);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        global.setTimeout = originalSetTimeout;
+        await runtime.stop();
+    }
+});
+
+test("submit does not retry deterministic local verifier false", async () => {
+    const { runtime, database } = await startHarness();
+    const socket = {};
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalVerifyRetryConfig = global.config.pool.verifyShareRetry;
+    let slowHashCalls = 0;
+
+    try {
+        global.config.pool.verifyShareRetry = { maxRetries: 3, retryDelayMs: 7 };
+        global.coinFuncs.slowHashAsync = function localFalse(_buffer, _blockTemplate, _wallet, callback) {
+            slowHashCalls += 1;
+            callback(false);
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 140,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "worker-local-false" }
+        });
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 141,
+            method: "submit",
+            params: { id: socket.miner_id, job_id: jobId, nonce: "0000000f", result: VALID_RESULT }
+        });
+
+        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(slowHashCalls, 1);
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(database.invalidShares.length, 0);
+    } finally {
+        global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
         await runtime.stop();
     }
 });
