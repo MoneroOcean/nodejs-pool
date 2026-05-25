@@ -514,6 +514,13 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
         }
     });
 
+    assert.equal(xtmTPool.acceptSubmittedBlock({ rpcResult: { result: { block_hash: [0, 1, 2, 255] } } }), true);
+    assert.equal(xtmTPool.acceptSubmittedBlock({ rpcResult: { result: { block_hash: "11".repeat(32) } } }), true);
+    assert.equal(xtmTPool.acceptSubmittedBlock({ rpcResult: { result: { status: "OK" } } }), false);
+    assert.equal(xtmTPool.acceptSubmittedBlock({ rpcResult: { result: { status: "FAILED" } } }), false);
+    assert.equal(xtmCPool.acceptSubmittedBlock({ rpcResult: { result: { block_hash: [1, 2, 3] } } }), true);
+    assert.equal(xtmCPool.acceptSubmittedBlock({ rpcResult: { result: { status: "OK" } } }), false);
+
     assert.equal(resolvedRxHash, "000102ff");
     assert.equal(xtmRxCalls.length, 1);
     assert.equal(xtmRxCalls[0].port, 18146);
