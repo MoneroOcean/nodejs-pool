@@ -13,6 +13,9 @@ _*.js
 *~
 *.un~
 
+# Untracked dependency locks
+package-lock.json
+
 # Local runtime config and TLS files
 cert*
 config.json
