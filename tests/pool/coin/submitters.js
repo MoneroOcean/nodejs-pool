@@ -15,6 +15,22 @@ const {
 
 const REAL_ETH_STYLE_PORT = 8645;
 const INSTANCE_ID_PID_MASK = (1 << 22) - 1;
+const XTM_T_MINING_HASH_OFFSET = 3;
+const XTM_T_MINING_HASH_SIZE = 32;
+const XTM_T_NONCE_OFFSET = XTM_T_MINING_HASH_OFFSET + XTM_T_MINING_HASH_SIZE;
+const XTM_T_NONCE_SIZE = 8;
+const XTM_T_MINER_NONCE_OFFSET = XTM_T_NONCE_OFFSET + 4;
+const XTM_T_POW_ALGO_OFFSET = XTM_T_NONCE_OFFSET + XTM_T_NONCE_SIZE;
+const XTM_T_POW_DATA_OFFSET = XTM_T_POW_ALGO_OFFSET + 1;
+const XTM_T_POW_DATA_SIZE = 32;
+const XTM_T_RANDOMXT_POW_ALGO = 2;
+const TARI_SOURCE_CANDIDATES = [
+    process.env.POOL_TEST_TARI_SOURCE_DIR,
+    process.env.TARI_SOURCE_DIR,
+    "/usr/local/src/tari",
+    "/usr/local/src/tari-src",
+    process.env.HOME ? path.join(process.env.HOME, "tari") : ""
+].filter(Boolean);
 
 function withPatchedPid(pid, fn) {
     const originalDescriptor = Object.getOwnPropertyDescriptor(process, "pid");
@@ -54,6 +70,42 @@ function createInstanceIdWord(poolId, pid) {
     } finally {
         global.config.pool_id = previousPoolId;
     }
+}
+
+function createXtmTMiningBlob(miningHash, nonce, powData) {
+    const powBytes = Buffer.alloc(XTM_T_POW_DATA_SIZE);
+    if (powData) Buffer.from(powData).copy(powBytes, 0, 0, XTM_T_POW_DATA_SIZE);
+    const blob = Buffer.concat([
+        Buffer.alloc(XTM_T_MINING_HASH_OFFSET),
+        miningHash,
+        Buffer.alloc(XTM_T_NONCE_SIZE),
+        Buffer.from([XTM_T_RANDOMXT_POW_ALGO]),
+        powBytes
+    ]);
+
+    blob.writeBigUInt64BE(BigInt(nonce), XTM_T_NONCE_OFFSET);
+    return blob;
+}
+
+function reconstructXtmTMiningBlob(miningHash, submittedBlock) {
+    const powData = submittedBlock.header.pow && submittedBlock.header.pow.pow_data
+        ? submittedBlock.header.pow.pow_data
+        : [];
+    return createXtmTMiningBlob(miningHash, BigInt(submittedBlock.header.nonce), powData);
+}
+
+function findTariSourceFile(relativePath) {
+    for (const root of TARI_SOURCE_CANDIDATES) {
+        const candidate = path.join(root, relativePath);
+        if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+}
+
+function readRustIntegerConst(source, name) {
+    const match = source.match(new RegExp("\\bconst\\s+" + name + "\\s*:\\s*[^=]+\\s*=\\s*(\\d+)\\s*;"));
+    assert.notEqual(match, null, "missing Tari source const " + name);
+    return Number(match[1]);
 }
 
 test.describe("pool coin helpers: submitters", { concurrency: false }, () => {
@@ -377,11 +429,78 @@ test("erg mining.submit parser falls back to nonce suffix for standard submits",
     assert.equal(params.nonce, "5b3ec51d640c");
 });
 
+test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
+    const miningHash = Buffer.from("31".repeat(XTM_T_MINING_HASH_SIZE), "hex");
+    const xtmBlock = {
+        header: {
+            nonce: "0",
+            pow: { pow_data: [7, 7, 7] }
+        }
+    };
+    const blockTemplate = new coinFuncs.BlockTemplate({
+        blocktemplate_blob: createXtmTMiningBlob(miningHash, 0n).toString("hex"),
+        coin: "XTM-T",
+        difficulty: 1,
+        height: 271620,
+        port: 18146,
+        reserved_offset: XTM_T_NONCE_OFFSET,
+        reward: 1,
+        seed_hash: "22".repeat(32),
+        xtm_block: xtmBlock
+    });
+    const calls = [];
+    const minerBlob = Buffer.from(blockTemplate.nextBlobHex(), "hex");
+
+    minerBlob.writeUInt32BE(0x01020304, XTM_T_MINER_NONCE_OFFSET);
+
+    xtmTPool.submitBlockRpc.call(xtmTPool, {
+        blockData: minerBlob,
+        blockTemplate,
+        replyFn() {},
+        support: {
+            rpcPortDaemon(port, method, params) {
+                calls.push({ port, method, params });
+            }
+        }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].port, 18146);
+    assert.equal(calls[0].method, "SubmitBlock");
+    assert.equal(calls[0].params.header.nonce, minerBlob.readBigUInt64BE(XTM_T_NONCE_OFFSET).toString(10));
+    assert.deepEqual(calls[0].params.header.pow.pow_data, []);
+    assert.equal(reconstructXtmTMiningBlob(miningHash, calls[0].params).equals(minerBlob), true);
+    assert.notStrictEqual(calls[0].params, xtmBlock);
+    assert.equal(xtmBlock.header.nonce, "0");
+    assert.deepEqual(xtmBlock.header.pow.pow_data, [7, 7, 7]);
+});
+
+test("xtm-t layout matches Tari source constants when source is available", (t) => {
+    const innerPath = findTariSourceFile(path.join("applications", "minotari_node", "src", "xmrig_proxy", "inner.rs"));
+    if (!innerPath) {
+        t.skip("Tari source tree not available; set POOL_TEST_TARI_SOURCE_DIR to enable this contract check.");
+        return;
+    }
+
+    const innerSource = fs.readFileSync(innerPath, "utf8");
+    assert.equal(readRustIntegerConst(innerSource, "TARI_BLOB_RESERVED_OFFSET"), XTM_T_NONCE_OFFSET);
+    assert.equal(readRustIntegerConst(innerSource, "TARI_MINING_BLOB_SIZE"), XTM_T_POW_DATA_OFFSET + XTM_T_POW_DATA_SIZE);
+    assert.equal(readRustIntegerConst(innerSource, "POW_ALGO_RANDOMXT"), XTM_T_RANDOMXT_POW_ALGO);
+
+    const helpersPath = findTariSourceFile(path.join("base_layer", "core", "src", "proof_of_work", "monero_rx", "helpers.rs"));
+    if (!helpersPath) return;
+    const helpersSource = fs.readFileSync(helpersPath, "utf8");
+    assert.match(helpersSource, /nonce\.to_be_bytes\(\)/);
+    assert.match(helpersSource, /pow\.to_bytes\(\)/);
+});
+
 test("xtm submit and verify handlers preserve the pre-refactor special-case tari semantics", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
     const xtmCPool = coinFuncs.getPoolSettings("XTM-C");
-    const blockDataRx = Buffer.alloc(48, 0);
+    const blockDataRx = Buffer.alloc(76, 0);
     const blockDataC29 = Buffer.alloc(8, 0);
     const xtmRxCalls = [];
     const xtmC29Calls = [];
@@ -394,9 +513,22 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
         Buffer.from("aabbccdd", "hex")
     ]);
     const job = { blob_type_num: 107 };
+    const xtmRxBlock = {
+        header: {
+            nonce: "",
+            pow: { pow_data: [99] }
+        }
+    };
+    const xtmC29Block = {
+        header: {
+            nonce: "",
+            pow: { pow_data: [88] }
+        }
+    };
 
+    blockDataRx.writeUInt32BE(7, 3 + 32);
     blockDataRx.writeUInt32BE(1234, 3 + 32 + 4);
-    Buffer.from([9, 8, 7, 6]).copy(blockDataRx, 3 + 32 + 8 + 1);
+    blockDataRx[3 + 32 + 8] = 2;
     blockDataC29.writeBigUInt64BE(15n, 0);
 
     xtmTPool.resolveSubmittedBlockHash({
@@ -413,12 +545,7 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
         blockData: blockDataRx,
         blockTemplate: {
             port: 18146,
-            xtm_block: {
-                header: {
-                    nonce: "",
-                    pow: { pow_data: [] }
-                }
-            }
+            xtm_block: xtmRxBlock
         },
         replyFn() {},
         support: {
@@ -498,12 +625,7 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
         blockData: blockDataC29,
         blockTemplate: {
             port: 18148,
-            xtm_block: {
-                header: {
-                    nonce: "",
-                    pow: { pow_data: [] }
-                }
-            }
+            xtm_block: xtmC29Block
         },
         job,
         replyFn() {},
@@ -525,8 +647,11 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
     assert.equal(xtmRxCalls.length, 1);
     assert.equal(xtmRxCalls[0].port, 18146);
     assert.equal(xtmRxCalls[0].method, "SubmitBlock");
-    assert.equal(xtmRxCalls[0].params.header.nonce, "1234");
-    assert.deepEqual(xtmRxCalls[0].params.header.pow.pow_data, [9, 8, 7, 6]);
+    assert.equal(xtmRxCalls[0].params.header.nonce, ((7n << 32n) | 1234n).toString(10));
+    assert.deepEqual(xtmRxCalls[0].params.header.pow.pow_data, []);
+    assert.notStrictEqual(xtmRxCalls[0].params, xtmRxBlock);
+    assert.equal(xtmRxBlock.header.nonce, "");
+    assert.deepEqual(xtmRxBlock.header.pow.pow_data, [99]);
 
     assert.deepEqual(job.c29_packed_edges, [0xab, 0xcd]);
     assert.equal(verifyArgs[0], 77n);
@@ -540,5 +665,8 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
     assert.equal(xtmC29Calls[0].method, "SubmitBlock");
     assert.equal(xtmC29Calls[0].params.header.nonce, "15");
     assert.deepEqual(xtmC29Calls[0].params.header.pow.pow_data, [0xab, 0xcd]);
+    assert.notStrictEqual(xtmC29Calls[0].params, xtmC29Block);
+    assert.equal(xtmC29Block.header.nonce, "");
+    assert.deepEqual(xtmC29Block.header.pow.pow_data, [88]);
 });
 });

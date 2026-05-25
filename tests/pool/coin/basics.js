@@ -150,6 +150,35 @@ test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex c
     );
 });
 
+test("BlockTemplate keeps XTM-T pool nonce in the Tari nonce prefix", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const blob = Buffer.concat([
+        Buffer.alloc(3),
+        Buffer.alloc(32, 0x11),
+        Buffer.alloc(8),
+        Buffer.from([0x02]),
+        Buffer.alloc(32)
+    ]);
+    const blockTemplate = new coinFuncs.BlockTemplate({
+        blocktemplate_blob: blob.toString("hex"),
+        coin: "XTM-T",
+        difficulty: 1,
+        height: 302,
+        port: 18146,
+        reserved_offset: 35,
+        reward: 1,
+        seed_hash: "22".repeat(32),
+        xtm_block: { header: { nonce: "0", pow: { pow_data: [] } } }
+    });
+
+    const nextBlob = Buffer.from(blockTemplate.nextBlobHex(), "hex");
+
+    assert.equal(blockTemplate.extraNonce, 1);
+    assert.equal(nextBlob.readUInt32BE(35), 1);
+    assert.equal(nextBlob[43], 0x02);
+    assert.equal(nextBlob.subarray(44).equals(Buffer.alloc(32)), true);
+});
+
 test("BlockTemplate uses the SAL blob marker when daemon reserved offset is stale", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const marker = Buffer.concat([Buffer.from([0x02, 17]), Buffer.alloc(17, 0)]);
