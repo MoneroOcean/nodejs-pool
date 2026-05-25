@@ -24,6 +24,7 @@ const XTM_T_POW_ALGO_OFFSET = XTM_T_NONCE_OFFSET + XTM_T_NONCE_SIZE;
 const XTM_T_POW_DATA_OFFSET = XTM_T_POW_ALGO_OFFSET + 1;
 const XTM_T_POW_DATA_SIZE = 32;
 const XTM_T_RANDOMXT_POW_ALGO = 2;
+const XTM_T_POOL_RESERVED_OFFSET = XTM_T_POW_DATA_OFFSET;
 const TARI_SOURCE_CANDIDATES = [
     process.env.POOL_TEST_TARI_SOURCE_DIR,
     process.env.TARI_SOURCE_DIR,
@@ -106,6 +107,12 @@ function readRustIntegerConst(source, name) {
     const match = source.match(new RegExp("\\bconst\\s+" + name + "\\s*:\\s*[^=]+\\s*=\\s*(\\d+)\\s*;"));
     assert.notEqual(match, null, "missing Tari source const " + name);
     return Number(match[1]);
+}
+
+function readRustMatchArm(source, currentArm, nextArm) {
+    const match = source.match(new RegExp(currentArm + "\\s*=>\\s*\\{([\\s\\S]*?)\\n\\s*\\},\\n\\s*" + nextArm));
+    assert.notEqual(match, null, "missing Tari source match arm " + currentArm);
+    return match[1];
 }
 
 test.describe("pool coin helpers: submitters", { concurrency: false }, () => {
@@ -432,6 +439,7 @@ test("erg mining.submit parser falls back to nonce suffix for standard submits",
 test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
+    assert.equal(xtmTPool.disableProxyNonce, false);
     const miningHash = Buffer.from("31".repeat(XTM_T_MINING_HASH_SIZE), "hex");
     const xtmBlock = {
         header: {
@@ -445,7 +453,7 @@ test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () =
         difficulty: 1,
         height: 271620,
         port: 18146,
-        reserved_offset: XTM_T_NONCE_OFFSET,
+        reserved_offset: XTM_T_POOL_RESERVED_OFFSET,
         reward: 1,
         seed_hash: "22".repeat(32),
         xtm_block: xtmBlock
@@ -454,6 +462,8 @@ test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () =
     const minerBlob = Buffer.from(blockTemplate.nextBlobHex(), "hex");
 
     minerBlob.writeUInt32BE(0x01020304, XTM_T_MINER_NONCE_OFFSET);
+    minerBlob.writeUInt32BE(0xaabbccdd, blockTemplate.clientPoolLocation);
+    minerBlob.writeUInt32BE(0xeeff0011, blockTemplate.clientNonceLocation);
 
     xtmTPool.submitBlockRpc.call(xtmTPool, {
         blockData: minerBlob,
@@ -470,14 +480,45 @@ test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () =
     assert.equal(calls[0].port, 18146);
     assert.equal(calls[0].method, "SubmitBlock");
     assert.equal(calls[0].params.header.nonce, minerBlob.readBigUInt64BE(XTM_T_NONCE_OFFSET).toString(10));
-    assert.deepEqual(calls[0].params.header.pow.pow_data, []);
+    assert.equal(minerBlob[XTM_T_POW_ALGO_OFFSET], XTM_T_RANDOMXT_POW_ALGO);
+    assert.deepEqual(calls[0].params.header.pow.pow_data, [...minerBlob.subarray(XTM_T_POW_DATA_OFFSET)]);
     assert.equal(reconstructXtmTMiningBlob(miningHash, calls[0].params).equals(minerBlob), true);
     assert.notStrictEqual(calls[0].params, xtmBlock);
     assert.equal(xtmBlock.header.nonce, "0");
     assert.deepEqual(xtmBlock.header.pow.pow_data, [7, 7, 7]);
 });
 
-test("xtm-t layout matches Tari source constants when source is available", (t) => {
+test("xtm-t SubmitBlock rejects a blob with a corrupted pow_algo byte", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
+    const miningHash = Buffer.from("31".repeat(XTM_T_MINING_HASH_SIZE), "hex");
+    const blockData = createXtmTMiningBlob(miningHash, 1n);
+    let reply = null;
+
+    blockData[XTM_T_POW_ALGO_OFFSET] = 0xaa;
+
+    xtmTPool.submitBlockRpc.call(xtmTPool, {
+        blockData,
+        blockTemplate: {
+            port: 18146,
+            xtm_block: { header: { nonce: "0", pow: { pow_data: [] } } }
+        },
+        replyFn(rpcResult, rpcStatus) {
+            reply = { rpcResult, rpcStatus };
+        },
+        support: {
+            rpcPortDaemon() {
+                throw new Error("corrupted XTM-T pow_algo must not be submitted");
+            }
+        }
+    });
+
+    assert.equal(reply.rpcStatus, 0);
+    assert.equal(reply.rpcResult.error.code, -1);
+    assert.match(reply.rpcResult.error.message, /Invalid XTM-T pow_algo byte 170; expected 2/);
+});
+
+test("xtm-t layout keeps pool reserve clear of Tari nonce and pow_algo", (t) => {
     const innerPath = findTariSourceFile(path.join("applications", "minotari_node", "src", "xmrig_proxy", "inner.rs"));
     if (!innerPath) {
         t.skip("Tari source tree not available; set POOL_TEST_TARI_SOURCE_DIR to enable this contract check.");
@@ -488,12 +529,22 @@ test("xtm-t layout matches Tari source constants when source is available", (t) 
     assert.equal(readRustIntegerConst(innerSource, "TARI_BLOB_RESERVED_OFFSET"), XTM_T_NONCE_OFFSET);
     assert.equal(readRustIntegerConst(innerSource, "TARI_MINING_BLOB_SIZE"), XTM_T_POW_DATA_OFFSET + XTM_T_POW_DATA_SIZE);
     assert.equal(readRustIntegerConst(innerSource, "POW_ALGO_RANDOMXT"), XTM_T_RANDOMXT_POW_ALGO);
+    assert.equal(XTM_T_POOL_RESERVED_OFFSET, XTM_T_POW_DATA_OFFSET);
+    assert.equal(XTM_T_POOL_RESERVED_OFFSET >= XTM_T_POW_ALGO_OFFSET + 1, true);
+    assert.equal(XTM_T_POOL_RESERVED_OFFSET + 16 <= XTM_T_POW_DATA_OFFSET + XTM_T_POW_DATA_SIZE, true);
 
     const helpersPath = findTariSourceFile(path.join("base_layer", "core", "src", "proof_of_work", "monero_rx", "helpers.rs"));
     if (!helpersPath) return;
     const helpersSource = fs.readFileSync(helpersPath, "utf8");
     assert.match(helpersSource, /nonce\.to_be_bytes\(\)/);
     assert.match(helpersSource, /pow\.to_bytes\(\)/);
+
+    const validatorPath = findTariSourceFile(path.join("base_layer", "core", "src", "validation", "header", "header_full_validator.rs"));
+    if (!validatorPath) return;
+    const validatorSource = fs.readFileSync(validatorPath, "utf8");
+    const randomXtArm = readRustMatchArm(validatorSource, "PowAlgorithm::RandomXT", "PowAlgorithm::Sha3x");
+    assert.match(randomXtArm, /pow\.pow_data\.len\(\)\s*>\s*32/);
+    assert.doesNotMatch(randomXtArm, /is_empty/);
 });
 
 test("xtm submit and verify handlers preserve the pre-refactor special-case tari semantics", () => {
@@ -640,6 +691,16 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
     assert.equal(xtmTPool.acceptSubmittedBlock({ rpcResult: { result: { block_hash: "11".repeat(32) } } }), true);
     assert.equal(xtmTPool.acceptSubmittedBlock({ rpcResult: { result: { status: "OK" } } }), false);
     assert.equal(xtmTPool.acceptSubmittedBlock({ rpcResult: { result: { status: "FAILED" } } }), false);
+    assert.equal(xtmTPool.submissionKey({
+        job: { usesProxyNonce: false },
+        miner: { proxy: true },
+        params: { nonce: "01020304", poolNonce: 5, workerNonce: 6 }
+    }), "01020304");
+    assert.equal(xtmTPool.submissionKey({
+        job: { usesProxyNonce: true },
+        miner: { proxy: true },
+        params: { nonce: "01020304", poolNonce: 5, workerNonce: 6 }
+    }), "01020304_5_6");
     assert.equal(xtmCPool.acceptSubmittedBlock({ rpcResult: { result: { block_hash: [1, 2, 3] } } }), true);
     assert.equal(xtmCPool.acceptSubmittedBlock({ rpcResult: { result: { status: "OK" } } }), false);
 

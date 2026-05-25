@@ -8,6 +8,7 @@ const process = require("node:process");
 const test = require("node:test");
 
 const loadRegistry = require("../../../lib/coins/core/registry.js");
+const createMinerJobs = require("../../../lib/pool/jobs.js");
 const {
     MAIN_PORT,
     createBaseTemplate,
@@ -150,7 +151,7 @@ test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex c
     );
 });
 
-test("BlockTemplate keeps XTM-T pool nonce in the Tari nonce prefix", () => {
+test("BlockTemplate keeps XTM-T pool/proxy nonce inside RandomXT pow_data", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const blob = Buffer.concat([
         Buffer.alloc(3),
@@ -165,7 +166,7 @@ test("BlockTemplate keeps XTM-T pool nonce in the Tari nonce prefix", () => {
         difficulty: 1,
         height: 302,
         port: 18146,
-        reserved_offset: 35,
+        reserved_offset: 44,
         reward: 1,
         seed_hash: "22".repeat(32),
         xtm_block: { header: { nonce: "0", pow: { pow_data: [] } } }
@@ -174,9 +175,99 @@ test("BlockTemplate keeps XTM-T pool nonce in the Tari nonce prefix", () => {
     const nextBlob = Buffer.from(blockTemplate.nextBlobHex(), "hex");
 
     assert.equal(blockTemplate.extraNonce, 1);
-    assert.equal(nextBlob.readUInt32BE(35), 1);
+    assert.equal(nextBlob.subarray(35, 43).equals(Buffer.alloc(8)), true);
     assert.equal(nextBlob[43], 0x02);
-    assert.equal(nextBlob.subarray(44).equals(Buffer.alloc(32)), true);
+    assert.equal(nextBlob.readUInt32BE(44), 1);
+    assert.equal(blockTemplate.disableProxyNonce, false);
+    assert.equal(blockTemplate.clientPoolLocation, 52);
+    assert.equal(blockTemplate.clientNonceLocation, 56);
+});
+
+test("proxy miners use standard jobs when proxy nonce layout is disabled", () => {
+    const originalGetPoolProfile = global.coinFuncs.getPoolProfile;
+    const calls = [];
+    const validJobs = [];
+    const poolSettings = {
+        sharedTemplateNonces: false,
+        disableProxyNonce: true,
+        useEthJobId: false,
+        buildJobPayload(ctx) {
+            calls.push("standard");
+            assert.equal(ctx.newJob.usesProxyNonce, false);
+            return { blob: ctx.blobHex, job_id: ctx.newJob.id };
+        },
+        buildProxyJobPayload() {
+            calls.push("proxy");
+            return {};
+        }
+    };
+    const miner = {
+        proxy: true,
+        jobLastBlockHash: null,
+        newDiffToSet: null,
+        newDiffRecommendation: null,
+        difficulty: 50,
+        curr_coin_hash_factor: 1,
+        curr_coin_min_diff: 1,
+        cachedJob: null,
+        validJobs: {
+            enq(job) {
+                validJobs.push(job);
+            }
+        }
+    };
+    let nextBlobCalls = 0;
+    let childBlobCalls = 0;
+    const blockTemplate = {
+        idHash: "xtm-t-no-proxy",
+        difficulty: 100,
+        height: 302,
+        seed_hash: "22".repeat(32),
+        port: 18146,
+        block_version: 0,
+        extraNonce: 0,
+        disableProxyNonce: true,
+        clientPoolLocation: 43,
+        clientNonceLocation: 47,
+        nextBlobHex() {
+            nextBlobCalls += 1;
+            this.extraNonce += 1;
+            return "aa";
+        },
+        nextBlobWithChildNonceHex() {
+            childBlobCalls += 1;
+            return "bb";
+        }
+    };
+
+    try {
+        global.coinFuncs.getPoolProfile = function getPoolProfile() {
+            return { blobType: 106, pool: poolSettings };
+        };
+        createMinerJobs({})(miner, {
+            protoVersion: 1,
+            getCoinJobParams() {},
+            getNewId() { return "job-1"; },
+            getNewEthJobId() { return "eth-job-1"; },
+            getTargetHex() { return "00".repeat(32); },
+            getRavenTargetHex() { return "00".repeat(32); },
+            toBigInt(value) { return BigInt(value); },
+            divideBaseDiff() { return 1; }
+        });
+
+        const payload = miner.getCoinJob("XTM-T", { bt: blockTemplate, algo_name: "rx/0", coinHashFactor: 1 });
+
+        assert.deepEqual(payload, { blob: "aa", job_id: "job-1" });
+        assert.deepEqual(calls, ["standard"]);
+        assert.equal(nextBlobCalls, 1);
+        assert.equal(childBlobCalls, 0);
+        assert.equal(validJobs.length, 1);
+        assert.equal(validJobs[0].usesProxyNonce, false);
+        assert.equal(validJobs[0].clientPoolLocation, undefined);
+        assert.equal(validJobs[0].clientNonceLocation, undefined);
+    } finally {
+        global.coinFuncs.getPoolProfile = originalGetPoolProfile;
+    }
 });
 
 test("BlockTemplate uses the SAL blob marker when daemon reserved offset is stale", () => {
