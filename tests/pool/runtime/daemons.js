@@ -366,6 +366,117 @@ test("non-xmr submit failures are not retried", async () => {
     }
 });
 
+test("submitter exceptions are reported as submit failures instead of escaping", async () => {
+    const original = {
+        coinFuncs: global.coinFuncs,
+        config: global.config,
+        consoleError: console.error,
+        database: global.database,
+        protos: global.protos,
+        setTimeout: global.setTimeout,
+        support: global.support
+    };
+    const blockData = Buffer.from("01020304", "hex");
+    const submittedHash = Buffer.from("22".repeat(32), "hex");
+    const submitParams = { nonce: "a51e0200" };
+    const errors = [];
+    const emails = [];
+    let submitCalls = 0;
+    let submitCallbackValue = null;
+
+    global.config = {
+        daemon: { port: MAIN_PORT },
+        general: { adminEmail: "ops@example.com" },
+        hostname: "pool.test",
+        pool: { trustedMiners: false, trustThreshold: 1, trustMin: 0 }
+    };
+    global.database = {};
+    global.protos = { Block: { encode(value) { return value; } }, AltBlock: { encode(value) { return value; } } };
+    global.support = {
+        sendAdminFyi(key, subject, body) {
+            emails.push({ key, subject, body });
+            return true;
+        }
+    };
+    global.coinFuncs = {
+        convertBlob(blob) { return blob; },
+        slowHashBuff() { return submittedHash; },
+        getPortLastBlockHeader(_port, callback) { callback(null, { height: 199 }); },
+        getPoolProfile() {
+            return {
+                pool: {
+                    acceptSubmittedBlock() { return false; },
+                    submitBlockRpc(options) {
+                        submitCalls += 1;
+                        assert.strictEqual(options.params, submitParams);
+                        throw new RangeError("submitter boom");
+                    }
+                }
+            };
+        }
+    };
+    global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
+        fn(...args);
+        return { unref() {} };
+    };
+    console.error = function captureExpectedError(message) {
+        errors.push(message);
+    };
+
+    try {
+        const helpers = createShareBlockHelpers({
+            crypto,
+            debug() {},
+            divideBaseDiff() { return 100; },
+            bigIntFromBuffer() { return 1n; },
+            bigIntToBuffer(value) { return value; },
+            toBigInt(value) { return BigInt(value); },
+            baseRavenDiff: 1,
+            anchorState: { current: 0 },
+            activeBlockTemplates: { ETH: { height: 200 } },
+            walletTrust: {},
+            processSend() {},
+            clearWalletSessionTrust() {},
+            getThreadName() { return ""; },
+            formatCoinPort(coin, port) { return coin + ":" + port; },
+            formatPoolEvent(label, details) { return label + ": " + JSON.stringify(details); },
+            getLastMinerLogTime() { return {}; },
+            setLastMinerLogTime() {}
+        });
+
+        helpers.submitBlock(
+            { logString: "miner-1", payout: ETH_WALLET, poolTypeEnum: 0, trust: { trust: 0 } },
+            { coin: "ETH" },
+            { coin: "ETH", port: ETH_PORT, height: 200, difficulty: 1 },
+            blockData,
+            submittedHash,
+            100,
+            true,
+            true,
+            null,
+            function onSubmitDone(value) {
+                submitCallbackValue = value;
+            },
+            submitParams
+        );
+
+        assert.equal(submitCalls, 1);
+        assert.equal(submitCallbackValue, false);
+        assert.match(errors.join("\n"), /Block submit exception/);
+        assert.match(errors.join("\n"), /submitter boom/);
+        assert.equal(emails.length, 1);
+        assert.match(emails[0].body, /SubmitBlock exception: submitter boom/);
+    } finally {
+        global.coinFuncs = original.coinFuncs;
+        global.config = original.config;
+        global.database = original.database;
+        global.protos = original.protos;
+        global.setTimeout = original.setTimeout;
+        global.support = original.support;
+        console.error = original.consoleError;
+    }
+});
+
 test("block-submit test mode stops daemon-first submits once the marker is removed", async () => {
     const { runtime } = await startHarness({
         templates: createBlockSubmitTemplates("main-block-submit-test-mode-off")

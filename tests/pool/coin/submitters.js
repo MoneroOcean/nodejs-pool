@@ -488,6 +488,53 @@ test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () =
     assert.deepEqual(xtmBlock.header.pow.pow_data, [7, 7, 7]);
 });
 
+test("xtm-t legacy nonce read reports non-integer indexed values", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
+    const miningHash = Buffer.from("31".repeat(XTM_T_MINING_HASH_SIZE), "hex");
+    const blockData = createXtmTMiningBlob(miningHash, 0n, [4, 5, 6]);
+    const spoofedBlockData = new Proxy(blockData, {
+        get(target, prop) {
+            if (prop === "slice") return target.slice.bind(target);
+            if (prop === String(XTM_T_MINER_NONCE_OFFSET)) return 0xa5;
+            if (prop === String(XTM_T_MINER_NONCE_OFFSET + 1)) return 0x1e;
+            if (prop === String(XTM_T_MINER_NONCE_OFFSET + 2)) return 0x01;
+            if (prop === String(XTM_T_MINER_NONCE_OFFSET + 3)) return 255.99999856948853;
+            return Reflect.get(target, prop, target);
+        }
+    });
+
+    Buffer.from("a51e0200", "hex").copy(blockData, XTM_T_MINER_NONCE_OFFSET);
+    assert.equal(Buffer.isBuffer(spoofedBlockData), true);
+    assert.equal(Number.isInteger(spoofedBlockData.readUInt32BE(XTM_T_MINER_NONCE_OFFSET)), false);
+
+    assert.throws(function submitSpoofedXtmBlob() {
+        xtmTPool.submitBlockRpc.call(xtmTPool, {
+            blockData: spoofedBlockData,
+            blockTemplate: {
+                port: 18146,
+                reserved_offset: XTM_T_POOL_RESERVED_OFFSET,
+                xtm_block: { header: { nonce: "0", pow: { pow_data: [] } } }
+            },
+            replyFn() {},
+            support: {
+                rpcPortDaemon() {
+                    throw new Error("non-integer legacy nonce read must fail before submit");
+                }
+            }
+        });
+    }, function checkError(error) {
+        assert.match(error.message, /XTM legacy nonce read XTM-T returned non-integer uint32/);
+        assert.match(error.message, /lo=2770207231\.9999986/);
+        assert.match(error.message, /isBuffer:true/);
+        assert.match(error.message, /readUInt32BEIsBufferProto:true/);
+        assert.match(error.message, /42:number:255\.99999856948853:integer=false/);
+        assert.match(error.message, /backingDataViewLo=2770207232/);
+        assert.match(error.message, /backingBytes=0,0,0,0,165,30,2,0/);
+        return true;
+    });
+});
+
 test("xtm-t SubmitBlock rejects a blob with a corrupted pow_algo byte", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
@@ -577,9 +624,9 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
         }
     };
 
-    blockDataRx.writeUInt32BE(7, 3 + 32);
-    blockDataRx.writeUInt32BE(1234, 3 + 32 + 4);
-    blockDataRx[3 + 32 + 8] = 2;
+    blockDataRx.writeUInt32BE(7, XTM_T_NONCE_OFFSET);
+    blockDataRx.writeUInt32BE(1234, XTM_T_MINER_NONCE_OFFSET);
+    blockDataRx[XTM_T_POW_ALGO_OFFSET] = XTM_T_RANDOMXT_POW_ALGO;
     blockDataC29.writeBigUInt64BE(15n, 0);
 
     xtmTPool.resolveSubmittedBlockHash({
