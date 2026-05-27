@@ -104,6 +104,8 @@ test("fixDaemonIssue invokes fix_daemon with structured arguments", () => {
             "--expected-xtm-height", "706"
         ]);
         assert.match(global.support.emails[0].subject, /xtm-lag/);
+        assert.match(global.support.emails[0].body, /XMR height 500 expected unknown/);
+        assert.match(global.support.emails[0].body, /XTM height 700 expected 706/);
     } finally {
         childProcess.execFile = originalExecFile;
     }
