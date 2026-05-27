@@ -17,8 +17,8 @@ Usage: fix_daemon.sh [--dry-run] <reason> [options]
 Reasons:
   xmr-lag             restart monerod and xtm_mm
   proxy-unhealthy     restart monerod and xtm_mm
-  xtm-lag             restart local xtm if present and xtm_mm
-  template-stuck      restart monerod, local xtm if present, and xtm_mm
+  xtm-lag             restart local xtm if present/enabled and xtm_mm
+  template-stuck      restart monerod, local xtm if present/enabled, and xtm_mm
 
 Options:
   --port <port>
@@ -108,6 +108,10 @@ service_exists() {
   systemctl cat "$1" >/dev/null 2>&1
 }
 
+service_enabled() {
+  systemctl is-enabled "$1" >/dev/null 2>&1
+}
+
 run_service() {
   local action="$1"
   local unit="$2"
@@ -127,6 +131,10 @@ run_optional_service() {
     return 0
   fi
   if service_exists "$unit"; then
+    if [ "$action" != "stop" ] && ! service_enabled "$unit"; then
+      log "skipping $action $unit because the unit is disabled"
+      return 0
+    fi
     run_service "$action" "$unit"
   else
     log "skipping $action $unit because the unit is not present"
