@@ -234,6 +234,34 @@ test("behind-block emails use concise pool node labels", () => {
     });
 });
 
+test("monitorNodes includes header failure details in daemon emails", async () => {
+    const emails = [];
+    createTestEnvironment({
+        daemonPort: 18081,
+        mysqlQuery(sql) {
+            if (sql === "SELECT blockID, xtmBlockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") {
+                return [];
+            }
+            throw new Error("Unexpected SQL: " + sql);
+        }
+    });
+    global.support.sendEmail = function (to, subject, body) {
+        emails.push({ to, subject, body });
+    };
+    global.coinFuncs.getPortLastBlockHeaderMM = function (_port, callback) {
+        callback(new Error("merged mining XTM-T last block header failed on port 18146: getlastblockheader timeout"));
+    };
+
+    const poolStats = loadPoolStats();
+    for (let i = 0; i < 5; ++i) await poolStats.monitorNodes();
+
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].to, "admin@example.com");
+    assert.match(emails[0].subject, /18081/);
+    assert.match(emails[0].body, /18146/);
+    assert.match(emails[0].body, /getlastblockheader timeout/);
+});
+
 test.beforeEach(() => {
     delete require.cache[POOL_STATS_PATH];
     originalConsoleLog = console.log;

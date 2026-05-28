@@ -111,6 +111,32 @@ test("fixDaemonIssue invokes fix_daemon with structured arguments", () => {
     }
 });
 
+test("getPortLastBlockHeaderMM labels merged-mining header failures", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const mainPort = coinFuncs.COIN2PORT("");
+    const mmPort = coinFuncs.COIN2PORT("XTM-T");
+    const originalPort = global.config.daemon.port;
+    const originalHeader = global.coinFuncs.getPortLastBlockHeader;
+    global.config.daemon.port = mainPort;
+    global.coinFuncs.getPortLastBlockHeader = function (port, callback) {
+        if (port === mainPort) return callback(null, { height: 501 });
+        if (port === mmPort) return callback(new Error("getlastblockheader timeout"));
+        return callback(new Error("unexpected port " + port));
+    };
+
+    try {
+        coinFuncs.getPortLastBlockHeaderMM(mainPort, function (error, body) {
+            assert.match(error.message, /merged mining XTM-T/);
+            assert.match(error.message, new RegExp(String(mmPort)));
+            assert.match(error.message, /getlastblockheader timeout/);
+            assert.deepEqual(body, { height: 501 });
+        });
+    } finally {
+        global.config.daemon.port = originalPort;
+        global.coinFuncs.getPortLastBlockHeader = originalHeader;
+    }
+});
+
 test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex calls", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const template = createBaseTemplate({
