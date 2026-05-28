@@ -15,10 +15,10 @@ usage() {
 Usage: fix_daemon.sh [--dry-run] <reason> [options]
 
 Reasons:
-  xmr-lag             restart monerod and xtm_mm
-  proxy-unhealthy     restart monerod and xtm_mm
-  xtm-lag             restart local xtm if present/enabled and xtm_mm
-  template-stuck      restart monerod, local xtm if present/enabled, and xtm_mm
+  xmr-lag             restart monerod, relay-pool if present, and xtm_mm if present
+  proxy-unhealthy     restart monerod, relay-pool if present, and xtm_mm if present
+  xtm-lag             restart local xtm if present/enabled, relay-pool if present, and xtm_mm if present
+  template-stuck      restart monerod, local xtm if present/enabled, relay-pool if present, and xtm_mm if present
 
 Options:
   --port <port>
@@ -141,6 +141,14 @@ run_optional_service() {
   fi
 }
 
+restart_relay_pool() {
+  run_optional_service restart relay-pool.service
+}
+
+run_xtm_mm_service() {
+  run_optional_service "$1" xtm_mm.service
+}
+
 wait_json_rpc() {
   local name="$1"
   local url="$2"
@@ -201,28 +209,31 @@ log "starting $reason recovery$(describe_context)"
 
 case "$reason" in
   xmr-lag|proxy-unhealthy)
-    run_service stop xtm_mm.service || true
+    run_xtm_mm_service stop || true
     run_service restart monero.service
+    restart_relay_pool
     wait_monero_rpc || true
-    run_service start xtm_mm.service
+    run_xtm_mm_service start
     ;;
   xtm-lag)
-    run_service stop xtm_mm.service || true
+    run_xtm_mm_service stop || true
     run_optional_service restart xtm.service
+    restart_relay_pool
     if service_exists xtm.service || [ "$dry_run" -eq 1 ]; then
       wait_tari_rpc || true
     fi
-    run_service start xtm_mm.service
+    run_xtm_mm_service start
     ;;
   template-stuck|unknown|*)
-    run_service stop xtm_mm.service || true
+    run_xtm_mm_service stop || true
     run_service restart monero.service
     run_optional_service restart xtm.service
+    restart_relay_pool
     wait_monero_rpc || true
     if service_exists xtm.service || [ "$dry_run" -eq 1 ]; then
       wait_tari_rpc || true
     fi
-    run_service start xtm_mm.service
+    run_xtm_mm_service start
     ;;
 esac
 
