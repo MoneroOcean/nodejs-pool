@@ -488,27 +488,31 @@ test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () =
     assert.deepEqual(xtmBlock.header.pow.pow_data, [7, 7, 7]);
 });
 
-test("xtm-t legacy nonce read reports non-integer indexed values", () => {
+test("xtm-t legacy nonce submit uses backing bytes when Buffer uint32 reads are unsafe", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
     const miningHash = Buffer.from("31".repeat(XTM_T_MINING_HASH_SIZE), "hex");
     const blockData = createXtmTMiningBlob(miningHash, 0n, [4, 5, 6]);
+    const calls = [];
+    const originalConsoleWarn = console.warn;
+    const warnings = [];
+    const emails = global.support.emails;
     const spoofedBlockData = new Proxy(blockData, {
         get(target, prop) {
             if (prop === "slice") return target.slice.bind(target);
-            if (prop === String(XTM_T_MINER_NONCE_OFFSET)) return 0xa5;
-            if (prop === String(XTM_T_MINER_NONCE_OFFSET + 1)) return 0x1e;
-            if (prop === String(XTM_T_MINER_NONCE_OFFSET + 2)) return 0x01;
-            if (prop === String(XTM_T_MINER_NONCE_OFFSET + 3)) return 255.99999856948853;
+            if (prop === String(XTM_T_MINER_NONCE_OFFSET)) return 130.99999999999991;
             return Reflect.get(target, prop, target);
         }
     });
 
-    Buffer.from("a51e0200", "hex").copy(blockData, XTM_T_MINER_NONCE_OFFSET);
+    Buffer.from("83304400", "hex").copy(blockData, XTM_T_MINER_NONCE_OFFSET);
     assert.equal(Buffer.isBuffer(spoofedBlockData), true);
     assert.equal(Number.isInteger(spoofedBlockData.readUInt32BE(XTM_T_MINER_NONCE_OFFSET)), false);
+    console.warn = function captureWarn(message) {
+        warnings.push(message);
+    };
 
-    assert.throws(function submitSpoofedXtmBlob() {
+    try {
         xtmTPool.submitBlockRpc.call(xtmTPool, {
             blockData: spoofedBlockData,
             blockTemplate: {
@@ -518,21 +522,89 @@ test("xtm-t legacy nonce read reports non-integer indexed values", () => {
             },
             replyFn() {},
             support: {
-                rpcPortDaemon() {
-                    throw new Error("non-integer legacy nonce read must fail before submit");
+                rpcPortDaemon(port, method, params) {
+                    calls.push({ port, method, params });
                 }
             }
         });
-    }, function checkError(error) {
-        assert.match(error.message, /XTM legacy nonce read XTM-T returned non-integer uint32/);
-        assert.match(error.message, /lo=2770207231\.9999986/);
-        assert.match(error.message, /isBuffer:true/);
-        assert.match(error.message, /readUInt32BEIsBufferProto:true/);
-        assert.match(error.message, /42:number:255\.99999856948853:integer=false/);
-        assert.match(error.message, /backingDataViewLo=2770207232/);
-        assert.match(error.message, /backingBytes=0,0,0,0,165,30,2,0/);
-        return true;
-    });
+    } finally {
+        console.warn = originalConsoleWarn;
+    }
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].port, 18146);
+    assert.equal(calls[0].method, "SubmitBlock");
+    assert.equal(calls[0].params.header.nonce, blockData.readBigUInt64BE(XTM_T_NONCE_OFFSET).toString(10));
+    assert.deepEqual(calls[0].params.header.pow.pow_data, [...blockData.subarray(XTM_T_POW_DATA_OFFSET)]);
+    assert.match(warnings.join("\n"), /isProxy:true/);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].key, "coins:xtm-legacy-nonce-read:XTM legacy nonce read XTM-T");
+    assert.equal(emails[0].subject, "FYI: XTM legacy nonce read mismatch");
+    assert.match(emails[0].body, /isProxy:true/);
+    assert.match(emails[0].body, /legacyLo1=2200978431\.9999986/);
+    assert.match(emails[0].body, /legacyLo2=2200978431\.9999986/);
+    assert.match(emails[0].body, /indexedCalcLo:2200978431\.9999986/);
+});
+
+test("xtm-t legacy nonce submit does not depend on Buffer readUInt32BE", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const xtmTPool = coinFuncs.getPoolSettings("XTM-T");
+    const miningHash = Buffer.from("31".repeat(XTM_T_MINING_HASH_SIZE), "hex");
+    const blockData = createXtmTMiningBlob(miningHash, 0n, [4, 5, 6]);
+    const originalReadUInt32BE = Buffer.prototype.readUInt32BE;
+    const originalConsoleWarn = console.warn;
+    const calls = [];
+    const warnings = [];
+    const emails = global.support.emails;
+    let returnedBadNonceRead = false;
+
+    Buffer.from("83304400", "hex").copy(blockData, XTM_T_MINER_NONCE_OFFSET);
+    Buffer.prototype.readUInt32BE = function patchedReadUInt32BE(offset, ...args) {
+        if (this === blockData && offset === XTM_T_MINER_NONCE_OFFSET && !returnedBadNonceRead) {
+            returnedBadNonceRead = true;
+            return 2200978431.9999986;
+        }
+        return originalReadUInt32BE.call(this, offset, ...args);
+    };
+    console.warn = function captureWarn(message) {
+        warnings.push(message);
+    };
+
+    try {
+        xtmTPool.submitBlockRpc.call(xtmTPool, {
+            blockData,
+            blockTemplate: {
+                port: 18146,
+                reserved_offset: XTM_T_POOL_RESERVED_OFFSET,
+                xtm_block: { header: { nonce: "0", pow: { pow_data: [] } } }
+            },
+            replyFn() {},
+            support: {
+                rpcPortDaemon(port, method, params) {
+                    calls.push({ port, method, params });
+                }
+            }
+        });
+    } finally {
+        Buffer.prototype.readUInt32BE = originalReadUInt32BE;
+        console.warn = originalConsoleWarn;
+    }
+
+    assert.equal(calls.length, 1);
+    assert.equal(returnedBadNonceRead, true);
+    assert.equal(calls[0].params.header.nonce, blockData.readBigUInt64BE(XTM_T_NONCE_OFFSET).toString(10));
+    assert.equal(calls[0].params.header.nonce, "2200978432");
+    assert.match(warnings.join("\n"), /isProxy:false/);
+    assert.match(warnings.join("\n"), /indexed=\[35:number:0:integer=true/);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].key, "coins:xtm-legacy-nonce-read:XTM legacy nonce read XTM-T");
+    assert.equal(emails[0].subject, "FYI: XTM legacy nonce read mismatch");
+    assert.match(emails[0].body, /legacyLo1=2200978431\.9999986/);
+    assert.match(emails[0].body, /legacyLo2=2200978432/);
+    assert.match(emails[0].body, /isProxy:false/);
+    assert.match(emails[0].body, /indexed=\[35:number:0:integer=true/);
+    assert.match(emails[0].body, /indexedCalcLo:2200978432/);
+    assert.match(emails[0].body, /readUInt32BEIsOriginal:false/);
 });
 
 test("xtm-t SubmitBlock rejects a blob with a corrupted pow_algo byte", () => {
