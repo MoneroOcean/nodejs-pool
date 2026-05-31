@@ -373,6 +373,57 @@ test("BTC-style block rewards only credit coinbase outputs paid to the pool addr
     }
 });
 
+test("BTC-style network tip rewards fall back to max coinbase output for history sampling", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const cases = [
+        { coin: "RVN", port: 8766, addressKey: "address_8766" },
+        { coin: "XNA", port: 19001, addressKey: "address_19001" }
+    ];
+    const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
+
+    try {
+        for (const entry of cases) {
+            const poolAddress = "POOL_" + entry.coin + "_ADDRESS";
+            global.config.pool[entry.addressKey] = poolAddress;
+            global.support.rpcPortDaemon2 = function rpcPortDaemon2(port, method, params, callback) {
+                assert.equal(port, entry.port);
+                assert.equal(method, "");
+                assert.deepEqual(params, { method: "getblock", params: [entry.coin.toLowerCase() + "-tip", 2] });
+                callback({
+                    result: {
+                        difficulty: 2,
+                        tx: [{
+                            vout: [
+                                { n: 0, value: 12.5, scriptPubKey: { addresses: ["OTHER_MINER"] } },
+                                { n: 1, value: 3, scriptPubKey: { address: poolAddress } },
+                                { n: 2, value: 1.25, scriptPubKey: { addresses: ["GOVERNANCE_ADDRESS"] } }
+                            ]
+                        }]
+                    }
+                });
+            };
+
+            try {
+                const header = await new Promise((resolve, reject) => {
+                    coinFuncs.getPortAnyBlockHeaderByHash(entry.port, entry.coin.toLowerCase() + "-tip", false, (err, body) => {
+                        if (err) return reject(new Error("unexpected " + entry.coin + " network tip header error"));
+                        return resolve(body);
+                    });
+                });
+
+                assert.equal(header.reward, 1250000000);
+            } finally {
+                delete global.config.pool[entry.addressKey];
+            }
+        }
+    } finally {
+        global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
+        cases.forEach(function clearAddress(entry) {
+            delete global.config.pool[entry.addressKey];
+        });
+    }
+});
+
 test("BlockTemplate derives dual-main candidate difficulty from the lowest chain difficulty", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const originalGetAuxChainXTM = global.coinFuncs.getAuxChainXTM;
