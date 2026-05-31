@@ -62,7 +62,8 @@ function normalizeBatches(entry) {
                 blockIds: Array.isArray(batch && batch.blockIds)
                     ? batch.blockIds.map(function normalizeId(blockId) { return Number(blockId); }).filter(Number.isFinite)
                     : [],
-                createdAt: Number(batch && batch.createdAt) || 0
+                createdAt: Number(batch && batch.createdAt) || 0,
+                txHash: typeof batch?.txHash === "string" ? batch.txHash : ""
             };
         }).filter(function keepBatch(batch) {
             return batch.amount > 0;
@@ -87,6 +88,9 @@ function summarizeEntry(port, entry, blockLookup) {
     const totalAmount = batches.reduce(function sum(total, batch) {
         return total + batch.amount;
     }, 0);
+    const txHashes = batches.map(function mapTx(batch) {
+        return batch.txHash;
+    }).filter(Boolean);
     return {
         port: String(port),
         coin: formatCoin(port),
@@ -96,7 +100,8 @@ function summarizeEntry(port, entry, blockLookup) {
         baseline: formatAmount(Number(entry && entry.balanceBaseline) || 0, port),
         created_at: firstCreatedAt ? new Date(firstCreatedAt).toISOString() : "unknown",
         first_height: heights.length ? heights[0] : null,
-        last_height: heights.length ? heights[heights.length - 1] : null
+        last_height: heights.length ? heights[heights.length - 1] : null,
+        txs: txHashes.join(",")
     };
 }
 
@@ -109,6 +114,7 @@ function printSummary(summary) {
         " amount=" + summary.amount +
         " baseline=" + summary.baseline +
         " created_at=" + summary.created_at +
+        (summary.txs ? " txs=" + summary.txs : "") +
         (summary.first_height !== null ? " first_height=" + summary.first_height : "") +
         (summary.last_height !== null ? " last_height=" + summary.last_height : "")
     );
