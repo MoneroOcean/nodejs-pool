@@ -157,6 +157,9 @@ test("kawpow submit verifies the recomputed mixhash before crediting shares", as
         assert.equal(forgedSubmitReply.error.message, "Low difficulty share");
         assert.equal(forgedSubmitReply.result, undefined);
         assert.equal(database.shares.length, 1);
+        const expectedRawShares = global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT) * 0.01;
+        assert.ok(Math.abs(database.shares[0].payload.raw_shares - expectedRawShares) < 512);
+        assert.equal(Number(database.shares[0].payload.shares2), Math.floor(expectedRawShares));
         assert.equal(runtime.getState().shareStats.normalShares, 1);
         assert.equal(runtime.getState().shareStats.invalidShares, 1);
     } finally {
