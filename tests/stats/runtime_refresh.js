@@ -192,6 +192,11 @@ function createTestEnvironment(options = {}) {
         getPortLastBlockHeader(_port, callback) {
             callback(null, { height: 10 });
         },
+        getPoolHashesPerDifficulty(port) {
+            const scales = options.hashesPerDifficultyByPort || {};
+            const scale = scales[port] || scales[String(port)] || 1;
+            return Number.isFinite(Number(scale)) && Number(scale) > 0 ? Number(scale) : 1;
+        },
         fixDaemonIssue() {}
     };
 
@@ -442,6 +447,9 @@ test("startPoolStats initializes pool and network caches without waiting for pri
     createTestEnvironment({
         daemonPort: "18000",
         ports: ["18000", "18081"],
+        hashesPerDifficultyByPort: {
+            18081: 1000
+        },
         caches: {
             global_stats: { hash: 111, minerCount: 5 },
             global_stats2: { totalHashes: 1000, roundHashes: 200 },
@@ -552,7 +560,7 @@ test("startPoolStats initializes pool and network caches without waiting for pri
             ts: 1234
         },
         18081: {
-            difficulty: 100,
+            difficulty: 100000,
             hash: "aa",
             height: 10,
             value: 2,
