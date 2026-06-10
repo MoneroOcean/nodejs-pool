@@ -221,6 +221,7 @@ function createCoinFuncsStub() {
         [MAIN_PORT]: 0,
         [ETH_PORT]: 101
     };
+    const ravenHashesPerDifficulty = realCoinFuncs.getPoolHashesPerDifficulty(REAL_RAVEN_PROFILE_PORT);
 
     function resolvePortBlobType(context, port, version) {
         if (context && typeof context.portBlobType === "function") return context.portBlobType(port, version);
@@ -349,10 +350,17 @@ function createCoinFuncsStub() {
         convertAlgosToCoinPerf(algosPerf) {
             const coinPerf = {};
             if ("rx/0" in algosPerf) coinPerf[""] = algosPerf["rx/0"];
-            if ("kawpow" in algosPerf) coinPerf.ETH = algosPerf.kawpow;
+            if ("kawpow1" in algosPerf) coinPerf.ETH = algosPerf.kawpow1;
+            else if ("kawpow4" in algosPerf) coinPerf.ETH = algosPerf.kawpow4 * ravenHashesPerDifficulty;
+            else if ("kawpow" in algosPerf) coinPerf.ETH = algosPerf.kawpow * ravenHashesPerDifficulty;
             if ("ethash" in algosPerf) coinPerf.ETH = algosPerf.ethash;
             if ("etchash" in algosPerf) coinPerf.ETH = algosPerf.etchash;
             return coinPerf;
+        },
+        getPoolHashesPerDifficulty(key) {
+            const profile = resolveStubProfile(this, key);
+            const scale = profile && profile.pool ? Number(profile.pool.hashesPerDifficulty) : 1;
+            return Number.isFinite(scale) && scale > 0 ? scale : 1;
         },
         get_miner_agent_not_supported_algo: realCoinFuncs.get_miner_agent_not_supported_algo,
         get_miner_agent_warning_notification: realCoinFuncs.get_miner_agent_warning_notification,

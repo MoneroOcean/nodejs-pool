@@ -135,12 +135,15 @@ test("block-submit test mode still emails admin for unresolved zero hashes", asy
 });
 
 test("block submission failures reset wallet trust even when the share stays accepted", async () => {
+    const coinHashFactor = 1 / global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT);
     const { runtime } = await startHarness({
+        coinHashFactors: { ETH: coinHashFactor },
         templates: [
             createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
             {
                 ...createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-trust-reset", height: 201 }),
-                difficulty: 5
+                difficulty: 5,
+                coinHashFactor
             }
         ]
     });
@@ -214,7 +217,7 @@ test("block submission failures reset wallet trust even when the share stays acc
 
         await flushTimers();
         assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
-        assert.equal(minerA.trust.trust, 1);
+        assert.ok(Math.abs(minerA.trust.trust - 1) < 1e-12);
         assert.equal(minerB.trust.trust, 0);
         assert.equal(state.walletTrust[ETH_WALLET], 0);
     } finally {

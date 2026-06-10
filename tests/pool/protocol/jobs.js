@@ -351,7 +351,17 @@ test("kawpow submit retries verifier host errors without local fallback", async 
 });
 
 test("trusted kawpow submit uses the same trusted-share fast path as other algos", async () => {
-    const { runtime, database } = await startHarness();
+    const coinHashFactor = 1 / global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT);
+    const { runtime, database } = await startHarness({
+        coinHashFactors: { ETH: coinHashFactor },
+        templates: [
+            createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
+            {
+                ...createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 }),
+                coinHashFactor
+            }
+        ]
+    });
     const client = new JsonLineClient(ETH_PORT);
     const originalTrustedMiners = global.config.pool.trustedMiners;
     const originalRandomBytes = crypto.randomBytes;
@@ -485,7 +495,7 @@ test("getjob can switch a miner from default jobs to kawpow-style jobs when algo
         const miner = runtime.getState().activeMiners.get(socket.miner_id);
         miner.curr_coin = undefined;
         miner.curr_coin_time = 0;
-        poolModule.setTestCoinHashFactor("ETH", 5);
+        poolModule.setTestCoinHashFactor("ETH", 5 / global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT));
 
         const getjobReply = invokePoolMethod({
             socket,
@@ -729,7 +739,7 @@ test("getjob applies forged params ids to the authenticated socket miner only", 
         victim.curr_coin_time = 0;
         attacker.curr_coin = undefined;
         attacker.curr_coin_time = 0;
-        poolModule.setTestCoinHashFactor("ETH", 5);
+        poolModule.setTestCoinHashFactor("ETH", 5 / global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT));
 
         const getjobReply = invokePoolMethod({
             socket: attackerSocket,

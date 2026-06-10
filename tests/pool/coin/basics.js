@@ -235,7 +235,6 @@ test("proxy miners use standard jobs when proxy nonce layout is disabled", () =>
         newDiffToSet: null,
         newDiffRecommendation: null,
         difficulty: 50,
-        curr_coin_hash_factor: 1,
         curr_coin_min_diff: 1,
         cachedJob: null,
         validJobs: {
@@ -500,21 +499,33 @@ test("BlockTemplate uses hash-only fast path for extra-nonce templates without a
 
 test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
-    const perf = coinFuncs.convertAlgosToCoinPerf({
+    const hashesPerDifficulty = coinFuncs.getPoolHashesPerDifficulty(19001);
+    const legacyPerf = coinFuncs.convertAlgosToCoinPerf({
         "rx/0": 100,
         "argon2/chukwav2": 200,
         c29: 300,
         kawpow4: 400,
         etchash: 500
     });
+    const rawPerf = coinFuncs.convertAlgosToCoinPerf({ kawpow1: 400 });
+    const equivalentRawPerf = coinFuncs.convertAlgosToCoinPerf({ kawpow1: 400 * hashesPerDifficulty });
+    const legacyFactor = 12345;
+    const perHashFactor = legacyFactor / hashesPerDifficulty;
 
-    assert.equal(perf[""], 100);
-    assert.equal(perf.TRTL, 200);
-    assert.equal(perf.LTHN, 200);
-    assert.equal(perf["SAL"], 100);
-    assert.equal(perf["XTM-C"], 300);
-    assert.equal(perf["XNA"], 400);
-    assert.equal(perf["ETC"], 500);
+    assert.ok(hashesPerDifficulty > 0x100000000);
+    assert.equal(legacyPerf[""], 100);
+    assert.equal(legacyPerf.TRTL, 200);
+    assert.equal(legacyPerf.LTHN, 200);
+    assert.equal(legacyPerf["SAL"], 100);
+    assert.equal(legacyPerf["XTM-C"], 300);
+    assert.equal(legacyPerf.RVN, 400 * hashesPerDifficulty);
+    assert.equal(legacyPerf.XNA, 400 * hashesPerDifficulty);
+    assert.equal(legacyPerf["ETC"], 500);
+    assert.equal(rawPerf.RVN, 400);
+    assert.equal(rawPerf.XNA, 400);
+    assert.equal(legacyPerf.RVN * perHashFactor, equivalentRawPerf.RVN * perHashFactor);
+    assert.ok(Math.abs(2 * hashesPerDifficulty * perHashFactor - 2 * legacyFactor) < 1e-9);
+    assert.equal(coinFuncs.normalizeMinerAlgos({ kawpow1: 1 }).kawpow, 1);
 });
 
 test("TRTL profile verifies shares with Argon2/Chukwa variant 2", () => {
