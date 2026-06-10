@@ -324,6 +324,71 @@ test("first-share bogus block candidates are verified locally before any daemon 
     }
 });
 
+test("first-share block candidates submit to daemon when remote verifier is unavailable", async () => {
+    const { runtime, database } = await startHarness({
+        templates: [
+            {
+                ...createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-verifier-unavailable", height: 101 }),
+                difficulty: 1,
+                xmr_difficulty: 1,
+                xtm_difficulty: Number.MAX_SAFE_INTEGER
+            },
+            createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
+        ]
+    });
+    const socket = {};
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const originalVerifyRetry = global.config.pool.verifyShareRetry;
+    let verifierCalls = 0;
+
+    try {
+        global.config.pool.verifyShareRetry = { maxRetries: 1, retryDelayMs: 0 };
+        global.coinFuncs.slowHashAsync = function verifierHostError(_buffer, _blockTemplate, _wallet, callback) {
+            verifierCalls += 1;
+            callback(false, "verify-host-error");
+        };
+        global.coinFuncs.slowHashBuff = function localHashShouldNotRun() {
+            throw new Error("local slowHashBuff should not run when verifier is unavailable");
+        };
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1999,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-block-verifier-unavailable"
+            }
+        });
+
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 2000,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: loginReply.replies[0].result.job.job_id,
+                nonce: "0000000d",
+                result: VALID_RESULT
+            }
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await flushTimers();
+
+        assert.equal(verifierCalls, 2);
+        assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(global.support.rpcPortDaemonCalls.length >= 1, true);
+        assert.equal(database.blocks.length, 1);
+    } finally {
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        global.config.pool.verifyShareRetry = originalVerifyRetry;
+        await runtime.stop();
+    }
+});
+
 test("block-submit test mode caches marker changes for five seconds", async () => {
     const { runtime } = await startHarness();
     const markerPath = poolModule.getBlockSubmitTestModeState().markerPath;

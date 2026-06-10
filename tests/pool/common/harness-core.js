@@ -452,6 +452,13 @@ function createCoinFuncsStub() {
             }
             callback(VALID_RESULT);
         },
+        slowHashBuffAsync(buffer, blockTemplate, _wallet, callback, verifyContext) {
+            if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
+                callback(this.slowHashBuff(buffer, blockTemplate));
+                return;
+            }
+            callback(this.slowHashBuff(buffer, blockTemplate, verifyContext && verifyContext.nonce, verifyContext && verifyContext.mixhash));
+        },
         getBlockID() {
             return Buffer.from("aa".repeat(32), "hex");
         }
