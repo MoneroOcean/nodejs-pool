@@ -43,6 +43,48 @@ const {
     requestRawJson
 } = require("../common/runtime-helpers.js");
 
+const OK_REPLY = [{ error: null, result: { status: "OK" } }];
+const THROTTLED_REPLY = [{
+    error: "Throttled down share submission (please increase difficulty)",
+    result: undefined
+}];
+
+function submitShare(socket, id, jobId, nonce, result = VALID_RESULT) {
+    return invokePoolMethod({
+        socket,
+        id,
+        method: "submit",
+        params: { id: socket.miner_id, job_id: jobId, nonce, result }
+    });
+}
+
+function loginTrustedMiner(runtime, socket, id, worker) {
+    const loginReply = invokePoolMethod({
+        socket,
+        id,
+        method: "login",
+        params: { login: MAIN_WALLET, pass: worker }
+    });
+    const state = runtime.getState();
+    const miner = state.activeMiners.get(socket.miner_id);
+    const jobId = loginReply.replies[0].result.job.job_id;
+    state.walletTrust[MAIN_WALLET] = 1000;
+    miner.trust.trust = 1000;
+    miner.trust.check_height = 0;
+    return {
+        state,
+        miner,
+        jobId,
+        trackedJob: miner.validJobs.toarray().find((entry) => entry.id === jobId)
+    };
+}
+
+function selectVerificationThenTrust() {
+    let randomCall = 0;
+    // A failed trust decision consumes both random branches in isSafeToTrust.
+    crypto.randomBytes = () => Buffer.from([++randomCall <= 2 ? 0 : 255]);
+}
+
 test.describe("pool runtime: trust", { concurrency: false }, () => {
 test("trusted miners can take the trusted-share fast path", async () => {
     const validVector = RX0_MAIN_SHARE_VECTORS[0];
@@ -416,6 +458,236 @@ test("deferred share flush preserves trustedShare=false for verified shares", as
         assert.equal(database.shares[0].payload.trustedShare, false);
     } finally {
         global.config.pool.shareAccTime = originalShareAccTime;
+        await runtime.stop();
+    }
+});
+
+test("trusted shares wait for pending wallet verification and rerun the trust decision", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const socket = {};
+    const verifierCallbacks = [];
+    let verifierCalls = 0;
+
+    try {
+        global.config.pool.trustedMiners = true;
+        global.coinFuncs.slowHashAsync = function holdWalletVerification(_buffer, _blockTemplate, _wallet, callback) {
+            verifierCalls += 1;
+            verifierCallbacks.push(callback);
+        };
+
+        const { jobId } = loginTrustedMiner(runtime, socket, 2100, "worker-trusted-queue-rerun");
+        selectVerificationThenTrust();
+
+        const verifyingReply = submitShare(socket, 2101, jobId, "00000030");
+        const queuedReply = submitShare(socket, 2102, jobId, "00000031");
+
+        assert.equal(verifierCalls, 1);
+        assert.deepEqual(verifyingReply.replies, []);
+        assert.deepEqual(queuedReply.replies, []);
+
+        crypto.randomBytes = () => Buffer.from([0]);
+        verifierCallbacks.shift()(VALID_RESULT);
+        await flushTimers();
+
+        assert.equal(verifierCalls, 2);
+        assert.deepEqual(verifyingReply.replies, OK_REPLY);
+        assert.deepEqual(queuedReply.replies, []);
+
+        verifierCallbacks.shift()(VALID_RESULT);
+        await flushTimers();
+
+        assert.deepEqual(queuedReply.replies, OK_REPLY);
+        assert.equal(runtime.getState().shareStats.normalShares, 2);
+        assert.equal(runtime.getState().shareStats.trustedShares, 0);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
+test("failed wallet verification forces the queued generation through verification", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalBanEnabled = global.config.pool.banEnabled;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const socket = {};
+    const verifierCallbacks = [];
+    let verifierCalls = 0;
+
+    try {
+        global.config.pool.trustedMiners = true;
+        global.config.pool.banEnabled = false;
+        global.coinFuncs.slowHashAsync = function holdWalletVerification(_buffer, _blockTemplate, _wallet, callback) {
+            verifierCalls += 1;
+            verifierCallbacks.push(callback);
+        };
+
+        const { state, miner, jobId } = loginTrustedMiner(runtime, socket, 2110, "worker-trusted-queue-failed");
+        selectVerificationThenTrust();
+
+        const failedReply = submitShare(socket, 2111, jobId, "00000032");
+        const queuedReplies = ["00000033", "00000034", "00000035"].map(function submitQueuedShare(nonce, index) {
+            return submitShare(socket, 2112 + index, jobId, nonce);
+        });
+
+        assert.equal(verifierCalls, 1);
+        verifierCallbacks.shift()("ab".repeat(32));
+
+        state.walletTrust[MAIN_WALLET] = 1000;
+        miner.trust.trust = 1000;
+        crypto.randomBytes = () => Buffer.from([255]);
+
+        for (let index = 0; index < queuedReplies.length; ++index) {
+            await flushTimers();
+            assert.equal(verifierCalls, index + 2);
+            verifierCallbacks.shift()(VALID_RESULT);
+        }
+        await flushTimers();
+
+        assert.deepEqual(failedReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        for (const queuedReply of queuedReplies) {
+            assert.deepEqual(queuedReply.replies, OK_REPLY);
+        }
+        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(runtime.getState().shareStats.normalShares, 3);
+        assert.equal(runtime.getState().shareStats.trustedShares, 0);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        global.config.pool.banEnabled = originalBanEnabled;
+        crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
+test("trusted queue overflow is throttled and releases the tracked nonce", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
+    const originalThrottleWindow = global.config.pool.minerThrottleShareWindow;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const socket = {};
+    const verifierCallbacks = [];
+
+    try {
+        global.config.pool.trustedMiners = true;
+        global.config.pool.minerThrottleSharePerSec = 1;
+        global.config.pool.minerThrottleShareWindow = 1;
+        global.coinFuncs.slowHashAsync = function holdWalletVerification(_buffer, _blockTemplate, _wallet, callback) {
+            verifierCallbacks.push(callback);
+        };
+
+        const { jobId, trackedJob } = loginTrustedMiner(runtime, socket, 2115, "worker-trusted-queue-limit");
+        selectVerificationThenTrust();
+
+        const verifyingReply = submitShare(socket, 2116, jobId, "00000038");
+        const queuedReply = submitShare(socket, 2117, jobId, "00000039");
+        const overflowReply = submitShare(socket, 2118, jobId, "0000003a");
+
+        assert.deepEqual(queuedReply.replies, []);
+        assert.deepEqual(overflowReply.replies, THROTTLED_REPLY);
+        assert.equal(trackedJob.submissions.has("0000003a"), false);
+
+        verifierCallbacks.shift()(VALID_RESULT);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await flushTimers();
+
+        assert.deepEqual(verifyingReply.replies, OK_REPLY);
+        assert.deepEqual(queuedReply.replies, OK_REPLY);
+        assert.equal(runtime.getState().shareStats.throttledShares, 1);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
+        global.config.pool.minerThrottleShareWindow = originalThrottleWindow;
+        crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
+test("wallet bans discard active and pending trusted queue entries", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const socket = {};
+    const verifierCallbacks = [];
+
+    try {
+        global.config.pool.trustedMiners = true;
+        global.coinFuncs.slowHashAsync = function holdWalletVerification(_buffer, _blockTemplate, _wallet, callback) {
+            verifierCallbacks.push(callback);
+        };
+
+        const { state, miner, jobId, trackedJob } = loginTrustedMiner(runtime, socket, 2119, "worker-trusted-queue-ban");
+        selectVerificationThenTrust();
+
+        const verifyingReply = submitShare(socket, 2120, jobId, "0000003b");
+        const queuedReply = submitShare(socket, 2121, jobId, "0000003c");
+        const pendingReply = submitShare(socket, 2122, jobId, "0000003d");
+
+        assert.deepEqual(queuedReply.replies, []);
+        verifierCallbacks.shift()(VALID_RESULT);
+        miner.lastSlowHashAsyncDelay = 0;
+        state.bannedTmpWallets[MAIN_WALLET] = 1;
+        await flushTimers();
+
+        assert.deepEqual(verifyingReply.replies, OK_REPLY);
+        assert.deepEqual(queuedReply.replies, THROTTLED_REPLY);
+        assert.deepEqual(pendingReply.replies, THROTTLED_REPLY);
+        assert.equal(trackedJob.submissions.has("0000003c"), false);
+        assert.equal(trackedJob.submissions.has("0000003d"), false);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
+test("ordinary same-wallet verification remains parallel", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const socket = {};
+    const verifierCallbacks = [];
+    let verifierCalls = 0;
+
+    try {
+        global.config.pool.trustedMiners = true;
+        crypto.randomBytes = () => Buffer.from([0]);
+        global.coinFuncs.slowHashAsync = function holdParallelVerification(_buffer, _blockTemplate, _wallet, callback) {
+            verifierCalls += 1;
+            verifierCallbacks.push(callback);
+        };
+
+        const { jobId } = loginTrustedMiner(runtime, socket, 2120, "worker-parallel-verification");
+
+        const replies = ["00000036", "00000037"].map(function submitVerifiedShare(nonce, index) {
+            return submitShare(socket, 2121 + index, jobId, nonce);
+        });
+
+        assert.equal(verifierCalls, 2);
+        verifierCallbacks.shift()(VALID_RESULT);
+        verifierCallbacks.shift()(VALID_RESULT);
+        await flushTimers();
+
+        for (const reply of replies) {
+            assert.deepEqual(reply.replies, OK_REPLY);
+        }
+        assert.equal(runtime.getState().shareStats.normalShares, 2);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
         await runtime.stop();
     }
 });

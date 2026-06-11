@@ -322,7 +322,7 @@ test("submit does not retry verifier queue timeout", async () => {
     }
 });
 
-test("submit invalidates verifier failures after retry limit is exhausted", async () => {
+test("submit does not penalize miners when verifier host retries are exhausted", async () => {
     const { runtime, database } = await startHarness();
     const socket = {};
     const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
@@ -363,9 +363,12 @@ test("submit invalidates verifier failures after retry limit is exhausted", asyn
         while (submitReply.replies.length === 0 && Date.now() < deadline) {
             await new Promise((resolve) => setTimeout(resolve, 1));
         }
-        assert.deepEqual(submitReply.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.deepEqual(submitReply.replies, [{
+            error: "Throttled down share submission (please increase difficulty)",
+            result: undefined
+        }]);
         assert.equal(slowHashCalls, 4);
-        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
         assert.equal(database.invalidShares.length, 0);
     } finally {
         global.config.pool.verifyShareRetry = originalVerifyRetryConfig;
