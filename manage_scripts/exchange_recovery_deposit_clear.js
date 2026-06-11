@@ -8,33 +8,11 @@
 
 const cli = require("../script_utils.js")();
 const coinDefs = require("../lib2/coins.js")().COINS;
-
-const CACHE_KEY = "altblock_exchange_deposit";
-const portArg = cli.get("port", null);
-const clear = cli.get("clear", false) === true;
-
-function parseBooleanOption(value) {
-    if (value === null || typeof value === "undefined") return false;
-    switch (String(value).toLowerCase()) {
-        case "1":
-        case "true":
-        case "yes":
-            return true;
-        default:
-            return false;
-    }
-}
-
-function formatCoin(port) {
-    if (global.coinFuncs && typeof global.coinFuncs.PORT2COIN_FULL === "function") {
-        return global.coinFuncs.PORT2COIN_FULL(Number(port));
-    }
-    return String(port);
-}
-
-function normalizePendingCache(value) {
-    return value && typeof value === "object" ? Object.assign(Object.create(null), value) : Object.create(null);
-}
+const {
+    formatCoin,
+    normalizePendingCache,
+    runPendingCacheCli
+} = require("./exchange_recovery_cache_common.js");
 
 function formatAmount(amount, port) {
     const parsed = Number(amount);
@@ -43,15 +21,6 @@ function formatAmount(amount, port) {
     const decimals = Number(coinDef && coinDef.exchange_deposit_decimals_dynamic);
     if (Number.isFinite(decimals) && decimals > 0) return parsed.toFixed(Math.min(Math.trunc(decimals), 12));
     return parsed.toFixed(8);
-}
-
-function buildBlockLookup() {
-    const lookup = new Map();
-    cli.forEachBinaryEntry(global.database.altblockDB, function onEntry(_key, data) {
-        const block = global.protos.AltBlock.decode(data);
-        lookup.set(Number(block.id), block);
-    });
-    return lookup;
 }
 
 function normalizeBatches(entry) {
@@ -121,56 +90,20 @@ function printSummary(summary) {
 }
 
 function main() {
-    cli.init(function onInit() {
-        const pending = normalizePendingCache(global.database.getCache(CACHE_KEY));
-        const blockLookup = buildBlockLookup();
-        const targetPort = portArg ? String(portArg) : null;
-
-        if (clear) {
-            if (!targetPort) {
-                console.error("Please specify --port when using --clear");
-                process.exit(1);
-            }
-            const entry = pending[targetPort];
-            if (!entry) {
-                console.error("No pending altblock_exchange deposit entry for port " + targetPort);
-                process.exit(1);
-            }
-            if (!parseBooleanOption(cli.get("confirm-reviewed-deposit"))) {
-                console.error("Rerun with --confirm-reviewed-deposit=true after confirming the exchange deposit is posted/credited.");
-                process.exit(1);
-            }
-            const summary = summarizeEntry(targetPort, entry, blockLookup);
-            delete pending[targetPort];
-            global.database.setCache(CACHE_KEY, pending);
-            console.log("Cleared altblock_exchange deposit pending entry:");
-            printSummary(summary);
-            console.log("Only do this after confirming the exchange deposit is posted/credited.");
-            console.log("Running altblock_exchange will pick this up on the next cycle.");
-            process.exit(0);
-        }
-
-        if (targetPort) {
-            const entry = pending[targetPort];
-            if (!entry) {
-                console.error("No pending altblock_exchange deposit entry for port " + targetPort);
-                process.exit(1);
-            }
-            printSummary(summarizeEntry(targetPort, entry, blockLookup));
-            process.exit(0);
-        }
-
-        const ports = Object.keys(pending).sort(function sortPorts(left, right) {
-            return Number(left) - Number(right);
-        });
-        if (ports.length === 0) {
-            console.log("No altblock_exchange deposit pending entries found");
-            process.exit(0);
-        }
-        ports.forEach(function printPort(port) {
-            printSummary(summarizeEntry(port, pending[port], blockLookup));
-        });
-        process.exit(0);
+    runPendingCacheCli({
+        cli,
+        cacheKey: "altblock_exchange_deposit",
+        entryLabel: "altblock_exchange deposit",
+        confirmOption: "confirm-reviewed-deposit",
+        confirmInstruction: "Rerun with --confirm-reviewed-deposit=true after confirming the exchange deposit is posted/credited.",
+        clearedHeading: "Cleared altblock_exchange deposit pending entry:",
+        emptyMessage: "No altblock_exchange deposit pending entries found",
+        summarizeEntry,
+        printSummary,
+        afterClear: [
+            "Only do this after confirming the exchange deposit is posted/credited.",
+            "Running altblock_exchange will pick this up on the next cycle."
+        ]
     });
 }
 

@@ -8,33 +8,11 @@
 
 const cli = require("../script_utils.js")();
 const coinDefs = require("../lib2/coins.js")().COINS;
-
-const CACHE_KEY = "altblock_exchange_wallet";
-const portArg = cli.get("port", null);
-const clear = cli.get("clear", false) === true;
-
-function parseBooleanOption(value) {
-    if (value === null || typeof value === "undefined") return false;
-    switch (String(value).toLowerCase()) {
-        case "1":
-        case "true":
-        case "yes":
-            return true;
-        default:
-            return false;
-    }
-}
-
-function formatCoin(port) {
-    if (global.coinFuncs && typeof global.coinFuncs.PORT2COIN_FULL === "function") {
-        return global.coinFuncs.PORT2COIN_FULL(Number(port));
-    }
-    return String(port);
-}
-
-function normalizePendingCache(value) {
-    return value && typeof value === "object" ? Object.assign(Object.create(null), value) : Object.create(null);
-}
+const {
+    formatCoin,
+    normalizePendingCache,
+    runPendingCacheCli
+} = require("./exchange_recovery_cache_common.js");
 
 function formatWalletBalance(entry, port) {
     const balance = Number(entry && entry.walletBalance);
@@ -42,15 +20,6 @@ function formatWalletBalance(entry, port) {
     const coinDef = coinDefs[String(port)];
     if (!coinDef || !coinDef.divisor) return String(balance);
     return (balance / coinDef.divisor).toFixed(8);
-}
-
-function buildBlockLookup() {
-    const lookup = new Map();
-    cli.forEachBinaryEntry(global.database.altblockDB, function onEntry(_key, data) {
-        const block = global.protos.AltBlock.decode(data);
-        lookup.set(Number(block.id), block);
-    });
-    return lookup;
 }
 
 function summarizeEntry(port, entry, blockLookup) {
@@ -83,55 +52,17 @@ function printSummary(summary) {
 }
 
 function main() {
-    cli.init(function onInit() {
-        const pending = normalizePendingCache(global.database.getCache(CACHE_KEY));
-        const blockLookup = buildBlockLookup();
-        const targetPort = portArg ? String(portArg) : null;
-
-        if (clear) {
-            if (!targetPort) {
-                console.error("Please specify --port when using --clear");
-                process.exit(1);
-            }
-            const entry = pending[targetPort];
-            if (!entry) {
-                console.error("No pending altblock_exchange wallet entry for port " + targetPort);
-                process.exit(1);
-            }
-            if (!parseBooleanOption(cli.get("confirm-reviewed-wallet"))) {
-                console.error("Rerun with --confirm-reviewed-wallet=true after confirming the ambiguous wallet send state is safe to clear.");
-                process.exit(1);
-            }
-            const summary = summarizeEntry(targetPort, entry, blockLookup);
-            delete pending[targetPort];
-            global.database.setCache(CACHE_KEY, pending);
-            console.log("Cleared altblock_exchange wallet pending entry:");
-            printSummary(summary);
-            console.log("Running altblock_exchange will pick this up on the next cycle.");
-            process.exit(0);
-        }
-
-        if (targetPort) {
-            const entry = pending[targetPort];
-            if (!entry) {
-                console.error("No pending altblock_exchange wallet entry for port " + targetPort);
-                process.exit(1);
-            }
-            printSummary(summarizeEntry(targetPort, entry, blockLookup));
-            process.exit(0);
-        }
-
-        const ports = Object.keys(pending).sort(function sortPorts(left, right) {
-            return Number(left) - Number(right);
-        });
-        if (ports.length === 0) {
-            console.log("No altblock_exchange wallet pending entries found");
-            process.exit(0);
-        }
-        ports.forEach(function printPort(port) {
-            printSummary(summarizeEntry(port, pending[port], blockLookup));
-        });
-        process.exit(0);
+    runPendingCacheCli({
+        cli,
+        cacheKey: "altblock_exchange_wallet",
+        entryLabel: "altblock_exchange wallet",
+        confirmOption: "confirm-reviewed-wallet",
+        confirmInstruction: "Rerun with --confirm-reviewed-wallet=true after confirming the ambiguous wallet send state is safe to clear.",
+        clearedHeading: "Cleared altblock_exchange wallet pending entry:",
+        emptyMessage: "No altblock_exchange wallet pending entries found",
+        summarizeEntry,
+        printSummary,
+        afterClear: ["Running altblock_exchange will pick this up on the next cycle."]
     });
 }
 

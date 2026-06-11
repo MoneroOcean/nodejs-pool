@@ -11,7 +11,7 @@ cli.init(function() {
 			let blockData = global.protos.AltBlock.decode(data);
 			if (blockData.hash === hash) {
 			        is_found = true;
-				global.coinFuncs.getPortBlockHeaderByHash(blockData.port, hash, (err, body) => {
+				global.coinFuncs.getPortBlockHeaderByHash(blockData.port, hash, (err) => {
 					if (err !== null) {
 		        			console.log("Altblock with " + hash + " hash still has invalid hash for " + blockData.port + " port! Exiting!");
 						cursor.close();

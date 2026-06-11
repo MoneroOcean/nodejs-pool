@@ -194,13 +194,6 @@ function createPendingJobDatabase() {
         },
         incrementCacheData(key, value) {
             resets.push({ key, value });
-        },
-        isAltBlockInDB(port, height) {
-            for (const encoded of stores.altblockDB.values()) {
-                const block = PROTOS.AltBlock.decode(encoded);
-                if (block.port === port && block.height === height) return true;
-            }
-            return false;
         }
     };
 

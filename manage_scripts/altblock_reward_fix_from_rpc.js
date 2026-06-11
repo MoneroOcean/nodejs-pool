@@ -1,39 +1,13 @@
 "use strict";
 const cli = require("../script_utils.js")();
+const fixBlockRewardFromRpc = require("./block_reward_fix_common.js");
 const hash = cli.arg("hash", "Please specify altblock hash");
 
-cli.init(function() {
-	let txn = global.database.env.beginTxn();
-        let cursor = new global.database.lmdb.Cursor(txn, global.database.altblockDB);
-	let is_found = 0;
-        for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
-        	cursor.getCurrentBinary(function(key, data){  // jshint ignore:line
-			let blockData = global.protos.AltBlock.decode(data);
-			if (!is_found && blockData.hash === hash) {
-				console.log("Found altblock with " + blockData.hash + " hash");
-				is_found = 1;
-                                global.coinFuncs.getPortAnyBlockHeaderByHash(blockData.port, hash, false, function (err, body) {
-					if (err) {
-					        cursor.close();
-					        txn.commit();
-						console.error("Can't get block header");
-						process.exit(1);
-					}
-					console.log("Changing raw block reward from " + blockData.value + " to " + body.reward);
-					blockData.value = body.reward;
-					txn.putBinary(global.database.altblockDB, key, global.protos.AltBlock.encode(blockData));
-					txn.commit();
-					cursor.close();
-					console.log("Changed altblock");
-					process.exit(0);
-				});
-			}
-		});
-        }
-	if (!is_found) {
-	        cursor.close();
-        	txn.commit();
-		console.log("Not found altblock with " + hash + " hash");
-		process.exit(1);
-	}
+fixBlockRewardFromRpc({
+    cli,
+    hash,
+    databaseName: "altblockDB",
+    protoName: "AltBlock",
+    label: "altblock",
+    getPort: function getAltPort(block) { return block.port; }
 });
