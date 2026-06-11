@@ -695,6 +695,7 @@ test("pending altblock jobs store a canonical sibling when an invalid block exis
     const storage = createMapStorage();
     const canonicalHash = "ca".repeat(32);
     const orphanHash = "0f".repeat(32);
+    const canonicalReward = 5729250817;
 
     stores.altblockDB.set(25, PROTOS.AltBlock.encode({
         hash: orphanHash,
@@ -715,7 +716,7 @@ test("pending altblock jobs store a canonical sibling when an invalid block exis
         getPortBlockHeaderByHash(_port, hash, callback, suppressErrorLog) {
             assert.equal(hash, canonicalHash);
             assert.equal(suppressErrorLog, true);
-            callback(null, { depth: 60, reward: 5729250817 });
+            callback(null, { depth: 60, reward: canonicalReward });
         },
         getPoolProfile() {
             return { rpc: { unlockConfirmationDepth: 60 } };
@@ -756,7 +757,7 @@ test("pending altblock jobs store a canonical sibling when an invalid block exis
         const storedCanonical = blocks.find((block) => block.hash === canonicalHash);
         assert.equal(storedCanonical.valid, true);
         assert.equal(storedCanonical.unlocked, false);
-        assert.equal(storedCanonical.value, 5729250817);
+        assert.equal(Math.round(storedCanonical.value), canonicalReward);
         assert.equal(blocks.some((block) => block.hash === orphanHash && block.valid === false), true);
     } finally {
         pendingJobs.close();
