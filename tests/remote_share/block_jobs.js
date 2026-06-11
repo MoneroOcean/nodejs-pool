@@ -689,6 +689,81 @@ test("pending altblock jobs do not orphan wallet reward lookup misses", () => {
     }
 });
 
+test("pending altblock jobs store a canonical sibling when an invalid block exists at the same height", () => {
+    const restore = installRemoteShareGlobals();
+    const { database, stores } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    const canonicalHash = "ca".repeat(32);
+    const orphanHash = "0f".repeat(32);
+
+    stores.altblockDB.set(25, PROTOS.AltBlock.encode({
+        hash: orphanHash,
+        difficulty: 100,
+        shares: 0,
+        timestamp: Date.now() - 1000,
+        poolType: PROTOS.POOLTYPE.PPLNS,
+        unlocked: true,
+        valid: false,
+        port: 19081,
+        height: 506483,
+        anchor_height: 1000,
+        value: 0,
+        pay_value: 0
+    }));
+
+    global.coinFuncs = {
+        getPortBlockHeaderByHash(_port, hash, callback, suppressErrorLog) {
+            assert.equal(hash, canonicalHash);
+            assert.equal(suppressErrorLog, true);
+            callback(null, { depth: 60, reward: 5729250817 });
+        },
+        getPoolProfile() {
+            return { rpc: { unlockConfirmationDepth: 60 } };
+        },
+        PORT2COIN() {
+            return "SAL";
+        },
+        PORT2COIN_FULL() {
+            return "SAL";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log() {} },
+        storage
+    });
+
+    try {
+        const canonicalBlock = {
+            hash: canonicalHash,
+            difficulty: 6699272935,
+            shares: 0,
+            timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            unlocked: false,
+            valid: true,
+            port: 19081,
+            height: 506483,
+            anchor_height: 1001
+        };
+        pendingJobs.enqueueAltBlock(25, PROTOS.AltBlock.encode(canonicalBlock), canonicalBlock);
+        pendingJobs.processDueJobs();
+
+        assert.equal(storage.jobs.size, 0);
+        assert.equal(stores.altblockDB.size, 2);
+        const blocks = Array.from(stores.altblockDB.values()).map((encoded) => PROTOS.AltBlock.decode(encoded));
+        const storedCanonical = blocks.find((block) => block.hash === canonicalHash);
+        assert.equal(storedCanonical.valid, true);
+        assert.equal(storedCanonical.unlocked, false);
+        assert.equal(storedCanonical.value, 5729250817);
+        assert.equal(blocks.some((block) => block.hash === orphanHash && block.valid === false), true);
+    } finally {
+        pendingJobs.close();
+        restore();
+    }
+});
+
 test("pending blocks send a daily FYI when stuck over the stale age", () => {
     const sentEmails = [];
     const restore = installRemoteShareGlobals(() => {
