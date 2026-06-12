@@ -1,7 +1,7 @@
 #!/bin/bash -ex
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.1}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.4.0-pre.4}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
@@ -19,6 +19,23 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 DEPLOY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
+install_node_dependencies() {
+  if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+    retry_command npm ci "$@"
+  else
+    retry_command npm install "$@"
+  fi
+}
+
+configure_journald_retention() {
+  install -d -m 755 /etc/systemd/journald.conf.d
+  cat >/etc/systemd/journald.conf.d/90-moneroocean-retention.conf <<'EOF'
+[Journal]
+SystemMaxUse=100M
+SystemKeepFree=1G
+SystemMaxFileSize=10M
+EOF
+}
 
 clone_repo_once() {
   local repo="$1"
@@ -45,6 +62,13 @@ EOF
 }
 
 configure_swap() {
+  if awk 'NR > 1 {found = 1} END {exit found ? 0 : 1}' /proc/swaps; then
+    return 0
+  fi
+  if grep -Eq '^[^#]+[[:space:]]+[^[:space:]]+[[:space:]]+swap[[:space:]]' /etc/fstab; then
+    swapon -a
+    return 0
+  fi
   if [ ! -f /swapfile ] || [ "$(stat -c %s /swapfile 2>/dev/null || echo 0)" -lt 1073741824 ]; then
     rm -f /swapfile
     fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
@@ -97,7 +121,7 @@ validate_systemd_memory_limit "$TARI_MM_MEMORY_HIGH" TARI_MM_MEMORY_HIGH
 validate_systemd_memory_limit "$TARI_MM_MEMORY_SWAP_MAX" TARI_MM_MEMORY_SWAP_MAX
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
-MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR}"
+MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,global:INFO,sync-info:INFO,cn:ERROR,blockchain:ERROR,verify:ERROR}"
 
 rpc_synced() {
   local url="$1"
@@ -237,6 +261,7 @@ EOF
 
 configure_overcommit
 configure_swap
+configure_journald_retention
 
 retry_command apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update
 if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
@@ -244,7 +269,7 @@ if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
 else
   retry_command apt-get -o Acquire::Retries=3 full-upgrade -y
 fi
-retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl wget openssl sudo ufw git vim unzip python3 g++ make libc-dev cmake pkg-config autoconf automake libtool libssl-dev libsqlite3-dev sqlite3 clang libc++-dev libc++abi-dev libprotobuf-dev protobuf-compiler libncurses5-dev libncursesw5-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev libcap2-bin
+retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl wget openssl sudo ufw git vim unzip python3 g++ make libc6-dev cmake pkg-config autoconf automake libtool libssl-dev libsqlite3-dev sqlite3 clang libc++-dev libc++abi-dev libprotobuf-dev protobuf-compiler libncurses-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev libcap2-bin
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
@@ -366,9 +391,10 @@ fi
 systemctl start monero
 wait_for_monero_sync
 
-(cat <<EOF
+su -l user -s /bin/bash <<EOF
 set -ex
 $(declare -f retry_command)
+$(declare -f install_node_dependencies)
 if [ ! -f /home/user/.nvm/nvm.sh ]; then
   retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
 fi
@@ -393,7 +419,7 @@ if [ ! -d /home/user/nodejs-pool/.git ]; then
 fi
 cd /home/user/nodejs-pool
 if [ ! -d node_modules ]; then
-  JOBS=$(nproc) retry_command npm ci
+  JOBS=$(nproc) install_node_dependencies
 fi
 command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2 --min-release-age=7
 retry_command pm2 install pm2-logrotate
@@ -402,7 +428,6 @@ if [ ! -f cert.key ] || [ ! -f cert.pem ]; then
 fi
 #pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 EOF
-) | su user -l
 
 if [ -z "$TARI_EXTERNAL_IP" ]; then
   systemctl start xtm xtm_mm
