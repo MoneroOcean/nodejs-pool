@@ -3,14 +3,8 @@ const test = require("node:test");
 
 const {
     assert,
-    crypto,
-    fs,
-    fsp,
     MAIN_PORT,
-    ETH_PORT,
     MAIN_WALLET,
-    ALT_WALLET,
-    ETH_WALLET,
     VALID_RESULT,
     JsonLineClient,
     openRawSocket,
@@ -19,27 +13,6 @@ const {
     waitForSocketJson,
     startHarness,
     flushTimers,
-    invokePoolMethod,
-    createBaseTemplate,
-    poolModule,
-    RX0_MAIN_SHARE_VECTORS,
-    ZERO_RESULT,
-    buildMainShareResult,
-    createMainPowVectorMap,
-    flushShareAccumulator,
-    enableBlockSubmitTestMode,
-    disableBlockSubmitTestMode,
-    createBlockSubmitTemplates,
-    createFrozenTime,
-    setBlockSubmitTestMarker,
-    withBlockSubmitTestMode,
-    getLoginJobId,
-    loginMainMiner,
-    submitMainBlockCandidate,
-    authorizeEthMiner,
-    submitEthBlockCandidate,
-    submitEthBlockCandidateWithClient,
-    withCapturedConsoleError,
     requestRawJson
 } = require("../common/runtime-helpers.js");
 
@@ -319,7 +292,6 @@ test("per-subnet connection limits close excess sockets independently from the p
         await runtime.stop();
     }
 });
-
 
 test("rejected per-IP sockets do not reduce active subnet counts", async () => {
     const { runtime } = await startHarness();

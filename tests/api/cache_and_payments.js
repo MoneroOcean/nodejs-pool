@@ -10,15 +10,6 @@ delete global.__apiAutostart;
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-async function waitForCondition(check, timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        if (check()) return;
-        await wait(10);
-    }
-    throw new Error("Condition not met within " + timeoutMs + "ms");
-}
-
 async function waitForListening(runtime) {
     for (let attempts = 0; attempts < 50; attempts += 1) {
         const address = runtime.address();
@@ -56,16 +47,6 @@ function request(port, options) {
         req.on("error", reject);
         if (body) req.write(body);
         req.end();
-    });
-}
-
-function requestJson(port, method, path, payload) {
-    const body = JSON.stringify(payload);
-    return request(port, {
-        method: method,
-        path: path,
-        body: body,
-        headers: { "Content-Type": "application/json" }
     });
 }
 
@@ -175,22 +156,6 @@ async function withRuntime(options, run) {
         return await run(address.port, runtime);
     } finally {
         await runtime.stop();
-    }
-}
-
-async function captureConsole(run) {
-    const originalLog = console.log;
-    const originalError = console.error;
-    const logs = [];
-    const errors = [];
-    console.log = function captureLog(...args) { logs.push(args.map(String).join(" ")); };
-    console.error = function captureError(...args) { errors.push(args.map(String).join(" ")); };
-    try {
-        await run({ logs: logs, errors: errors });
-        return { logs: logs, errors: errors };
-    } finally {
-        console.log = originalLog;
-        console.error = originalError;
     }
 }
 

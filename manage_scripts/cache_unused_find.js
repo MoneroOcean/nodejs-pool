@@ -130,6 +130,7 @@ argv = require("../parse_args")(process.argv.slice(2));
 require("../init_mini.js").init(function () {
     const txn = global.database.env.beginTxn({ readOnly: true });
     const cursor = new global.database.lmdb.Cursor(txn, global.database.cacheDB);
+    // Miner-keyed cache entries are at least as long as the pool wallet address; shorter keys are housekeeping.
     const minKeyLength = global.config.pool.address.length;
     const pendingDeletes = [];
     let scannedCount = 0;

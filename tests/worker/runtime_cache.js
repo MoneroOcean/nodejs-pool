@@ -213,8 +213,6 @@ function runUpdate(runtime, height) {
     });
 }
 
-function toStoredTimestamp(value) { return Math.round(value / 1000) * 1000; }
-
 test.describe("worker runtime cache", { concurrency: false }, () => {
     let originalConfig;
     let originalDatabase;

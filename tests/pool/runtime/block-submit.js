@@ -3,20 +3,11 @@ const test = require("node:test");
 
 const {
     assert,
-    crypto,
     fs,
-    fsp,
     MAIN_PORT,
     ETH_PORT,
     MAIN_WALLET,
-    ALT_WALLET,
-    ETH_WALLET,
     VALID_RESULT,
-    JsonLineClient,
-    openRawSocket,
-    waitForSocketClose,
-    assertNoSocketData,
-    waitForSocketJson,
     startHarness,
     flushTimers,
     invokePoolMethod,
@@ -26,8 +17,6 @@ const {
     ZERO_RESULT,
     buildMainShareResult,
     createMainPowVectorMap,
-    flushShareAccumulator,
-    enableBlockSubmitTestMode,
     disableBlockSubmitTestMode,
     createBlockSubmitTemplates,
     createFrozenTime,
@@ -37,10 +26,7 @@ const {
     loginMainMiner,
     submitMainBlockCandidate,
     authorizeEthMiner,
-    submitEthBlockCandidate,
-    submitEthBlockCandidateWithClient,
-    withCapturedConsoleError,
-    requestRawJson
+    submitEthBlockCandidate
 } = require("../common/runtime-helpers.js");
 
 const HIGH_DIFF_ETH_RESULT = "00".repeat(31) + "01";

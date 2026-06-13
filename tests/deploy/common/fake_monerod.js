@@ -43,6 +43,8 @@ function encodeVarint(value) {
     return Buffer.from(bytes);
 }
 function createBlockTemplate(height) {
+    // Hand-serialized Monero block blob. tx_extra carries a pubkey (tag 0x01) then a 17-byte
+    // nonce (tag 0x02, len 17) whose position reserved_offset points to so the pool can patch it.
     const extra = Buffer.concat([Buffer.from([0x01]), Buffer.alloc(32, 0x33), Buffer.from([0x02, 17]), Buffer.alloc(17, 0)]);
     const blob = Buffer.concat([
         encodeVarint(1), encodeVarint(1), encodeVarint(0), Buffer.alloc(32, 0x11), Buffer.alloc(4, 0),

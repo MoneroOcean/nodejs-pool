@@ -10,6 +10,7 @@ function clone(value) {
 }
 
 function loadPoolStats() {
+    // Fresh require with autostart disabled so the module does not schedule its own timers; tests drive it directly.
     const previousAutostart = global.__poolStatsAutostart;
     global.__poolStatsAutostart = false;
     delete require.cache[POOL_STATS_PATH];

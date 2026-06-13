@@ -12,15 +12,6 @@ const { setTimeout: delay } = require("node:timers/promises");
 const ROOT_DIR = path.join(__dirname, "..", "..");
 const ARTIFACT_ROOT = path.join(ROOT_DIR, "test-artifacts", "deploy");
 const DEFAULT_CASE_TIMEOUT_MS = 45 * 60 * 1000;
-const EXPECTED_DEPLOY_PROCESSES = [
-    "api", "monero-wallet-rpc", "block_manager", "worker",
-    "payments", "remote_share", "long_runner", "pool_stats"
-];
-const REMOTE_SHARE_URLS = [
-    "http://127.0.0.1:8000/leafApi",
-    "http://[::1]:8000/leafApi",
-    "http://localhost:8000/leafApi"
-];
 const XMR_POOL_ADDRESS = "46yzCCD3Mza9tRj7aqPSaxVbbePtuAeKzf8Ky2eRtcXGcEgCg1iTBio6N4sPmznfgGEUGDoBz5CLxZ2XPTyZu1yoCAG7zt6";
 const XMR_FEE_ADDRESS = "463tWEBn5XZJSxLU6uLQnQ2iY9xuNcDbjLSjkn3XAXHCbLrTTErJrBWYgHJQyrCwkNgYvyV3z8zctJLPCZy24jvb3NiTcTJ";
 const XMR_MINER_ADDRESS = "862wu9yae6qSUaUGz3KjjSeQ3xPKKxhzf8eYd9qXFx4eTpWm1qp6tvY9mzX4YiUQyYNdwZ9T8Muy1NfydEnExWkER25EfNj";

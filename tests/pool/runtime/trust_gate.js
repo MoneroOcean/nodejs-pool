@@ -110,11 +110,11 @@ const FAIL_OPEN_CASES = [
 ];
 
 for (const verifier of ["eth", "erg"]) {
-    for (const c of FAIL_OPEN_CASES) {
-        test(`verify${verifier === "eth" ? "Eth" : "Erg"}Share fails open on verifier-unavailable: ${c.label}`, () => {
+    for (const testCase of FAIL_OPEN_CASES) {
+        test(`verify${verifier === "eth" ? "Eth" : "Erg"}Share fails open on verifier-unavailable: ${testCase.label}`, () => {
             const verifySpecialShare = factories.pool[verifier]({}).verifySpecialShare;
             const spies = { processShareCB: [], invalidShare: [], reportMinerShare: [], verifyShareCB: [] };
-            verifySpecialShare(makeShareCtx(c.result, c.errorKind, spies));
+            verifySpecialShare(makeShareCtx(testCase.result, testCase.errorKind, spies));
             assert.deepEqual(spies.processShareCB, [[null]]); // dropped with null
             assert.equal(spies.invalidShare.length, 0);       // NOT penalized
             assert.equal(spies.reportMinerShare.length, 0);   // NOT reported as bad

@@ -529,7 +529,6 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
 });
 
 test("TRTL profile verifies shares with Argon2/Chukwa variant 2", () => {
-    const loadRegistry = require("../../../lib/coins/core/registry.js");
     const profile = loadRegistry().profilesByPort[11898];
     const calls = [];
     const runtime = {

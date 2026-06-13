@@ -4,6 +4,6 @@ const key = cli.arg("key", "Please specify key");
 const value = cli.jsonArg("value", "Please specify value", "Can't parse your value: ");
 
 cli.init(function() {
-	global.database.setCache(key, value);
-	process.exit(0);
+    global.database.setCache(key, value);
+    process.exit(0);
 });

@@ -43,3 +43,6 @@ wallet_debug.txt
 .cache/live-miners
 test-artifacts/
 plan.txt
+
+# Local security audit notes (contain exploit detail; never commit)
+audit.md

@@ -26,7 +26,7 @@ async function buildUserDeletePlan(user, options) {
     options = options || {};
     const account = accountUtils.splitUserOrExit(user);
     const where = accountUtils.paymentWhere(account, true);
-    const extraTables = (options.extraTables || []).map(function (name) {
+    const extraTables = (options.extraTables || []).map(function toExtraTable(name) {
         return { name, sql: accountUtils.sqlTable(name) };
     });
     const queryRows = function queryRows(table) {

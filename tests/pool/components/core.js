@@ -7,14 +7,8 @@ const createConstants = require("../../../lib/coins/constants.js");
 const Coin = require("../../../lib/coins/index.js");
 const helpers = require("../../../lib/coins/helpers.js");
 const createPoolState = require("../../../lib/pool/state.js");
-const createProtocolHandler = require("../../../lib/pool/protocol.js");
 const createServerFactory = require("../../../lib/pool/servers.js");
 const createTemplateManager = require("../../../lib/pool/templates.js");
-const createShareProcessor = require("../../../lib/pool/shares.js");
-
-function clearObject(target) {
-    for (const key of Object.keys(target)) delete target[key];
-}
 
 async function captureConsole(run) {
     const originalError = console.error;

@@ -8,6 +8,7 @@ cli.init(function() {
                         console.error("Can't get block header");
                         process.exit(1);
                 }
+                // 18081 is the XMR main-chain daemon RPC port.
                 global.coinFuncs.getPortAnyBlockHeaderByHash(18081, body.hash, true, function (err, body) {
                         if (err) {
                                 console.error("Can't get block header");
@@ -25,8 +26,8 @@ cli.init(function() {
                         };
                         const body3 = global.protos.Block.encode(body2);
                         const blockHeight = parseInt(height, 10);
-                        let txn = global.database.env.beginTxn();
-                        let blockProto = txn.getBinary(global.database.blockDB, blockHeight);
+                        const txn = global.database.env.beginTxn();
+                        const blockProto = txn.getBinary(global.database.blockDB, blockHeight);
                         if (blockProto === null) {
                                 txn.putBinary(global.database.blockDB, blockHeight, body3);
                                 console.log("Block with " + height + " height added! Exiting!");

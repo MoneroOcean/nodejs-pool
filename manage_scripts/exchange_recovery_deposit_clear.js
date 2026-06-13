@@ -19,6 +19,7 @@ function formatAmount(amount, port) {
     if (!Number.isFinite(parsed)) return "unknown";
     const coinDef = coinDefs[String(port)];
     const decimals = Number(coinDef && coinDef.exchange_deposit_decimals_dynamic);
+    // Clamp at 12 to cap display precision and keep toFixed within its valid range for malformed config.
     if (Number.isFinite(decimals) && decimals > 0) return parsed.toFixed(Math.min(Math.trunc(decimals), 12));
     return parsed.toFixed(8);
 }

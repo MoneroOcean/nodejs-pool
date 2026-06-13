@@ -2,6 +2,8 @@
 const { Transform } = require("node:stream");
 const { spec } = require("node:test/reporters");
 
+// Wraps node:test's `spec` reporter and inserts a blank line before each group
+// header (lines starting with "▶ ", the spec reporter's suite marker) for readability.
 class SpacedSpecReporter extends Transform {
     constructor() {
         super({ writableObjectMode: true });

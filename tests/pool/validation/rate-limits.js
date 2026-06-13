@@ -3,31 +3,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-    MAIN_PORT,
     MAIN_WALLET,
-    ALT_WALLET,
-    THIRD_WALLET,
     VALID_RESULT,
     startHarness,
-    invokePoolMethod,
-    createBaseTemplate,
-    poolModule
+    invokePoolMethod
 } = require("../common/harness.js");
-
-async function expectLoginFinalError(params, error, options = {}) {
-    const { prepare, timeout } = options;
-    const { runtime } = await startHarness();
-
-    try {
-        if (prepare) await prepare(runtime);
-        const reply = invokePoolMethod({ method: "login", params });
-
-        assert.equal(reply.replies.length, 0);
-        assert.deepEqual(reply.finals, [{ error, timeout }]);
-    } finally {
-        await runtime.stop();
-    }
-}
 
 test.describe("pool validation: rate limits", { concurrency: false }, () => {
 test("keepalived alias returns the same response as keepalive", async () => {

@@ -129,6 +129,7 @@ function attachAttemptFileTail(run, plan, target, attempt, name, filePath, onLin
             handle = await fs.promises.open(filePath, "r");
             const stats = await handle.stat();
             if (stats.size < offset) {
+                // File shrank (truncated/rotated): restart tailing from the top.
                 offset = 0;
                 pending = "";
             }

@@ -23,6 +23,7 @@ cli.init(function() {
         console.error("Can't get block timestamp: " + JSON.stringify(body_header));
         process.exit(1);
       }
+      // A timestamp that looks far in the future is really in milliseconds; normalize to seconds.
       if ((Date.now() / 1000) < body_header.timestamp) body_header.timestamp = parseInt(body_header.timestamp / 1000);
       if (!body_header.difficulty) body_header.difficulty = argv.diff;
       if (!body_header.difficulty) {

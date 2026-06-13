@@ -3,30 +3,12 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-    MAIN_PORT,
-    ETH_PORT,
     MAIN_WALLET,
     ALT_WALLET,
     ETH_WALLET,
-    VALID_RESULT,
-    JsonLineClient,
     startHarness,
-    flushTimers,
-    invokePoolMethod,
-    createBaseTemplate,
-    poolModule
+    invokePoolMethod
 } = require("../common/harness.js");
-
-async function flushShareAccumulator(check, timeout = 200) {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        await flushTimers();
-        if (!check || check()) return;
-    }
-    if (!check || check()) return;
-    throw new Error("Timed out waiting for deferred share flush");
-}
 
 function assertLoginAccepted(reply) {
     assert.equal(reply.replies[0].error, null);

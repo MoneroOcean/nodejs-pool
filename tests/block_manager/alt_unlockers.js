@@ -249,6 +249,7 @@ function createUnlockerEnvironment(options = {}) {
             if (options.failTransactionOnBalanceUpdate && context.transactional) {
                 throw new Error("balance update failed");
             }
+            // params layout: pairCount (id, amount) pairs for the CASE, then the same ids for WHERE IN.
             const pairCount = params.length / 3;
             const updates = new Map();
             for (let i = 0; i < pairCount; ++i) {

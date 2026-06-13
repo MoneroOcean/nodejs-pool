@@ -5,8 +5,8 @@ module.exports = function dumpShares(depth, shouldPrint) {
         console.error("Depth must be a positive integer");
         process.exit(1);
     }
-    global.coinFuncs.getLastBlockHeader(function (err, body) {
-        if (err !== null) {
+    global.coinFuncs.getLastBlockHeader(function (error, body) {
+        if (error !== null) {
             console.error("Invalid block header");
             process.exit(1);
         }
@@ -16,12 +16,13 @@ module.exports = function dumpShares(depth, shouldPrint) {
         const cursor = new global.database.lmdb.Cursor(txn, global.database.shareDB);
 
         for (let blockID = lastBlock; blockID > lastBlock - depth; --blockID) {
+            // shareDB keys are block heights with duplicate values; only walk dups when an exact key match exists.
             for (let found = cursor.goToRange(parseInt(blockID)) === blockID; found; found = cursor.goToNextDup()) {
                 cursor.getCurrentBinary(function (_key, data) {
                     const shareData = global.protos.Share.decode(data);
                     if (!shouldPrint(shareData)) return;
-                    const d = new Date(shareData.timestamp);
-                    console.log(d.toString() + ": " + JSON.stringify(shareData));
+                    const date = new Date(shareData.timestamp);
+                    console.log(date.toString() + ": " + JSON.stringify(shareData));
                 }); // jshint ignore:line
             }
         }

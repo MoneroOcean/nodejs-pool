@@ -110,6 +110,7 @@ function createCryptonoteFixture(height) {
         encodeVarint(0)
     ]);
 
+    // tx_extra nonce tag (0x02) + 17-byte length; skip the 2 tag bytes to reach the pool-reserved region.
     const reserveTag = Buffer.concat([Buffer.from([0x02, 17]), Buffer.alloc(17, 0)]);
     const reserveTagOffset = blob.indexOf(reserveTag);
     const reservedOffset = reserveTagOffset + 2;
@@ -394,6 +395,7 @@ function createCoinFuncsStub() {
                 try {
                     return realCoinFuncs.convertBlob.call(this, blobBuffer, mapRealPort(this, port, blobBuffer[0]));
                 } catch (_error) {
+                    // Synthetic test blobs may not parse; fall back to the raw buffer below.
                 }
             }
             return Buffer.from(blobBuffer);

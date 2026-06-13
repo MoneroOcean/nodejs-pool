@@ -12,21 +12,10 @@ const {
     JsonLineClient,
     startHarness,
     flushTimers,
+    flushShareAccumulator,
     invokePoolMethod,
-    createBaseTemplate,
-    poolModule
+    createBaseTemplate
 } = require("../common/harness.js");
-
-async function flushShareAccumulator(check, timeout = 200) {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        await flushTimers();
-        if (!check || check()) return;
-    }
-    if (!check || check()) return;
-    throw new Error("Timed out waiting for deferred share flush");
-}
 
 function assertLoginAccepted(reply) {
     assert.equal(reply.replies[0].error, null);

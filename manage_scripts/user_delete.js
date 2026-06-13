@@ -4,5 +4,5 @@ const runUserDelete = require("./user_delete_common.js");
 const user = cli.arg("user", "Please specify user address to delete");
 
 cli.init(function() {
-	runUserDelete(user, { requireStaleBalance: true });
+    runUserDelete(user, { requireStaleBalance: true });
 });

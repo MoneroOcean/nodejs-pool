@@ -3,12 +3,9 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
-const createConstants = require("../../../lib/coins/constants.js");
-const helpers = require("../../../lib/coins/helpers.js");
 const createPoolState = require("../../../lib/pool/state.js");
 const createProtocolHandler = require("../../../lib/pool/protocol.js");
 const createServerFactory = require("../../../lib/pool/servers.js");
-const createTemplateManager = require("../../../lib/pool/templates.js");
 const createShareProcessor = require("../../../lib/pool/shares.js");
 
 function clearObject(target) {

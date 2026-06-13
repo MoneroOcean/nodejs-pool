@@ -1,7 +1,6 @@
 "use strict";
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const http = require("node:http");
 const path = require("node:path");
 const protobuf = require("protocol-buffers");
 const test = require("node:test");
@@ -22,58 +21,6 @@ async function waitForCondition(check, timeoutMs) {
         await wait(10);
     }
     throw new Error("Condition not met within " + timeoutMs + "ms");
-}
-
-function listenOnPort(port) {
-    return new Promise((resolve, reject) => {
-        const server = http.createServer();
-        server.once("error", reject);
-        server.listen(port, "127.0.0.1", function onListen() {
-            server.removeListener("error", reject);
-            resolve(server);
-        });
-    });
-}
-
-function closeServer(server) {
-    return new Promise((resolve, reject) => {
-        server.close(function onClose(error) {
-            if (error) {
-                reject(error);
-                return;
-            }
-            resolve();
-        });
-    });
-}
-
-async function waitForListening(runtime) {
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-        const address = runtime.address();
-        if (address && address.port) return address;
-        await wait(10);
-    }
-    throw new Error("remote_share runtime did not start listening");
-}
-
-function postFrame(port, body) {
-    return new Promise((resolve, reject) => {
-        const req = http.request({
-            host: "127.0.0.1",
-            port,
-            path: "/leafApi",
-            method: "POST",
-            headers: {
-                "Content-Type": "application/octet-stream",
-                "Content-Length": body.length
-            }
-        }, (res) => {
-            res.resume();
-            res.on("end", () => resolve(res.statusCode));
-        });
-        req.on("error", reject);
-        req.end(body);
-    });
 }
 
 function installRemoteShareGlobals(overrides) {

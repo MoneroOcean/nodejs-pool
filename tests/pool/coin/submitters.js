@@ -1,20 +1,12 @@
 "use strict";
 const assert = require("node:assert/strict");
-const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const process = require("node:process");
 const test = require("node:test");
 
-const loadRegistry = require("../../../lib/coins/core/registry.js");
-const {
-    MAIN_PORT,
-    createBaseTemplate,
-    installTestGlobals
-} = require("../common/harness.js");
+const { installTestGlobals } = require("../common/harness.js");
 
-const REAL_ETH_STYLE_PORT = 8645;
-const INSTANCE_ID_PID_MASK = (1 << 22) - 1;
 const XTM_T_MINING_HASH_OFFSET = 3;
 const XTM_T_MINING_HASH_SIZE = 32;
 const XTM_T_NONCE_OFFSET = XTM_T_MINING_HASH_OFFSET + XTM_T_MINING_HASH_SIZE;
@@ -32,46 +24,6 @@ const TARI_SOURCE_CANDIDATES = [
     "/usr/local/src/tari-src",
     process.env.HOME ? path.join(process.env.HOME, "tari") : ""
 ].filter(Boolean);
-
-function withPatchedPid(pid, fn) {
-    const originalDescriptor = Object.getOwnPropertyDescriptor(process, "pid");
-    Object.defineProperty(process, "pid", {
-        configurable: true,
-        value: pid
-    });
-
-    try {
-        return fn();
-    } finally {
-        Object.defineProperty(process, "pid", originalDescriptor);
-    }
-}
-
-function createInstanceIdWord(poolId, pid) {
-    const Coin = require("../../../lib/coins/index.js");
-    const previousPoolId = global.config.pool_id;
-    const realMainPort = global.coinFuncs.__realCoinFuncs.COIN2PORT("");
-    const template = {
-        ...createBaseTemplate({
-            coin: "",
-            port: MAIN_PORT,
-            idHash: "instance-id-" + poolId + "-" + pid,
-            height: 501
-        }),
-        port: realMainPort
-    };
-
-    try {
-        global.config.pool_id = poolId;
-        return withPatchedPid(pid, function buildInstanceIdWord() {
-            const realCoinFuncs = new Coin({});
-            const blockTemplate = new realCoinFuncs.BlockTemplate(template);
-            return blockTemplate.buffer.readUInt32LE(blockTemplate.reserved_offset + 4);
-        });
-    } finally {
-        global.config.pool_id = previousPoolId;
-    }
-}
 
 function createXtmTMiningBlob(miningHash, nonce, powData) {
     const powBytes = Buffer.alloc(XTM_T_POW_DATA_SIZE);

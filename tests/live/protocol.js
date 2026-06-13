@@ -245,6 +245,8 @@ async function isPoolEndpointReachable(host, port, useTls, timeoutMs = 1500) {
 
 const hasGpuProtocolProbe = (plan) => !plan.miner && !!plan.protocolProbe;
 const BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS = 15000;
+// Result hash of value 1: low enough to clear any block difficulty so the pool forwards it upstream.
+// Cryptonote results are little-endian (leading byte), ethash results big-endian (trailing byte).
 const CRYPTONOTE_HIGH_DIFF_RESULT_HEX = "01" + "00".repeat(31);
 const ETHASH_HIGH_DIFF_RESULT_HEX = "00".repeat(31) + "01";
 
@@ -257,6 +259,7 @@ function bigIntToLittleHex(value, size = 32) {
     return Buffer.from(hex, "hex").reverse().toString("hex");
 }
 
+// Difficulty maps to a target of BASE_DIFF/diff; a result hash <= target satisfies that difficulty.
 function buildResultHexForDifficulty(diff) {
     const normalized = BigInt(diff);
     if (normalized <= 0n) return "00".repeat(32);
@@ -409,6 +412,7 @@ function isSuccessfulSubmitResponse(message) {
     return !!message && !message.error && (message.result === true || message.result?.status === "OK");
 }
 
+// 16 hex-char nonce: the job's extranonce prefix, zero-padded, ending in 1 so the nonce is non-zero.
 function buildC29SubmitNonce(job) {
     const prefix = typeof job?.xn === "string" ? job.xn.toLowerCase() : "";
     return `${prefix}${"0".repeat(Math.max(0, 15 - prefix.length))}1`;

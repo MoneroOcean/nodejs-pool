@@ -105,7 +105,7 @@ class JsonLineClient {
     #onData(chunk) {
         this.buffer += chunk;
         const lines = this.buffer.split("\n");
-        this.buffer = lines.pop();
+        this.buffer = lines.pop(); // trailing element is a partial line; hold it for the next chunk
 
         for (const line of lines) {
             if (!line.trim()) continue;
@@ -125,7 +125,7 @@ class JsonLineClient {
             }
             const [message] = this.messages.splice(matchIndex, 1);
             clearTimeout(waiter.timer);
-            this.waiters.splice(index, 1);
+            this.waiters.splice(index, 1); // don't advance index: next waiter shifts into this slot
             waiter.resolve(message);
         }
     }
@@ -258,6 +258,19 @@ async function startHarness(extra = {}) {
 
 function flushTimers() { return new Promise((resolve) => setImmediate(resolve)); }
 
+// Drive the runtime until `check` passes (or time out), giving deferred share
+// accumulation a chance to flush between immediate ticks.
+async function flushShareAccumulator(check, timeout = 200) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await flushTimers();
+        if (!check || check()) return;
+    }
+    if (!check || check()) return;
+    throw new Error("Timed out waiting for deferred share flush");
+}
+
 function invokePoolMethod({
     socket = {},
     id = 1,
@@ -299,6 +312,7 @@ module.exports = {
     waitForSocketJson,
     startHarness,
     flushTimers,
+    flushShareAccumulator,
     invokePoolMethod,
     createBaseTemplate,
     installTestGlobals,

@@ -5,6 +5,8 @@ function cloneRows(rows) {
     });
 }
 
+// Minimal parser for the dynamically-built "UPDATE payment_batches SET ... WHERE id = ? [AND ...]"
+// statements: walks the SET assignments and trailing WHERE conjuncts, consuming params positionally.
 function applyPaymentBatchUpdate(store, sql, params) {
     const prefix = "UPDATE payment_batches SET ";
     if (!sql.startsWith(prefix)) return null;
@@ -119,6 +121,7 @@ function createFakeMysql(options = {}) {
 
     function maybeFail(sql, params, context) {
         for (const failure of failures) {
+            // once defaults to true: a used one-shot failure is skipped; once === false repeats forever.
             if (failure.used && failure.once !== false) continue;
             if (!failure.match(sql, params, context)) continue;
             failure.used = true;
@@ -329,6 +332,8 @@ function createFakeMysql(options = {}) {
             return { affectedRows: params[0].length };
         }
         if (sql.indexOf("UPDATE balance SET amount = amount - CASE id ") === 0) {
+            // Params layout: pairCount * [id, amount] for the CASE, then batchId, then pairCount ids
+            // for the IN list -> total 3 * pairCount + 1.
             const pairCount = (params.length - 1) / 3;
             const deductions = new Map();
             for (let index = 0; index < pairCount; ++index) {

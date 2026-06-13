@@ -6,50 +6,14 @@ const {
     MAIN_PORT,
     ETH_PORT,
     MAIN_WALLET,
-    ALT_WALLET,
     ETH_WALLET,
     VALID_RESULT,
     JsonLineClient,
     startHarness,
     flushTimers,
-    invokePoolMethod,
-    createBaseTemplate,
-    poolModule
+    flushShareAccumulator,
+    createBaseTemplate
 } = require("../common/harness.js");
-
-async function flushShareAccumulator(check, timeout = 200) {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        await flushTimers();
-        if (!check || check()) return;
-    }
-    if (!check || check()) return;
-    throw new Error("Timed out waiting for deferred share flush");
-}
-
-function assertLoginAccepted(reply) {
-    assert.equal(reply.replies[0].error, null);
-    assert.equal(reply.replies[0].result.status, "OK");
-}
-
-async function withLoggedInMiner(id, params, callback) {
-    const { runtime } = await startHarness();
-    const socket = {};
-
-    try {
-        const reply = invokePoolMethod({
-            socket,
-            id,
-            method: "login",
-            params
-        });
-        assertLoginAccepted(reply);
-        await callback(runtime.getState().activeMiners.get(socket.miner_id));
-    } finally {
-        await runtime.stop();
-    }
-}
 
 test.describe("pool protocol: stratum", { concurrency: false }, () => {
 test("default stratum miner can login, keepalive, and submit a valid share", async () => {

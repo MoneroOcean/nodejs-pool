@@ -11,6 +11,6 @@ cli.init(function() {
             txn.putBinary(global.database.blockDB, height, global.protos.Block.encode(blockData));
         }
         txn.commit();
-	console.log("Block on " + height + " height re-locked! Exiting!");
-	process.exit(0);
+        console.log("Block on " + height + " height re-locked! Exiting!");
+        process.exit(0);
 });

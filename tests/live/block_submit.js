@@ -194,6 +194,7 @@ function isBlockSubmitAttemptSettled(logText, expectation, worker) {
     if (outcomes.length === 0) return false;
 
     const chains = outcomes.map((entry) => entry.chain);
+    // A forbidden chain means the result is decided (it will fail the expectation), so stop waiting.
     if (expectation && Array.isArray(expectation.excludeChains) && expectation.excludeChains.some((prefix) => chains.some((chain) => chain.startsWith(prefix)))) {
         return true;
     }
@@ -234,6 +235,7 @@ async function waitForBlockSubmitAttemptFromPm2(run, files, logPaths, startOffse
     return { logText: bundle.text, worker: files.worker, summary: summarizeBlockSubmitLog(bundle.text, files.worker) };
 }
 
+// Stratum login convention (see lib/pool/miners.js): "wallet+diff" pins a fixed difficulty.
 function withFixedDifficulty(wallet, loginDiff) { return loginDiff ? `${wallet}+${loginDiff}` : wallet; }
 function blockSubmitAttemptTimeout(run) { return Math.min(run.config.timeoutMs, BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS); }
 

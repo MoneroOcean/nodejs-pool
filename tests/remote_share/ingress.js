@@ -6,7 +6,6 @@ const path = require("node:path");
 const protobuf = require("protocol-buffers");
 const test = require("node:test");
 
-const createPendingJobs = require("../../lib/remote_share/pending_jobs.js");
 global.__remoteShareAutostart = false;
 const createRemoteShareRuntime = require("../../lib/remote_share.js").createRemoteShareRuntime;
 delete global.__remoteShareAutostart;
@@ -195,72 +194,6 @@ function installRemoteShareGlobals(overrides) {
         global.coinFuncs = original.coinFuncs;
         global.support = original.support;
     };
-}
-
-function createMapStorage() {
-    const jobs = new Map();
-    return {
-        jobs,
-        save(job) {
-            jobs.set(job.key, { ...job });
-        },
-        remove(key) {
-            jobs.delete(key);
-        },
-        loadDueJobs(now, limit) {
-            return Array.from(jobs.values())
-                .filter((job) => job.nextAttemptAt <= now)
-                .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt || left.createdAt - right.createdAt)
-                .slice(0, limit)
-                .map((job) => ({ ...job }));
-        },
-        loadAllJobs() {
-            return Array.from(jobs.values()).map((job) => ({ ...job }));
-        },
-        close() {}
-    };
-}
-
-function createPendingJobDatabase() {
-    const stores = {
-        blockDB: new Map(),
-        altblockDB: new Map()
-    };
-    const resets = [];
-
-    function getStore(db) {
-        if (db === database.blockDB) return stores.blockDB;
-        if (db === database.altblockDB) return stores.altblockDB;
-        throw new Error("Unknown DB handle");
-    }
-
-    const database = {
-        blockDB: { name: "blockDB" },
-        altblockDB: { name: "altblockDB" },
-        env: {
-            beginTxn() {
-                return {
-                    getBinary(db, key) {
-                        return getStore(db).has(key) ? getStore(db).get(key) : null;
-                    },
-                    putBinary(db, key, value) {
-                        getStore(db).set(key, Buffer.from(value));
-                    },
-                    abort() {},
-                    commit() {}
-                };
-            }
-        },
-        getCache(key) {
-            if (key.indexOf("stats2") >= 0) return { roundHashes: 1234 };
-            return false;
-        },
-        incrementCacheData(key, value) {
-            resets.push({ key, value });
-        }
-    };
-
-    return { database, resets, stores };
 }
 
 test.describe("remote share ingress", { concurrency: false }, () => {

@@ -6,7 +6,7 @@ const dumpShares = require("./share_dump_common.js");
 console.log("Dumping shares");
 
 cli.init(function() {
-        dumpShares(depth, function () {
-                return true;
-        });
+    dumpShares(depth, function () {
+        return true;
+    });
 });

@@ -15,35 +15,6 @@ function cloneRows(rows) {
     });
 }
 
-async function captureConsole(run) {
-    const original = {
-        error: console.error,
-        log: console.log,
-        warn: console.warn
-    };
-    const output = { error: [], log: [], warn: [] };
-
-    console.error = function () {
-        output.error.push(Array.from(arguments).join(" "));
-    };
-    console.log = function () {
-        output.log.push(Array.from(arguments).join(" "));
-    };
-    console.warn = function () {
-        output.warn.push(Array.from(arguments).join(" "));
-    };
-
-    try {
-        await run(output);
-    } finally {
-        console.error = original.error;
-        console.log = original.log;
-        console.warn = original.warn;
-    }
-
-    return output;
-}
-
 function createUnlockerEnvironment(options = {}) {
     const shareDB = { name: "shareDB" };
     const shareEntries = new Map();
@@ -395,26 +366,6 @@ function createUnlockerEnvironment(options = {}) {
             });
         }
     };
-}
-
-function sortRows(rows) {
-    return rows.slice().sort(function (left, right) {
-        const leftKey = left.hex + ":" + left.payment_address + ":" + (left.payment_id || "");
-        const rightKey = right.hex + ":" + right.payment_address + ":" + (right.payment_id || "");
-        return leftKey.localeCompare(rightKey);
-    });
-}
-
-function assertApproxRows(actualRows, expectedRows) {
-    const actual = sortRows(actualRows);
-    const expected = sortRows(expectedRows);
-    assert.equal(actual.length, expected.length);
-    for (let index = 0; index < actual.length; ++index) {
-        assert.equal(actual[index].hex, expected[index].hex);
-        assert.equal(actual[index].payment_address, expected[index].payment_address);
-        assert.equal(actual[index].payment_id, expected[index].payment_id);
-        assert.ok(Math.abs(actual[index].amount - expected[index].amount) < 1e-12);
-    }
 }
 
 test.describe("block_manager main unlocker", { concurrency: false }, () => {

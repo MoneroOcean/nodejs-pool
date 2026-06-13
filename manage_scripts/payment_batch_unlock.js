@@ -159,6 +159,8 @@ async function unlockBatch(options) {
                 "UPDATE balance SET pending_batch_id = NULL WHERE pending_batch_id = ?",
                 [batchId]
             );
+            // Operator attestation that the wallet shows no matching tx lets us unlock past the submit
+            // boundary (status 'submitting', submit_started_at set); otherwise we only unlock pre-submit batches.
             const batchResult = confirmWalletHistoryChecked
                 ? await connection.query(
                     "UPDATE payment_batches SET status = ?, released_at = ?, updated_at = ?, submit_started_at = NULL, last_error_text = ? WHERE id = ? AND status IN ('reserved', 'retrying', 'submitting')",

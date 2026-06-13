@@ -89,6 +89,7 @@ const GPU_PROTOCOL_PROBE_ALGOS = new Set(["autolykos2", "c29", "etchash", "kawpo
 const stripAnsi = (value) => typeof value === "string" ? value.replace(ANSI_ESCAPE_PATTERN, "") : "";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Resolves (not rejects) with undefined on timeout so callers can probe a promise without try/catch.
 async function waitWithTimeout(promise, timeoutMs) {
     let timeoutHandle;
     try {

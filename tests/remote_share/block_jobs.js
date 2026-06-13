@@ -156,7 +156,6 @@ function createMapStorage() {
                 }
             }
             const loadedJobs = dueJobs
-                .filter((job) => job.nextAttemptAt <= now)
                 .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt || left.createdAt - right.createdAt)
                 .slice(0, limit)
                 .map((job) => ({ ...job }));

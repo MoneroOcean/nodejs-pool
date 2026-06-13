@@ -3,7 +3,6 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
-const test = require("node:test");
 
 const {
     MAIN_PORT,
@@ -21,6 +20,7 @@ const {
     waitForSocketJson,
     startHarness,
     flushTimers,
+    flushShareAccumulator,
     invokePoolMethod,
     createBaseTemplate,
     poolModule
@@ -69,17 +69,6 @@ function buildMainShareResult(runtime, socket, jobId, nonce) {
 
 function createMainPowVectorMap(vectors = RX0_MAIN_SHARE_VECTORS) {
     return Object.fromEntries(vectors.map((vector) => [vector.nonce, vector]));
-}
-
-async function flushShareAccumulator(check, timeout = 200) {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        await flushTimers();
-        if (!check || check()) return;
-    }
-    if (!check || check()) return;
-    throw new Error("Timed out waiting for deferred share flush");
 }
 
 async function enableBlockSubmitTestMode() {
@@ -195,6 +184,8 @@ function authorizeEthMiner(socket, authorizeId, pass) {
 }
 
 function buildEthSubmitNonce(extraNonce, suffix) {
+    // Blob type 102 shares the 8-byte (16 hex char) nonce field with the extranonce,
+    // so the miner-supplied portion shrinks by the extranonce length; otherwise it spans all 16.
     const isSharedNonceProfile = global.coinFuncs.portBlobType(ETH_PORT) === 102;
     const nonceLength = isSharedNonceProfile ? 16 - extraNonce.length : 16;
     return "0x" + suffix.padStart(nonceLength, "0");

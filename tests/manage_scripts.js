@@ -72,6 +72,7 @@ function installAccountGlobals(options) {
     const queries = [];
     global.config = { payout: { walletMin: 0.003 } };
     global.support = {
+        // 1e12 mirrors the real support module's config.coin.sigDigits (XMR atomic units per coin).
         coinToDecimal(value) {
             return Number(value) / 1000000000000;
         },

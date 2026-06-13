@@ -66,13 +66,27 @@ function createLifecycleHarness(rows, template) {
     return { fixes, lifecycle, state };
 }
 
+// Snapshot the globals each test stubs so the finally block can restore them.
+function saveGlobals() {
+    const saved = {
+        dateNow: Date.now,
+        config: global.config,
+        mysql: global.mysql,
+        coinFuncs: global.coinFuncs,
+        support: global.support
+    };
+    return function restore() {
+        Date.now = saved.dateNow;
+        global.config = saved.config;
+        global.mysql = saved.mysql;
+        global.coinFuncs = saved.coinFuncs;
+        global.support = saved.support;
+    };
+}
+
 test.describe("pool runtime: daemon recovery", { concurrency: false }, () => {
 test("stuck template recovery waits for grace, respects cooldown, and clears after catch-up", async () => {
-    const originalDateNow = Date.now;
-    const originalConfig = global.config;
-    const originalMysql = global.mysql;
-    const originalCoinFuncs = global.coinFuncs;
-    const originalSupport = global.support;
+    const restoreGlobals = saveGlobals();
     let now = 100000;
     const template = { port: 18081, height: 100, xtm_height: 200 };
     const rows = [
@@ -100,20 +114,12 @@ test("stuck template recovery waits for grace, respects cooldown, and clears aft
         assert.equal((await lifecycle.checkStuckTemplateHealth()).xmr, "grace");
         assert.equal(fixes.length, 1);
     } finally {
-        Date.now = originalDateNow;
-        global.config = originalConfig;
-        global.mysql = originalMysql;
-        global.coinFuncs = originalCoinFuncs;
-        global.support = originalSupport;
+        restoreGlobals();
     }
 });
 
 test("stuck template recovery uses one full-stack fix when XMR and XTM both lag", async () => {
-    const originalDateNow = Date.now;
-    const originalConfig = global.config;
-    const originalMysql = global.mysql;
-    const originalCoinFuncs = global.coinFuncs;
-    const originalSupport = global.support;
+    const restoreGlobals = saveGlobals();
     let now = 100000;
     const template = { port: 18081, height: 100, xtm_height: 200 };
     const rows = [
@@ -140,11 +146,7 @@ test("stuck template recovery uses one full-stack fix when XMR and XTM both lag"
             expectedXtmHeight: 205
         });
     } finally {
-        Date.now = originalDateNow;
-        global.config = originalConfig;
-        global.mysql = originalMysql;
-        global.coinFuncs = originalCoinFuncs;
-        global.support = originalSupport;
+        restoreGlobals();
     }
 });
 });

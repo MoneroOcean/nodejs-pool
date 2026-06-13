@@ -32,6 +32,7 @@ function flushBufferedOutput() {
     }
 }
 
+// Replay suppressed output only when opted in AND the run failed, so passing runs stay quiet.
 process.on("exit", (code) => {
     if (shouldFlushBufferedOutput && code !== 0) flushBufferedOutput();
 });
