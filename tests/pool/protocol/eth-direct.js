@@ -352,6 +352,81 @@ test("eth-style direct miners still accept submits that provide only the nonce s
     }
 });
 
+test("eth-style direct miners accept a nonce suffix submitted in uppercase hex", async () => {
+    const { runtime, database } = await startHarness();
+    const originalPortBlobType = global.coinFuncs.portBlobType;
+    const originalSlowHashBuff = global.coinFuncs.slowHashBuff;
+    const socket = {};
+    let observedNonce = null;
+
+    try {
+        global.coinFuncs.portBlobType = function patchedPortBlobType(port) {
+            if (port === ETH_PORT) return 102;
+            return originalPortBlobType.call(this, port);
+        };
+        global.coinFuncs.slowHashBuff = function patchedSlowHashBuff(buffer, blockTemplate, nonce, mixhash) {
+            if (blockTemplate.port === ETH_PORT) {
+                observedNonce = nonce;
+                return [Buffer.from("ff".repeat(32), "hex"), Buffer.from("cd".repeat(32), "hex")];
+            }
+            return originalSlowHashBuff.call(this, buffer, blockTemplate, nonce, mixhash);
+        };
+
+        const subscribeReply = invokePoolMethod({
+            socket,
+            id: 217,
+            method: "mining.subscribe",
+            params: ["HarnessEthMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+        const extraNonce = subscribeReply.replies[0].result[1];
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 218,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "eth-style-suffix-nonce-upper"],
+            portData: global.config.ports[1]
+        });
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const notifyPush = authorizeReply.pushes.find((message) => message.method === "mining.notify");
+        const job = miner.validJobs.toarray().find((entry) => entry.id === notifyPush.params[0]);
+        job.difficulty = 1;
+        job.rewarded_difficulty = 1;
+        job.rewarded_difficulty2 = 1;
+        job.norm_diff = 1;
+        state.activeBlockTemplates.ETH.hash = "34".repeat(32);
+        state.activeBlockTemplates.ETH.difficulty = 1000;
+
+        // Uppercase hex suffix must be lowercased like a full nonce, or it fails the
+        // lowercase-only nonce check and the valid share is wrongly rejected.
+        const submitReply = invokePoolMethod({
+            socket,
+            id: 219,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000AB",
+                `0x${"11".repeat(32)}`,
+                `0x${"22".repeat(32)}`
+            ],
+            portData: global.config.ports[1]
+        });
+
+        await flushShareAccumulator(() => database.shares.length === 1);
+        assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
+        assert.equal(observedNonce, `${extraNonce}0000000000ab`);
+        assert.equal(database.invalidShares.length, 0);
+        assert.equal(database.shares.length, 1);
+    } finally {
+        global.coinFuncs.portBlobType = originalPortBlobType;
+        global.coinFuncs.slowHashBuff = originalSlowHashBuff;
+        await runtime.stop();
+    }
+});
+
 test("eth-style direct miners reject full nonces that do not start with the subscribe extranonce", async () => {
     const { runtime, database } = await startHarness({ freeEthExtranonces: [0xff7e] });
     const originalPortBlobType = global.coinFuncs.portBlobType;
