@@ -363,6 +363,48 @@ test.describe("payment unlock batch helper", { concurrency: false }, () => {
         assert.equal(mysql.state.locks.size, 0);
     });
 
+    test("unlockBatch honors string-form force values like the CLI passes them", async () => {
+        const mysql = createMysql({
+            balances: [
+                { id: 1, payment_address: "4".repeat(95), payment_id: null, amount: 100, pending_batch_id: 11 }
+            ],
+            paymentBatchItems: [{
+                id: 1,
+                batch_id: 11,
+                balance_id: 1,
+                destination_order: 0,
+                payment_address: "4".repeat(95)
+            }],
+            paymentBatches: [{
+                id: 11,
+                status: "submitting",
+                submit_started_at: "2026-04-18 11:59:50",
+                submitted_at: null,
+                tx_hash: null,
+                tx_key: null,
+                transaction_id: null,
+                finalized_at: null,
+                released_at: null,
+                updated_at: "2026-04-18 11:59:50",
+                last_error_text: "submitting"
+            }]
+        });
+
+        // The CLI parser yields the string "true" for `--force=true`; unlockBatch must
+        // treat it like boolean true, matching how --confirm-wallet-history-checked works.
+        const result = await unlockBatch({
+            batchId: 11,
+            force: "true",
+            confirmWalletHistoryChecked: "1",
+            mysql,
+            nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
+            support: createSupport()
+        });
+
+        assert.deepEqual(result.riskFlags, ["status is submitting"]);
+        assert.equal(mysql.state.store.paymentBatches[0].status, "retryable");
+    });
+
     test("unlockBatch refuses post-submit batches even when force is requested", async () => {
         const mysql = createMysql({
             balances: [

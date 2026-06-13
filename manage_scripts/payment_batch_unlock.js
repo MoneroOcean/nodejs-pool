@@ -138,7 +138,7 @@ async function unlockBatch(options) {
     const mysql = opts.mysql || global.mysql;
     const support = opts.support || global.support;
     const batchId = parseBatchId(opts.batchId);
-    const force = opts.force === true;
+    const force = isBooleanOption(opts.force);
     const confirmWalletHistoryChecked = isBooleanOption(opts.confirmWalletHistoryChecked);
     const nowMs = typeof opts.nowMs === "number" ? opts.nowMs : Date.now();
 
