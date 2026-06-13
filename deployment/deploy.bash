@@ -48,6 +48,23 @@ SystemMaxFileSize=10M
 EOF
 }
 
+configure_unattended_upgrade_blacklist() {
+  install -d -m 755 /etc/apt/apt.conf.d
+  cat >/etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist <<'EOF'
+// MySQL package maintainer scripts stop/restart mysql during upgrades.
+// Keep database upgrades manual so pool operators control the downtime.
+Unattended-Upgrade::Package-Blacklist {
+  "^mysql-server$";
+  "^mysql-server-[0-9].*$";
+  "^mysql-server-core-[0-9].*$";
+  "^mysql-client-[0-9].*$";
+  "^mysql-client-core-[0-9].*$";
+  "^mysql-common$";
+};
+EOF
+  rm -f /etc/needrestart/conf.d/moneroocean-critical.conf
+}
+
 clone_repo_once() {
   local repo="$1"
   local dest="$2"
@@ -264,17 +281,7 @@ EOF
   fi
 }
 
-install -d -m 755 /etc/needrestart/conf.d
-cat >/etc/needrestart/conf.d/moneroocean-critical.conf <<'EOF'
-# Keep unattended package maintenance from restarting pool-critical services.
-# Operators should restart these deliberately during a maintenance window.
-$nrconf{override_rc}->{qr(^mysql\.service$)} = 0;
-$nrconf{override_rc}->{qr(^pm2-user\.service$)} = 0;
-$nrconf{override_rc}->{qr(^monero\.service$)} = 0;
-$nrconf{override_rc}->{qr(^xtm\.service$)} = 0;
-$nrconf{override_rc}->{qr(^xtm_mm\.service$)} = 0;
-EOF
-
+configure_unattended_upgrade_blacklist
 configure_overcommit
 configure_swap
 configure_journald_retention
