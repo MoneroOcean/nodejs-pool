@@ -32,6 +32,7 @@ function createTestEnvironment(options = {}) {
     const caches = new Map(Object.entries(clone(options.caches || {})));
     const cacheWrites = [];
     const mysqlQueries = [];
+    const supportRpcCalls = [];
     const readCounts = { blocks: 0, altblocks: 0 };
 
     function sortEntries(entries) {
@@ -162,7 +163,8 @@ function createTestEnvironment(options = {}) {
         formatDateFromSQL(value) {
             return "formatted:" + value;
         },
-        rpcPortDaemon(_port, _method, _params, callback) {
+        rpcPortDaemon(port, method, params, callback) {
+            supportRpcCalls.push({ port, method, params });
             callback({ result: { difficulty: 111 } });
         },
         sendEmail() {}
@@ -206,6 +208,7 @@ function createTestEnvironment(options = {}) {
         caches,
         cacheWrites,
         mysqlQueries,
+        supportRpcCalls,
         readCounts,
         resetReadCounts() {
             readCounts.blocks = 0;
@@ -444,7 +447,7 @@ test("monitorNodes uses one full-stack recovery when XMR and XTM both lag", asyn
 });
 
 test("startPoolStats initializes pool and network caches without waiting for prices", async () => {
-    createTestEnvironment({
+    const state = createTestEnvironment({
         daemonPort: "18000",
         ports: ["18000", "18081"],
         hashesPerDifficultyByPort: {
@@ -566,13 +569,14 @@ test("startPoolStats initializes pool and network caches without waiting for pri
             value: 2,
             ts: 1234
         },
-        difficulty: 111,
+        difficulty: 100,
         hash: "aa",
         main_height: 10,
         height: 10,
         value: 2,
         ts: 1234
     });
+    assert.deepEqual(state.supportRpcCalls, []);
     assert.equal(pendingPriceCallbacks.length, 3);
     assert.deepEqual(scheduledTasks, []);
 

@@ -633,6 +633,7 @@ test("wallet reward selectors stay on the coin profiles for asset-aware chains",
 test("cryptonote wallet reward lookup errors keep wallet source markers", async () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const rpc = coinFuncs.getRpcSettings("");
+    const profile = coinFuncs.getPoolProfile("");
     const calls = [];
 
     const result = await new Promise((resolve) => {
@@ -644,6 +645,7 @@ test("cryptonote wallet reward lookup errors keep wallet source markers", async 
             isOurBlock: true,
             noErrorReport: true,
             port: MAIN_PORT,
+            profile,
             runtime: {
                 support: {
                     rpcPortDaemon(port, method, params, callback, suppressErrorLog) {
@@ -680,7 +682,7 @@ test("cryptonote wallet reward lookup errors keep wallet source markers", async 
     assert.deepEqual(calls, [
         {
             port: MAIN_PORT,
-            method: "getblock",
+            method: "get_block",
             params: { hash: "aa".repeat(32) },
             suppressErrorLog: true
         },
