@@ -5,4 +5,5 @@ test.describe("remote share", { concurrency: false }, function remoteShareSuite(
     require("./remote_share/ingress.js");
     require("./remote_share/block_jobs.js");
     require("./remote_share/pending_summary.js");
+    require("./remote_share/share_store_validation.js");
 });
