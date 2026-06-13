@@ -143,7 +143,7 @@ test("cryptonote block-header reward lookup preserves suppress flags and wallet 
         global.support = {
             rpcPortDaemon(port, method, params, callback, suppressErrorLog) {
                 assert.equal(port, 18081);
-                assert.equal(method, "getblock");
+                assert.equal(method, "get_block");
                 assert.equal(suppressErrorLog, true);
                 callback({
                     result: {
