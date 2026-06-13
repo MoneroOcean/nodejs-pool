@@ -52,6 +52,7 @@ test.describe("pool runtime", { concurrency: false }, function poolRuntimeSuite(
     require("./pool/components/runtime.js");
     require("./pool/coin/basics.js");
     require("./pool/coin/submitters.js");
+    require("./pool/coin/agent_regex.js");
     require("./pool/protocol/stratum.js");
     require("./pool/protocol/jobs.js");
     require("./pool/protocol/eth-session.js");
