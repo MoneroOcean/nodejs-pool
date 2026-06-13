@@ -62,6 +62,7 @@ test.describe("pool runtime", { concurrency: false }, function poolRuntimeSuite(
     require("./pool/validation/login.js");
     require("./pool/validation/rate-limits.js");
     require("./pool/runtime/trust.js");
+    require("./pool/runtime/trust_gate.js");
     require("./pool/runtime/block-submit.js");
     require("./pool/runtime/daemon_recovery.js");
     require("./pool/runtime/daemons.js");
