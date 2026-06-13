@@ -81,8 +81,10 @@ function loginTrustedMiner(runtime, socket, id, worker) {
 
 function selectVerificationThenTrust() {
     let randomCall = 0;
-    // A failed trust decision consumes both random branches in isSafeToTrust.
-    crypto.randomBytes = () => Buffer.from([++randomCall <= 2 ? 0 : 255]);
+    // isSafeToTrust now draws a single random byte per trust decision (the old code drew one byte per
+    // OR-branch, which multiplied the trust probability). The first decision fails (draw 0 -> verify),
+    // every subsequent decision succeeds (draw 255 -> trusted).
+    crypto.randomBytes = () => Buffer.from([++randomCall <= 1 ? 0 : 255]);
 }
 
 test.describe("pool runtime: trust", { concurrency: false }, () => {
