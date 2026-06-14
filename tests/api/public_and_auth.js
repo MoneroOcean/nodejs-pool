@@ -401,6 +401,67 @@ test.describe("api public and auth", { concurrency: false }, () => {
         });
     });
 
+    test("subscribeEmail rejects non-string body fields before they reach SQL", async () => {
+        const mysql = createMysql(async function handler(sql, params) {
+            throw new Error("query must not run for rejected input: " + sql + " params=" + JSON.stringify(params));
+        });
+
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: createConfig(),
+            database: createDatabase({ caches: {} }),
+            mysql: mysql,
+            support: createSupport()
+        }, async (port) => {
+            // Array username would render as `WHERE username = 4` (mass match) if it reached SQL.
+            const arrayUser = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: [4], enabled: 0, from: "", to: ""
+            });
+            assert.equal(arrayUser.statusCode, 401);
+
+            // Object enabled would expand into extra SET assignments (e.g. payout_threshold_lock).
+            const objectEnabled = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet", enabled: { id: 0, payout_threshold_lock: 1 }, from: "", to: ""
+            });
+            assert.equal(objectEnabled.statusCode, 400);
+
+            // Non-string email fields are rejected too.
+            const arrayTo = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet", enabled: 1, from: "", to: ["a@b.c"]
+            });
+            assert.equal(arrayTo.statusCode, 400);
+
+            assert.equal(mysql.calls.length, 0);
+        });
+    });
+
+    test("subscribeEmail still accepts a normal scalar request", async () => {
+        let updateCalls = 0;
+        const mysql = createMysql(async function handler(sql, params) {
+            if (sql.startsWith("UPDATE users SET enable_email = ? WHERE username = ?")) {
+                updateCalls += 1;
+                assert.deepEqual(params, [1, "wallet"]);
+                return { affectedRows: 1 };
+            }
+            throw new Error("Unexpected SQL: " + sql);
+        });
+
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: createConfig(),
+            database: createDatabase({ caches: {} }),
+            mysql: mysql,
+            support: createSupport()
+        }, async (port) => {
+            const ok = await requestJson(port, "POST", "/user/subscribeEmail", {
+                username: "wallet", enabled: 1, from: "", to: ""
+            });
+            assert.equal(ok.statusCode, 200);
+            assert.deepEqual(ok.json, { msg: "Email preferences were updated" });
+            assert.equal(updateCalls, 1);
+        });
+    });
+
     test("public threshold updates still work and missing worker cache rows fail safely", async () => {
         const mysql = createMysql(async function handler(sql) {
             if (sql.startsWith("SELECT id FROM users WHERE username = ? AND payout_threshold_lock = '1'")) return [];
