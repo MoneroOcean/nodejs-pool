@@ -11,6 +11,11 @@ if (fs.existsSync(dir + "/data.mdb")) {
 }
 
 cli.init(function() {
+    // Each DB is copied under a single source read txn so the copy is a consistent snapshot.
+    // That snapshot is held for the whole copy, which pins source pages and blocks reuse - run
+    // this with the pool stopped, otherwise a large copy can drive a live source DB to map-full.
+    console.log("Note: copying holds a read snapshot of the source DB; run with the pool stopped.");
+
     let env2 = new lmdb.Env();
     env2.open({
         path: dir,
@@ -19,53 +24,64 @@ cli.init(function() {
         useWritemap: true,
         maxReaders: 512
     });
-    const databases = [
-        {
-            label: "blocks",
-            source: global.database.blockDB,
-            target: env2.openDbi({ name: "blocks", create: true, integerKey: true, keyIsUint32: true })
-        },
-        {
-            label: "altblocks",
-            source: global.database.altblockDB,
-            target: env2.openDbi({ name: "altblocks", create: true, integerKey: true, keyIsUint32: true })
-        },
-        {
-            label: "shares",
-            source: global.database.shareDB,
-            target: env2.openDbi({
-                name: "shares",
-                create: true,
-                dupSort: true,
-                dupFixed: false,
-                integerDup: true,
-                integerKey: true,
-                keyIsUint32: true
-            })
-        },
-        {
-            label: "cache",
-            source: global.database.cacheDB,
-            target: env2.openDbi({ name: "cache", create: true })
-        }
-    ];
+    // env2 is a second env not covered by the init_mini exit handler, so it is closed in a
+    // finally below and each per-DB copy ends its txns/cursor on every path.
+    try {
+        const databases = [
+            {
+                label: "blocks",
+                source: global.database.blockDB,
+                target: env2.openDbi({ name: "blocks", create: true, integerKey: true, keyIsUint32: true })
+            },
+            {
+                label: "altblocks",
+                source: global.database.altblockDB,
+                target: env2.openDbi({ name: "altblocks", create: true, integerKey: true, keyIsUint32: true })
+            },
+            {
+                label: "shares",
+                source: global.database.shareDB,
+                target: env2.openDbi({
+                    name: "shares",
+                    create: true,
+                    dupSort: true,
+                    dupFixed: false,
+                    integerDup: true,
+                    integerKey: true,
+                    keyIsUint32: true
+                })
+            },
+            {
+                label: "cache",
+                source: global.database.cacheDB,
+                target: env2.openDbi({ name: "cache", create: true })
+            }
+        ];
 
-    databases.forEach(function copyDb(database) {
-        console.log("Copying " + database.label);
-        let txn = global.database.env.beginTxn({ readOnly: true });
-        let txn2 = env2.beginTxn();
-        let cursor = new global.database.lmdb.Cursor(txn, database.source);
-        for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
-            cursor.getCurrentBinary(function(key, data) {
-                txn2.putBinary(database.target, key, data);
-            });
-        }
-        cursor.close();
-        txn.commit();
-        txn2.commit();
-    });
+        databases.forEach(function copyDb(database) {
+            console.log("Copying " + database.label);
+            const txn = global.database.env.beginTxn({ readOnly: true });
+            const cursor = new global.database.lmdb.Cursor(txn, database.source);
+            const txn2 = env2.beginTxn();
+            try {
+                for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
+                    cursor.getCurrentBinary(function(key, data) {
+                        txn2.putBinary(database.target, key, data);
+                    });
+                }
+                txn2.commit();
+            } catch (error) {
+                txn2.abort();
+                throw error;
+            } finally {
+                cursor.close();
+                txn.abort();
+            }
+        });
+    } finally {
+        env2.close();
+    }
 
-    env2.close();
     console.log("DONE");
     process.exit(0);
 });
