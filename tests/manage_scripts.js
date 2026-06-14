@@ -448,6 +448,31 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
+    test("non-force balance move refuses source rows reserved by payment batch", async function testNonForceMovePendingBatch() {
+        const globals = installAccountGlobals({
+            rows: {
+                balance: [
+                    { payment_address: "old", payment_id: null, amount: 1, last_edited: "2026-01-01 00:00:00", pending_batch_id: 7 },
+                    { payment_address: "new", payment_id: null, amount: 2, last_edited: "2026-01-01 00:00:00", pending_batch_id: null }
+                ]
+            }
+        });
+        try {
+            await withCapturedConsole(function runCaptured() {
+                return assert.rejects(
+                    withExitTrap(function runPlan() {
+                        return moveBalance.buildBalanceMovePlan("old", "new", {});
+                    }),
+                    function matchExit(error) {
+                        return error && error.message === "process.exit" && error.code === 1;
+                    }
+                );
+            });
+        } finally {
+            globals.restore();
+        }
+    });
+
     test("init_mini resolves repo files independently of cwd", async function testInitMiniPaths() {
         const originalLoad = Module._load;
         const originalCwd = process.cwd();

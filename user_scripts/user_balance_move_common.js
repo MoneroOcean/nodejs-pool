@@ -11,7 +11,7 @@ function requireForceConfirmation(options) {
 
 function assertNotPendingPayment(row) {
     if (row && row.pending_batch_id !== null && typeof row.pending_batch_id !== "undefined") {
-        console.error("Source balance is reserved by pending payment batch " + row.pending_batch_id + ". Refusing force move.");
+        console.error("Source balance is reserved by pending payment batch " + row.pending_batch_id + ". Refusing to move reserved balance.");
         process.exit(1);
     }
 }
@@ -55,7 +55,11 @@ async function buildBalanceMovePlan(oldUser, newUser, options) {
         console.error("Source user has invalid balance amount");
         process.exit(1);
     }
-    if (options.force === true) assertNotPendingPayment(oldRow);
+    // A balance reserved by an in-flight payment batch must never be moved: the
+    // batch may already have sent (or be about to send) to the original address,
+    // so relocating the funds here would let the same money be paid twice. This
+    // check is unconditional; the non-force tool used to skip it.
+    assertNotPendingPayment(oldRow);
     if (options.requireStaleBalance === true && Date.now() / 1000 - global.support.formatDateFromSQL(rows[0].last_edited) < 24 * 60 * 60) {
         console.error("There was recent amount update. Refusing to continue!");
         process.exit(1);

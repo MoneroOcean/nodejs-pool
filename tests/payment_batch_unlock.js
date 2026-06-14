@@ -178,6 +178,10 @@ function createMysql(options = {}) {
     };
 }
 
+async function noWalletMatch() {
+    return { status: "no_match" };
+}
+
 function createSupport() {
     return {
         formatDate(timestampMs) {
@@ -294,6 +298,7 @@ test.describe("payment unlock batch helper", { concurrency: false }, () => {
             batchId: 5,
             force: false,
             confirmWalletHistoryChecked: true,
+            walletMatchChecker: noWalletMatch,
             mysql,
             nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
             support: createSupport()
@@ -344,6 +349,7 @@ test.describe("payment unlock batch helper", { concurrency: false }, () => {
             batchId: 11,
             force: true,
             confirmWalletHistoryChecked: true,
+            walletMatchChecker: noWalletMatch,
             mysql,
             nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
             support: createSupport()
@@ -396,6 +402,7 @@ test.describe("payment unlock batch helper", { concurrency: false }, () => {
             batchId: 11,
             force: "true",
             confirmWalletHistoryChecked: "1",
+            walletMatchChecker: noWalletMatch,
             mysql,
             nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
             support: createSupport()
@@ -403,6 +410,106 @@ test.describe("payment unlock batch helper", { concurrency: false }, () => {
 
         assert.deepEqual(result.riskFlags, ["status is submitting"]);
         assert.equal(mysql.state.store.paymentBatches[0].status, "retryable");
+    });
+
+    test("unlockBatch refuses to cross the submit boundary when the wallet shows a matching transfer", async () => {
+        const mysql = createMysql({
+            balances: [
+                { id: 1, payment_address: "4".repeat(95), payment_id: null, amount: 100, pending_batch_id: 21 }
+            ],
+            paymentBatchItems: [{
+                id: 1,
+                batch_id: 21,
+                balance_id: 1,
+                destination_order: 0,
+                payment_address: "4".repeat(95)
+            }],
+            paymentBatches: [{
+                id: 21,
+                status: "submitting",
+                submit_started_at: "2026-04-18 11:59:50",
+                submitted_at: null,
+                tx_hash: null,
+                tx_key: null,
+                transaction_id: null,
+                finalized_at: null,
+                released_at: null,
+                updated_at: "2026-04-18 11:59:50",
+                last_error_text: "submitting"
+            }]
+        });
+
+        await assert.rejects(async function rejectMatchedTransfer() {
+            await unlockBatch({
+                batchId: 21,
+                force: true,
+                confirmWalletHistoryChecked: true,
+                walletMatchChecker: async function matched() { return { status: "match_found", txid: "abc123" }; },
+                mysql,
+                nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
+                support: createSupport()
+            });
+        }, function assertMatched(error) {
+            assert.equal(error.code, "wallet_tx_match");
+            assert.match(error.message, /wallet history shows a matching transfer/);
+            return true;
+        });
+
+        assert.equal(mysql.state.store.balances[0].pending_batch_id, 21);
+        assert.equal(mysql.state.store.paymentBatches[0].status, "submitting");
+        assert.equal(mysql.state.store.paymentBatches[0].submit_started_at, "2026-04-18 11:59:50");
+        assert.equal(mysql.state.state.beginCount, 0);
+        assert.equal(mysql.state.state.commitCount, 0);
+        assert.equal(mysql.state.locks.size, 0);
+    });
+
+    test("unlockBatch fails closed across the submit boundary when the wallet cannot be verified", async () => {
+        const mysql = createMysql({
+            balances: [
+                { id: 1, payment_address: "4".repeat(95), payment_id: null, amount: 100, pending_batch_id: 23 }
+            ],
+            paymentBatchItems: [{
+                id: 1,
+                batch_id: 23,
+                balance_id: 1,
+                destination_order: 0,
+                payment_address: "4".repeat(95)
+            }],
+            paymentBatches: [{
+                id: 23,
+                status: "submitting",
+                submit_started_at: "2026-04-18 11:59:50",
+                submitted_at: null,
+                tx_hash: null,
+                tx_key: null,
+                transaction_id: null,
+                finalized_at: null,
+                released_at: null,
+                updated_at: "2026-04-18 11:59:50",
+                last_error_text: "submitting"
+            }]
+        });
+
+        await assert.rejects(async function rejectUnverifiableWallet() {
+            await unlockBatch({
+                batchId: 23,
+                force: true,
+                confirmWalletHistoryChecked: true,
+                walletMatchChecker: async function unavailable() { return { status: "wallet_unavailable", message: "wallet height lookup failed" }; },
+                mysql,
+                nowMs: Date.UTC(2026, 3, 18, 12, 0, 0),
+                support: createSupport()
+            });
+        }, function assertUnverifiable(error) {
+            assert.equal(error.code, "wallet_unavailable");
+            assert.match(error.message, /could not verify wallet history/);
+            return true;
+        });
+
+        assert.equal(mysql.state.store.balances[0].pending_batch_id, 23);
+        assert.equal(mysql.state.store.paymentBatches[0].status, "submitting");
+        assert.equal(mysql.state.state.beginCount, 0);
+        assert.equal(mysql.state.locks.size, 0);
     });
 
     test("unlockBatch refuses post-submit batches even when force is requested", async () => {

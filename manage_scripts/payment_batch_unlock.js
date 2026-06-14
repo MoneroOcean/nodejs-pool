@@ -1,6 +1,10 @@
 "use strict";
+const createPaymentsCommon = require("../lib/payments/common.js");
 const ADVISORY_LOCK_NAME = "nodejs-pool:payments";
 const SAFE_BATCH_STATUSES = new Set(["reserved", "retrying"]);
+// Mirror the runtime reconcile lookback so the operator-side wallet check scans
+// the same recent-transfer window rather than the whole wallet history.
+const RECENT_TRANSFER_LOOKBACK_BLOCKS = 31 * 24 * 30;
 
 function isBooleanOption(value) {
     return value === true || value === "true" || value === "1";
@@ -133,10 +137,77 @@ function assertUnlockAllowed(batchId, batch, items, reservedBalances, force, con
     return riskFlags;
 }
 
+function rpcWalletCall(support, method, params) {
+    return new Promise(function resolveCall(resolve) {
+        support.rpcWallet(method, params, resolve, true);
+    });
+}
+
+// Crossing the wallet submit boundary on operator attestation alone is unsafe: a
+// 'submitting' batch may have already broadcast its transfer. Instead of trusting
+// the human "I checked wallet history" claim, the tool checks it itself using the
+// exact same matching the runtime uses to auto-reconcile, and fails closed if the
+// wallet cannot be reached. Returns one of:
+//   { status: "no_match" }            -> safe to unlock
+//   { status: "match_found", txid }   -> a real transfer matches; refuse
+//   { status: "wallet_unavailable" }  -> cannot prove safety; refuse
+async function defaultWalletMatchChecker(batch, items, deps) {
+    const support = deps && deps.support;
+    const config = deps && deps.config;
+    if (!support || typeof support.rpcWallet !== "function") {
+        return { status: "wallet_unavailable", message: "wallet RPC is not available" };
+    }
+    const common = createPaymentsCommon({ mysqlPool: global.mysql, support, config });
+    const heightReply = await rpcWalletCall(support, "get_height", {});
+    const walletHeight = heightReply && heightReply.result ? Number(heightReply.result.height) : null;
+    if (walletHeight === null || !Number.isFinite(walletHeight)) {
+        return { status: "wallet_unavailable", message: "wallet height lookup failed" };
+    }
+    const reply = await rpcWalletCall(support, "get_transfers", {
+        out: true,
+        pending: true,
+        pool: true,
+        filter_by_height: true,
+        min_height: Math.max(0, walletHeight - RECENT_TRANSFER_LOOKBACK_BLOCKS),
+        max_height: walletHeight
+    });
+    if (!reply || typeof reply !== "object" || !reply.result) {
+        return { status: "wallet_unavailable", message: "wallet get_transfers failed" };
+    }
+    const transfers = [];
+    for (const key of ["out", "pending", "pool"]) {
+        if (Array.isArray(reply.result[key])) transfers.push.apply(transfers, reply.result[key]);
+    }
+    const match = transfers.find(function matches(transfer) {
+        return common.transferMatchesBatch(batch, items, transfer);
+    });
+    return match ? { status: "match_found", txid: match.txid } : { status: "no_match" };
+}
+
+async function assertWalletHistoryClear(batchId, loaded, walletMatchChecker, deps) {
+    const matchResult = await walletMatchChecker(loaded.batch, loaded.items, deps);
+    if (matchResult && matchResult.status === "no_match") return;
+    if (matchResult && matchResult.status === "match_found") {
+        throw createUnlockError(
+            "Refusing to unlock payment batch " + batchId + ": wallet history shows a matching transfer (" +
+                matchResult.txid + "); the batch was already sent.",
+            { code: "wallet_tx_match", txid: matchResult.txid, items: loaded.items, reservedBalances: loaded.reservedBalances }
+        );
+    }
+    throw createUnlockError(
+        "Refusing to unlock payment batch " + batchId + ": could not verify wallet history (" +
+            ((matchResult && matchResult.message) || (matchResult && matchResult.status) || "no result") +
+            "). Re-run once the wallet is reachable.",
+        { code: "wallet_unavailable", items: loaded.items, reservedBalances: loaded.reservedBalances }
+    );
+}
+
 async function unlockBatch(options) {
     const opts = options || {};
     const mysql = opts.mysql || global.mysql;
     const support = opts.support || global.support;
+    const config = opts.config || global.config;
+    const walletMatchChecker = opts.walletMatchChecker || defaultWalletMatchChecker;
     const batchId = parseBatchId(opts.batchId);
     const force = isBooleanOption(opts.force);
     const confirmWalletHistoryChecked = isBooleanOption(opts.confirmWalletHistoryChecked);
@@ -149,6 +220,12 @@ async function unlockBatch(options) {
     return await withPaymentsAdvisoryLock(mysql, async function runUnlock(connection) {
         const loaded = await loadBatchState(connection, batchId);
         const riskFlags = assertUnlockAllowed(batchId, loaded.batch, loaded.items, loaded.reservedBalances, force, confirmWalletHistoryChecked);
+        // The only way past the submit boundary is the operator attestation flag.
+        // Verify that attestation against the wallet ourselves (fail closed) so a
+        // wrong "no matching tx" judgment cannot free a batch that actually sent.
+        if (confirmWalletHistoryChecked && isPresent(loaded.batch.submit_started_at)) {
+            await assertWalletHistoryClear(batchId, loaded, walletMatchChecker, { support, config });
+        }
         const releasedAt = nowSqlTimestamp(support, nowMs);
         const note = "manually released for retry by manage_scripts/payment_batch_unlock.js at " + releasedAt +
             (confirmWalletHistoryChecked ? " (wallet history checked and confirmed no tx match)" : "");
