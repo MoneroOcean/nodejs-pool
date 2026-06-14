@@ -78,6 +78,21 @@ function createFakeEnvironment(options = {}) {
             return this.entries[this.index][0];
         }
 
+        goToRange(key) {
+            for (let i = 0; i < this.entries.length; ++i) {
+                const candidate = this.entries[i][0];
+                const ordered = (typeof candidate === "number" && typeof key === "number")
+                    ? candidate - key
+                    : String(candidate).localeCompare(String(key));
+                if (ordered >= 0) {
+                    this.index = i;
+                    return candidate;
+                }
+            }
+            this.index = -1;
+            return null;
+        }
+
         getCurrentString(callback) {
             callback(this.entries[this.index][0], this.entries[this.index][1]);
         }
@@ -210,6 +225,7 @@ test.afterEach(() => {
     global.config = originalConfig;
     global.protos = originalProtos;
     delete global.__longRunnerAutostart;
+    delete global.__longRunnerScanChunkSize;
     delete require.cache[LONG_RUNNER_PATH];
 });
 
@@ -339,6 +355,38 @@ test("cleanCacheDB ignores MDB_NOTFOUND when a queued key disappears before dele
     assert.equal(state.cacheStore.has(worker), false);
     assert.equal(state.cacheStore.has("history:" + worker), false);
     assert.equal(state.cacheStore.has("stats:" + worker), false);
+});
+
+test("cleanCacheDB yields identical results when the scan spans multiple chunks", () => {
+    const now = Date.now();
+    const address = "4".repeat(95);
+    function buildEntries() {
+        return [
+            ["identifiers:" + address, JSON.stringify(["rigA", "rigB"])],
+            ["stats:" + address + "_rigA", JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
+            ["stats:" + address + "_rigB", JSON.stringify({ lastHash: now - 23 * 60 * 60 * 1000 })],
+            ["stats:" + address, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
+            ["history:" + address, HISTORY_FIXTURE_VALUE],
+            [address + "_oldworker", JSON.stringify({ value: 1 })],
+            ["history:" + address + "_oldworker", HISTORY_FIXTURE_VALUE],
+            ["stats:" + address + "_oldworker", JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
+            [address + "_fresh", JSON.stringify({ value: 4 })],
+            ["history:" + address + "_fresh", HISTORY_FIXTURE_VALUE],
+            ["stats:" + address + "_fresh", JSON.stringify({ lastHash: now })],
+            ["tiny_old", JSON.stringify({ untouched: true })]
+        ];
+    }
+
+    const singleChunk = createFakeEnvironment({ cacheEntries: buildEntries() });
+    loadLongRunner().cleanCacheDB();
+    const expected = Array.from(singleChunk.cacheStore.entries()).sort();
+
+    global.__longRunnerScanChunkSize = 3;
+    const multiChunk = createFakeEnvironment({ cacheEntries: buildEntries() });
+    loadLongRunner().cleanCacheDB();
+    const actual = Array.from(multiChunk.cacheStore.entries()).sort();
+
+    assert.deepEqual(actual, expected);
 });
 
 test("cleanAltBlockDB removes only unlocked overflow or expired rows", () => {

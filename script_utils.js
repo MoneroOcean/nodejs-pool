@@ -13,14 +13,17 @@ function forEachEntry(database, reader, iterator, reverse) {
     const startMethod = reverse === true ? "goToLast" : "goToFirst";
     const nextMethod = reverse === true ? "goToPrev" : "goToNext";
 
-    for (let found = cursor[startMethod](); found; found = cursor[nextMethod]()) {
-        cursor[reader](function onEntry(key, data) {
-            iterator(key, data);
-        }); // jshint ignore:line
+    try {
+        for (let found = cursor[startMethod](); found; found = cursor[nextMethod]()) {
+            cursor[reader](function onEntry(key, data) {
+                iterator(key, data);
+            }); // jshint ignore:line
+        }
+    } finally {
+        // Release the cursor/read txn even if the iterator throws, so the slot is not held open.
+        cursor.close();
+        txn.commit();
     }
-
-    cursor.close();
-    txn.commit();
 }
 
 function createCli(options) {

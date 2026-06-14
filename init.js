@@ -74,10 +74,18 @@ function syncDatabaseEnv() {
     });
 }
 
+let databaseEnvClosed = false;
 function closeDatabaseEnv() {
+    if (databaseEnvClosed) return;
     const env = global.database && global.database.env;
     if (!env || typeof env.close !== "function") return;
-    env.close();
+    // Mark closed before calling close() so a later exit handler never double-closes (which throws).
+    databaseEnvClosed = true;
+    try {
+        env.close();
+    } catch (error) {
+        console.error("LMDB close failed: " + shutdownErrorMessage(error));
+    }
 }
 
 function installGracefulShutdown(name) {
@@ -121,6 +129,12 @@ function installGracefulShutdown(name) {
             process.exit(1);
         });
     });
+
+    // Final safety net: close the LMDB env (which frees this process's reader slots) on any exit
+    // path the graceful handler does not cover - process.exit() on a load error, an uncaught
+    // exception, or an unhandled rejection. Node runs "exit" listeners synchronously for all of
+    // these, and the close is idempotent, so this never double-closes after a graceful shutdown.
+    process.on("exit", closeDatabaseEnv);
 }
 
 function loadPoolModule() {

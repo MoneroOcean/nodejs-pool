@@ -19,15 +19,21 @@ cli.init(function() {
 
         let chunkSize = 0;
         let txn = global.database.env.beginTxn();
-        deleted.forEach(function(key) {
-            ++ chunkSize;
-            txn.del(global.database.altblockDB, key);
-            if (chunkSize > 500) {
+        try {
+            deleted.forEach(function(key) {
+                ++ chunkSize;
+                txn.del(global.database.altblockDB, key);
+                if (chunkSize > 500) {
+                    txn.commit();
+                    txn = global.database.env.beginTxn();
+                    chunkSize = 0;
+                }
+            });
             txn.commit();
-        txn = global.database.env.beginTxn();
-                chunkSize = 0;
+        } catch (error) {
+            // Abort the open write txn so the env's single writer lock is released immediately.
+            try { txn.abort(); } catch (_error) {}
+            throw error;
         }
-        });
-        txn.commit();
     process.exit(0);
 });
