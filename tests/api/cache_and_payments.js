@@ -327,7 +327,7 @@ test.describe("api cache and payments", { concurrency: false }, () => {
         const config = createConfig();
         config.pplns.enable = false;
         const mysql = createMysql(async function handler(sql, params, calls) {
-            if (sql.startsWith("SELECT * FROM transactions ORDER BY id DESC")) {
+            if (sql.includes("FROM transactions ORDER BY id DESC")) {
                 return [
                     { id: 11, transaction_hash: "hash11", mixin: 12, payees: 1, fees: 2, xmr_amt: 3, submitted_time: "2024-01-02T00:00:00Z" },
                     { id: 10, transaction_hash: "hash10", mixin: 11, payees: 2, fees: 3, xmr_amt: 4, submitted_time: "2024-01-01T00:00:00Z" }
@@ -385,7 +385,7 @@ test.describe("api cache and payments", { concurrency: false }, () => {
 
     test("block payment lookups stay parameterized when the wallet path contains injection text", async () => {
         const mysql = createMysql(async function handler(sql) {
-            if (sql.startsWith("SELECT * FROM paid_blocks")) {
+            if (sql.includes("FROM paid_blocks WHERE")) {
                 return [
                     { id: 1, paid_time: "2024-01-02T00:00:00Z", found_time: "2024-01-01T00:00:00Z", port: 18081, hex: "hex1", amount: 1000 },
                     { id: 2, paid_time: "2024-01-03T00:00:00Z", found_time: "2024-01-02T00:00:00Z", port: 18081, hex: "hex2", amount: 2000 }
@@ -411,6 +411,84 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             assert.equal(mysql.calls[1].params[0], attack);
             assert.equal(mysql.calls[1].params[1], "hex1");
             assert.equal(mysql.calls[1].params[2], "hex2");
+        });
+    });
+
+    test("block payment lookups reuse the address-independent paid_blocks scan across miners", async () => {
+        let paidBlocksCalls = 0;
+        let balanceCalls = 0;
+        const mysql = createMysql(async function handler(sql) {
+            if (sql.includes("FROM paid_blocks WHERE")) {
+                paidBlocksCalls += 1;
+                assert.doesNotMatch(sql, /SELECT \*/);
+                return [{ id: 1, paid_time: "2024-01-02T00:00:00Z", found_time: "2024-01-01T00:00:00Z", port: 18081, hex: "hex1", amount: 1000 }];
+            }
+            if (sql.startsWith("SELECT hex, amount FROM block_balance")) {
+                balanceCalls += 1;
+                return [{ hex: "hex1", amount: 0.5 }];
+            }
+            throw new Error("Unexpected SQL: " + sql);
+        });
+
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: createConfig(),
+            database: createDatabase({ caches: {} }),
+            mysql: mysql,
+            support: createSupport()
+        }, async (port) => {
+            const a = await request(port, { path: "/miner/walletA/block_payments?limit=15&page=0" });
+            const b = await request(port, { path: "/miner/walletB/block_payments?limit=15&page=0" });
+            assert.equal(a.statusCode, 200);
+            assert.equal(b.statusCode, 200);
+            // The 7-day paid_blocks scan is identical for every miner, so it runs once;
+            // only the per-miner block_balance lookup repeats.
+            assert.equal(paidBlocksCalls, 1);
+            assert.equal(balanceCalls, 2);
+        });
+    });
+
+    test("pool payments select explicit transaction columns, never SELECT *", async () => {
+        const seen = [];
+        const mysql = createMysql(async function handler(sql) {
+            seen.push(sql);
+            if (sql.includes("FROM transactions ORDER BY id DESC")) {
+                return [{ id: 1, transaction_hash: "h1", mixin: 7, payees: 1, fees: 2, xmr_amt: 3, submitted_time: "2024-01-02T00:00:00Z" }];
+            }
+            throw new Error("Unexpected SQL: " + sql);
+        });
+
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: createConfig(),
+            database: createDatabase({ caches: {} }),
+            mysql: mysql,
+            support: createSupport()
+        }, async (port) => {
+            const res = await request(port, { path: "/pool/payments/pplns?limit=15&page=0" });
+            assert.equal(res.statusCode, 200);
+            const txnSql = seen.find((sql) => sql.includes("FROM transactions ORDER BY id DESC"));
+            assert.ok(txnSql, "transactions query ran");
+            assert.doesNotMatch(txnSql, /SELECT \*/);
+            assert.doesNotMatch(txnSql, /\baddress\b/);
+            assert.doesNotMatch(txnSql, /payment_id/);
+        });
+    });
+
+    test("coin altblocks cache key normalizes the port so equivalent spellings share one entry", async () => {
+        const database = createDatabase({ caches: {} });
+        await withRuntime({
+            blockTemplate: createBlockTemplate(),
+            config: createConfig(),
+            database: database,
+            mysql: createMysql(async () => []),
+            support: createSupport()
+        }, async (port) => {
+            await request(port, { path: "/pool/coin_altblocks/18081?page=0" });
+            await request(port, { path: "/pool/coin_altblocks/018081?page=0" });
+            // Both spellings normalize to port 18081 -> one cache entry -> one DB call.
+            assert.equal(database.state.altBlockListCalls.length, 1);
+            assert.equal(database.state.altBlockListCalls[0].coinPort, 18081);
         });
     });
 

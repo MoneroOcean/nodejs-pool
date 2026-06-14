@@ -516,7 +516,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
 
     test("GUI-facing public routes keep nested stats, field names, and timestamp units", async () => {
         const mysql = createMysql(async function handler(sql, params) {
-            if (sql.startsWith("SELECT * FROM transactions ORDER BY id DESC")) {
+            if (sql.includes("FROM transactions ORDER BY id DESC")) {
                 return [
                     { id: 44, transaction_hash: "pool-tx", mixin: 11, payees: 3, fees: 15, xmr_amt: 345, submitted_time: "2024-01-02T03:04:05Z" }
                 ];
@@ -531,7 +531,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
                     { id: 55, transaction_hash: "miner-tx", mixin: 7 }
                 ];
             }
-            if (sql.startsWith("SELECT * FROM paid_blocks")) {
+            if (sql.includes("FROM paid_blocks WHERE")) {
                 return [
                     { id: 8, paid_time: "2024-01-03T00:00:00Z", found_time: "2024-01-02T00:00:00Z", port: 18081, hex: "block-hex", amount: 400 }
                 ];
