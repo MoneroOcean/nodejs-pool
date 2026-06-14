@@ -654,7 +654,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
         });
     });
 
-    test("email unsubscribe token and legacy routes return html and disable only matching subscriptions", async () => {
+    test("email unsubscribe token route returns html and disables only the matching subscription", async () => {
         const originalConfig = global.config;
         const config = createConfig();
         config.general.emailUnsubscribeBaseUrl = "https://api.moneroocean.stream";
@@ -668,14 +668,6 @@ test.describe("api public and auth", { concurrency: false }, () => {
             if (sql === "UPDATE users SET enable_email = 0 WHERE username = ? AND email = ?") {
                 const row = users.find(function findUser(user) {
                     return user.username === params[0] && user.email === params[1];
-                });
-                if (!row) return { affectedRows: 0 };
-                row.enable_email = 0;
-                return { affectedRows: 1 };
-            }
-            if (sql === "UPDATE users SET enable_email = 0 WHERE username = ?") {
-                const row = users.find(function findUser(user) {
-                    return user.username === params[0];
                 });
                 if (!row) return { affectedRows: 0 };
                 row.enable_email = 0;
@@ -715,10 +707,10 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 assert.equal(user.statusCode, 200);
                 assert.equal(user.json.email_enabled, 0);
 
+                // The unauthenticated legacy unsubscribe route has been removed.
                 const legacyResponse = await request(port, { path: "/user/legacy-wallet/unsubscribeEmail" });
-                assert.equal(legacyResponse.statusCode, 200);
-                assert.match(legacyResponse.headers["content-type"], /text\/html/);
-                assert.equal(users[1].enable_email, 0);
+                assert.equal(legacyResponse.statusCode, 404);
+                assert.equal(users[1].enable_email, 1);
             });
         } finally {
             global.config = originalConfig;
