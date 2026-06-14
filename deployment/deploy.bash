@@ -354,12 +354,20 @@ server {
 	gzip on;
 }
 
-limit_req_zone \$uri zone=big_api:32m rate=30r/m;
+# Per-client rate limit for the data-heavy API routes. Keyed on the real client IP
+# (Cloudflare's CF-Connecting-IP; the origin only accepts Cloudflare traffic) so a single
+# client cannot flood the paginated/scan endpoints. Cheap cached routes under "/" stay free.
+limit_req_zone \$http_cf_connecting_ip zone=api_ip:32m rate=5r/s;
 server {
 	listen 443 ssl;
 	server_name $API_DNS;
 	location /miner/ {
-		limit_req zone=big_api burst=4;
+		limit_req zone=api_ip burst=30 nodelay;
+		proxy_pass http://localhost:8001;
+		proxy_redirect off;
+	}
+	location /pool/ {
+		limit_req zone=api_ip burst=30 nodelay;
 		proxy_pass http://localhost:8001;
 		proxy_redirect off;
 	}
