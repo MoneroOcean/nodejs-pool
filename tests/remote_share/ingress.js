@@ -346,7 +346,7 @@ test("remote_share rejects new frames after LMDB map full while flushing shares"
     }
 });
 
-test("remote_share retries the batch and keeps running after a non-map-full flush error", async () => {
+test("remote_share pauses (reject mode) and stops accepting after a non-map-full flush error", async () => {
     const restore = installRemoteShareGlobals();
     const emails = [];
     global.support.sendEmail = function captureEmail() {
@@ -354,11 +354,9 @@ test("remote_share retries the batch and keeps running after a non-map-full flus
     };
     const shareStore = {
         calls: 0,
-        stored: [],
-        storeShares(batch) {
+        storeShares() {
             this.calls += 1;
-            if (this.calls === 1) throw new Error("transient disk write error");
-            for (const share of batch) this.stored.push(share);
+            throw new Error("transient disk write error");
         }
     };
     const pendingJobs = {
@@ -402,16 +400,18 @@ test("remote_share retries the batch and keeps running after a non-map-full flus
         const address = await waitForListening(runtime);
 
         assert.equal(await postFrame(address.port, makeShareFrame("rigA")), 200);
-        await wait(40); // first drain fails on a non-map-full error and re-queues rigA
+        await waitForCondition(() => emails.length === 1, 500); // flush fails -> reject mode
 
-        // The runtime must stay up and keep accepting (a non-map-full error is not reject mode).
-        assert.equal(await postFrame(address.port, makeShareFrame("rigB")), 200);
-        await wait(40); // retry drains rigA + rigB successfully
-
-        const storedIds = shareStore.stored.map((share) => share.identifier).sort();
-        assert.deepEqual(storedIds, ["rigA", "rigB"]);
-        assert.equal(shareStore.calls >= 2, true);
-        assert.equal(emails.length, 0); // non-map-full must not trigger map-full reject-mode email
+        // Paused: further frames are refused and the broken DB is not retried.
+        assert.equal(await postFrame(address.port, makeShareFrame("rigB")), 503);
+        await wait(40);
+        assert.equal(shareStore.calls, 1);
+        assert.equal(emails.length, 1);
+        assert.deepEqual(emails[0], [
+            "admin@example.com",
+            "remote_share rejecting new work due to LMDB write failure",
+            "remote_share is rejecting new share and block frames after an LMDB write failure while flushing queued shares: transient disk write error."
+        ]);
     } finally {
         await runtime.stop();
         restore();
