@@ -346,6 +346,78 @@ test("remote_share rejects new frames after LMDB map full while flushing shares"
     }
 });
 
+test("remote_share retries the batch and keeps running after a non-map-full flush error", async () => {
+    const restore = installRemoteShareGlobals();
+    const emails = [];
+    global.support.sendEmail = function captureEmail() {
+        emails.push(Array.from(arguments));
+    };
+    const shareStore = {
+        calls: 0,
+        stored: [],
+        storeShares(batch) {
+            this.calls += 1;
+            if (this.calls === 1) throw new Error("transient disk write error");
+            for (const share of batch) this.stored.push(share);
+        }
+    };
+    const pendingJobs = {
+        enqueueBlock() { throw new Error("unexpected block enqueue"); },
+        enqueueAltBlock() { throw new Error("unexpected altblock enqueue"); },
+        processDueJobs() {},
+        close() {}
+    };
+    const runtime = createRemoteShareRuntime({
+        clusterEnabled: false,
+        host: "127.0.0.1",
+        port: 0,
+        pendingJobs,
+        shareFlushIntervalMs: 10,
+        shareStore
+    });
+
+    function makeShareFrame(identifier) {
+        const sharePayload = PROTOS.Share.encode({
+            paymentAddress: "49abc",
+            foundBlock: false,
+            trustedShare: false,
+            poolType: PROTOS.POOLTYPE.PPLNS,
+            poolID: 1,
+            blockDiff: 100,
+            blockHeight: 55,
+            timestamp: Date.now(),
+            identifier,
+            raw_shares: 42
+        });
+        return PROTOS.WSData.encode({
+            msgType: PROTOS.MESSAGETYPE.SHARE,
+            key: "secret",
+            msg: sharePayload,
+            exInt: 55
+        });
+    }
+
+    try {
+        runtime.start();
+        const address = await waitForListening(runtime);
+
+        assert.equal(await postFrame(address.port, makeShareFrame("rigA")), 200);
+        await wait(40); // first drain fails on a non-map-full error and re-queues rigA
+
+        // The runtime must stay up and keep accepting (a non-map-full error is not reject mode).
+        assert.equal(await postFrame(address.port, makeShareFrame("rigB")), 200);
+        await wait(40); // retry drains rigA + rigB successfully
+
+        const storedIds = shareStore.stored.map((share) => share.identifier).sort();
+        assert.deepEqual(storedIds, ["rigA", "rigB"]);
+        assert.equal(shareStore.calls >= 2, true);
+        assert.equal(emails.length, 0); // non-map-full must not trigger map-full reject-mode email
+    } finally {
+        await runtime.stop();
+        restore();
+    }
+});
+
 test("remote_share honors port zero even when the default port is unavailable", async () => {
     const restore = installRemoteShareGlobals();
     let blocker = null;

@@ -451,6 +451,49 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         ]);
     });
 
+    test("worker fail-stops without crashing when a mid-cycle batch flush hits LMDB full", async () => {
+        const now = 1710000000000;
+        Date.now = function () { return now; };
+        const address = "4".repeat(95);
+        const shares = [];
+        // Enough distinct workers to exceed CACHE_WRITE_BATCH_SIZE (500), so the batcher flushes
+        // mid-cycle before the final flush and the map-full error surfaces from inside the cycle.
+        for (let index = 0; index < 600; ++index) {
+            shares.push({
+                height: 1,
+                share: createShare({
+                    paymentAddress: address,
+                    identifier: "rig" + index,
+                    rawShares: 600 + index,
+                    shares2: 300 + index,
+                    timestamp: now - 30 * 1000
+                })
+            });
+        }
+
+        const envState = createFakeEnvironment({ shares: shares, statsBufferLength: 27, statsBufferHours: 4 });
+        const originalBeginTxn = global.database.env.beginTxn;
+        global.database.env.beginTxn = function beginTxnWithMapFull(options) {
+            const txn = originalBeginTxn.call(this, options);
+            if (options && options.readOnly) return txn;
+            txn.commit = function commitMapFull() {
+                const error = new Error("MDB_MAP_FULL: Environment mapsize limit reached");
+                error.code = -30792;
+                throw error;
+            };
+            return txn;
+        };
+
+        const worker = loadWorker();
+        const runtime = worker.createWorkerRuntime();
+
+        await assert.doesNotReject(runUpdate(runtime, 1));
+
+        assert.equal(runtime.state.lmdbFailStop, true);
+        assert.equal(runtime.state.started, false);
+        assert.equal(envState.emails[0][1], "Worker module paused due to LMDB full");
+    });
+
     test("worker stopped email clears pending guard on cancellation and no-email lookup", async () => {
         const now = 1710000000000;
         Date.now = function () { return now; };
