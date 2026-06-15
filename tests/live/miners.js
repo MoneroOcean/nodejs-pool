@@ -6,12 +6,12 @@ const {
     HASHRATE_SCALE,
     EMBEDDED_ACTIVE_ALGOS,
     SRBMINER_INTEL_ALGORITHM_MAP,
-    MOMINER_NO_BENCH_ALGOS,
+    MOM_NO_BENCH_ALGOS,
     XMRIG_CPU_ALGOS,
     XMRIG_ALGO_PERF_SEED,
     SRBMINER_NICEHASH_STRATUM_ALGOS,
     SRBMINER_ETH_PROXY_ALGOS,
-    MOMINER_INTEL_ALGOS,
+    MOM_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     stripAnsi,
     sleep,
@@ -376,8 +376,8 @@ function buildMoMinerNoBenchConfig(context) {
             pass: context.password
         }],
         pool_ids: { primary: 0, donate: null },
-        algo_params: Object.fromEntries(MOMINER_NO_BENCH_ALGOS.map((algorithm) => [algorithm, {
-            dev: algorithm === "c29" || algorithm === "cn/gpu" ? context.moMinerC29Device : "cpu",
+        algo_params: Object.fromEntries(MOM_NO_BENCH_ALGOS.map((algorithm) => [algorithm, {
+            dev: algorithm === "c29" || algorithm === "cn/gpu" ? context.momC29Device : "cpu",
             perf: 1
         }])),
         default_msrs: {},
@@ -387,20 +387,20 @@ function buildMoMinerNoBenchConfig(context) {
 
 function buildMoMiner(rootDir, binaryPath) {
     return {
-        name: "mo-miner",
+        name: "mom",
         binaryPath,
         rootDir,
-        algorithms: new Set(MOMINER_INTEL_ALGOS),
+        algorithms: new Set(MOM_INTEL_ALGOS),
         parser: createMoMinerParser(),
-        style: "mo-miner",
+        style: "mom",
         async prepare(context) {
-            const configPath = path.join(context.attemptDir, "mo-miner-config.json");
+            const configPath = path.join(context.attemptDir, "mom-config.json");
             await writeJson(configPath, buildMoMinerNoBenchConfig(context));
-            context.moMinerConfigPath = configPath;
-            context.moMinerConfigArg = configPath;
+            context.momConfigPath = configPath;
+            context.momConfigArg = configPath;
         },
         buildArgs(context) {
-            return ["mine", context.moMinerConfigArg];
+            return ["mine", context.momConfigArg];
         },
         buildEnv(context) {
             return {
@@ -410,7 +410,7 @@ function buildMoMiner(rootDir, binaryPath) {
                     path.join(this.rootDir, "lib64"),
                     process.env.LD_LIBRARY_PATH || ""
                 ].filter(Boolean).join(":"),
-                MOMINER_CONFIG_DIR: context.attemptDir
+                MOM_CONFIG_DIR: context.attemptDir
             };
         }
     };

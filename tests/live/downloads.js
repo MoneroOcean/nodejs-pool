@@ -11,8 +11,8 @@ const {
     XMRIG_RELEASE_API,
     SRBMINER_RELEASE_API,
     SRBMINER_DOWNLOAD_PREFIX,
-    MOMINER_RELEASE_API,
-    MOMINER_DOWNLOAD_PREFIX,
+    MOM_RELEASE_API,
+    MOM_DOWNLOAD_PREFIX,
     USER_AGENT,
     commandExists,
     ensureDir,
@@ -204,8 +204,8 @@ function resolveMoMinerAsset(release) {
     const candidates = release.assets || [];
     if (process.platform !== "linux" || process.arch !== "x64") return null;
     return pickAsset(candidates, [
-        (asset) => /^mo-miner-v.*-lin\.(tar\.gz|tgz)$/i.test(String(asset.name || "")),
-        (asset) => /mo-miner/i.test(String(asset.name || "")) && /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || "")),
+        (asset) => /^mom-v.*-lin\.(tar\.gz|tgz)$/i.test(String(asset.name || "")),
+        (asset) => /mom/i.test(String(asset.name || "")) && /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || "")),
         (asset) => /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(String(asset.name || ""))
     ]);
 }
@@ -327,26 +327,26 @@ async function ensureSrbMinerBinary(config, logger) {
 
 async function ensureMoMinerRoot(config, logger) {
     return await ensureReleaseAsset(config, logger, {
-        miner: "mo-miner",
-        cacheKey: "mo-miner",
-        releaseApi: MOMINER_RELEASE_API,
+        miner: "mom",
+        cacheKey: "mom",
+        releaseApi: MOM_RELEASE_API,
         resolveAsset: resolveMoMinerAsset,
         archiveSuffixPattern: /(\.tar\.(gz|xz|bz2)|\.tgz|\.txz|\.tbz2)$/i,
-        downloadPrefix: MOMINER_DOWNLOAD_PREFIX,
+        downloadPrefix: MOM_DOWNLOAD_PREFIX,
         includeUnzipOnWindows: false,
         async locate(extractDir) {
-            const binaryPath = await findNamedFile(extractDir, "mo-miner");
+            const binaryPath = await findNamedFile(extractDir, "mom");
             return binaryPath ? { rootDir: path.dirname(binaryPath), binaryPath } : null;
         },
         missingAsset(release) {
-            return `No mo-miner Linux x64 archive asset is available in ${release.tag_name || "latest release"}`;
+            return `No mom Linux x64 archive asset is available in ${release.tag_name || "latest release"}`;
         },
         missingExtracted(asset) {
-            return `Could not find mo-miner executable after extracting ${asset.name}`;
+            return `Could not find mom executable after extracting ${asset.name}`;
         },
         logPayload(located, release, asset) {
             return {
-                miner: "mo-miner",
+                miner: "mom",
                 release: release.tag_name,
                 asset: asset.name,
                 rootDir: located.rootDir,

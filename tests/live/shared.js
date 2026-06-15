@@ -25,13 +25,13 @@ const DEFAULT_SRBMINER_CN_GPU_INTENSITY = process.env.NODEJS_POOL_LIVE_SRBMINER_
     || process.env.NODEJS_POOL_LIVE_SRBMINER_GPU_INTENSITY
     || "1";
 const DEFAULT_SRBMINER_API_PORT = 21550;
-const DEFAULT_MOMINER_C29_DEVICE = "gpu1*1";
+const DEFAULT_MOM_C29_DEVICE = "gpu1*1";
 
 const XMRIG_RELEASE_API = "https://api.github.com/repos/MoneroOcean/xmrig/releases/latest";
 const SRBMINER_RELEASE_API = "https://api.github.com/repos/doktor83/SRBMiner-Multi/releases/latest";
 const SRBMINER_DOWNLOAD_PREFIX = "https://github.com/doktor83/SRBMiner-Multi/releases/download/";
-const MOMINER_RELEASE_API = "https://api.github.com/repos/MoneroOcean/mo-miner/releases/latest";
-const MOMINER_DOWNLOAD_PREFIX = "https://github.com/MoneroOcean/mo-miner/releases/download/";
+const MOM_RELEASE_API = "https://api.github.com/repos/MoneroOcean/mo-miner/releases/latest";
+const MOM_DOWNLOAD_PREFIX = "https://github.com/MoneroOcean/mo-miner/releases/download/";
 
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
 const USER_AGENT = "nodejs-pool-live-tests";
@@ -66,7 +66,7 @@ const SRBMINER_INTEL_ALGORITHM_MAP = {
     kawpow: "kawpow"
 };
 
-const MOMINER_NO_BENCH_ALGOS = words(`
+const MOM_NO_BENCH_ALGOS = words(`
     argon2/chukwa argon2/chukwav2 argon2/wrkz c29 cn-heavy/0 cn-heavy/tube cn-heavy/xhv
     cn-lite/0 cn-lite/1 cn-pico/0 cn-pico/tlo cn/0 cn/1 cn/2 cn/ccx cn/double cn/fast
     cn/half cn/gpu cn/r cn/rto cn/rwz cn/upx2 cn/xao cn/zls ghostrider panthera
@@ -83,7 +83,7 @@ const XMRIG_ALGO_PERF_SEED = Object.fromEntries(words(`
 
 const SRBMINER_NICEHASH_STRATUM_ALGOS = new Set(["etchash"]);
 const SRBMINER_ETH_PROXY_ALGOS = new Set(["etchash"]);
-const MOMINER_INTEL_ALGOS = new Set(["c29"]);
+const MOM_INTEL_ALGOS = new Set(["c29"]);
 const GPU_PROTOCOL_PROBE_ALGOS = new Set(["autolykos2", "c29", "etchash", "kawpow"]);
 
 const stripAnsi = (value) => typeof value === "string" ? value.replace(ANSI_ESCAPE_PATTERN, "") : "";
@@ -386,12 +386,12 @@ module.exports = {
     DEFAULT_SRBMINER_GPU_INTENSITY,
     DEFAULT_SRBMINER_CN_GPU_INTENSITY,
     DEFAULT_SRBMINER_API_PORT,
-    DEFAULT_MOMINER_C29_DEVICE,
+    DEFAULT_MOM_C29_DEVICE,
     XMRIG_RELEASE_API,
     SRBMINER_RELEASE_API,
     SRBMINER_DOWNLOAD_PREFIX,
-    MOMINER_RELEASE_API,
-    MOMINER_DOWNLOAD_PREFIX,
+    MOM_RELEASE_API,
+    MOM_DOWNLOAD_PREFIX,
     USER_AGENT,
     DIFF_SCALE,
     HASHRATE_SCALE,
@@ -400,12 +400,12 @@ module.exports = {
     BASE_DIFF,
     EMBEDDED_ACTIVE_ALGOS,
     SRBMINER_INTEL_ALGORITHM_MAP,
-    MOMINER_NO_BENCH_ALGOS,
+    MOM_NO_BENCH_ALGOS,
     XMRIG_CPU_ALGOS,
     XMRIG_ALGO_PERF_SEED,
     SRBMINER_NICEHASH_STRATUM_ALGOS,
     SRBMINER_ETH_PROXY_ALGOS,
-    MOMINER_INTEL_ALGOS,
+    MOM_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     stripAnsi,
     sleep,
