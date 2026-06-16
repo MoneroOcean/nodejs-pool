@@ -5,10 +5,11 @@
 Node.js mining pool backend with LMDB share storage, MySQL-backed configuration, and a modular PM2 runtime.
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111.svg" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-111111.svg" alt="Node 18+">
-  <img src="https://img.shields.io/badge/platform-Ubuntu%2024.04-111111.svg" alt="Ubuntu 24.04">
-  <img src="https://img.shields.io/badge/focus-pool%20backend-111111.svg" alt="Pool backend">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A522.9.0-brightgreen.svg" alt="Node >=22.9.0">
+  <img src="https://img.shields.io/badge/platform-Ubuntu%2024.04-lightgrey.svg" alt="Ubuntu 24.04">
+  <img src="https://img.shields.io/badge/focus-pool%20backend-1f6feb.svg" alt="Pool backend">
+  <a href="https://github.com/MoneroOcean"><img src="https://img.shields.io/badge/MoneroOcean-ecosystem-6f42c1.svg" alt="MoneroOcean"></a>
 </p>
 
 </div>
@@ -109,14 +110,10 @@ The Docker-based setup and the optional `lib2` altblock stack live in [`lib2/REA
 
 ## Manual / Dev Notes
 
-- `package.json` currently requires Node `>=22.9.0`
+- `package.json` requires Node `>=22.9.0` and npm `>=11.10.0`
 - `config_example.json` provides the base local config shape
 - The SQL schema is in [`deployment/base.sql`](deployment/base.sql)
-- Run the test suite with:
-
-```bash
-npm test
-```
+- See the [Testing](#testing) section below for the available test suites
 
 ## Operational Notes
 
@@ -125,6 +122,28 @@ npm test
 - The default SQL schema is XMR-oriented; adapt SQL-backed config if you are building for something else.
 - Mining ports are not hardcoded in `config.json`; they are read from MySQL table `pool.port_config`.
 - If LMDB appears stuck or the API stops moving, start with `mdb_stat -fear ~/pool_db/` and then review PM2 service state.
+
+## Testing
+
+The test suite uses the built-in Node.js test runner. Run the full suite with:
+
+```bash
+npm test
+```
+
+Additional suites are defined in `package.json`:
+
+| Command | Scope |
+| --- | --- |
+| `npm test` | Full local suite (`tests/all.js`) |
+| `npm run test:deploy` | Deployment-oriented checks (`tests/deploy.js`) |
+| `npm run test:live` | Live integration checks against a running pool (`tests/live.js`) |
+| `npm run test:live:sg` | Live checks targeting `sg.moneroocean.stream` |
+
+Caveats:
+
+- Dependencies include native addons ([`node-blocktemplate`](https://github.com/MoneroOcean/node-blocktemplate), [`node-powhash`](https://github.com/MoneroOcean/node-powhash), `node-lmdb`) that must compile against your toolchain on `npm install`.
+- The live suites (`test:live*`) require network access to a reachable pool host and are not suitable for offline/CI-only runs.
 
 ## Setup And Support
 
@@ -152,3 +171,21 @@ If you want to quietly support the project:
 - [Zone117x](https://github.com/zone117x) for the original [node-cryptonote-pool](https://github.com/zone117x/node-cryptonote-pool) stratum foundation
 - [1rV1N](https://github.com/1rV1N), Mine Coins, Learner, [M5M400](https://github.com/M5M400), and [techandbeers](https://github.com/techandbeers) for fixes, docs, and operational improvements
 - [Wolf0](https://github.com/wolf9466/) and [OhGodAGirl](https://github.com/ohgodagirl) for AES-NI hashing work used by the broader pool stack
+
+## MoneroOcean ecosystem
+
+| Component | Role |
+| --- | --- |
+| [nodejs-pool](https://github.com/MoneroOcean/nodejs-pool) | Pool backend — stratum, share storage, payments |
+| [mo-pool-ui](https://github.com/MoneroOcean/mo-pool-ui) | Static web frontend for the pool |
+| [xmr-node-proxy](https://github.com/MoneroOcean/xmr-node-proxy) | Stratum proxy / share aggregator |
+| [mo-miner](https://github.com/MoneroOcean/mo-miner) | MoneroOcean end-user CPU/GPU mining client (multi-algo) |
+| [multi-miner](https://github.com/MoneroOcean/multi-miner) | Multi-algo miner manager |
+| [node-powhash](https://github.com/MoneroOcean/node-powhash) | Native multi-algo PoW hashing addon |
+| [node-randomx](https://github.com/MoneroOcean/node-randomx) | Native RandomX hashing addon |
+| [node-blocktemplate](https://github.com/MoneroOcean/node-blocktemplate) | Native block-template & serialization addon |
+| [grpc-json-proxy](https://github.com/MoneroOcean/grpc-json-proxy) | gRPC ↔ JSON-RPC proxy (Tari base node) |
+
+## License
+
+Released under the [MIT License](LICENSE).
