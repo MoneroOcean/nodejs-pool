@@ -18,11 +18,11 @@ const {
     DEFAULT_SRBMINER_GPU_INTENSITY,
     DEFAULT_SRBMINER_CN_GPU_INTENSITY,
     DEFAULT_SRBMINER_API_PORT,
-    DEFAULT_MOMINER_C29_DEVICE,
+    DEFAULT_MOM_C29_DEVICE,
     EMBEDDED_ACTIVE_ALGOS,
     SRBMINER_INTEL_ALGORITHM_MAP,
     SRBMINER_ETH_PROXY_ALGOS,
-    MOMINER_INTEL_ALGOS,
+    MOM_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     buildRunId,
     ensureDir,
@@ -178,7 +178,7 @@ async function createLivePoolRun(input) {
             }
         }
 
-        if (intelGpuDetected && usesAny(activeAlgorithmSet, MOMINER_INTEL_ALGOS)) {
+        if (intelGpuDetected && usesAny(activeAlgorithmSet, MOM_INTEL_ALGOS)) {
             const moMiner = await ensureMoMinerRoot(config, logger);
             miners.push(buildMoMiner(moMiner.rootDir, moMiner.binaryPath));
         }
@@ -273,7 +273,7 @@ function buildConfig(input) {
         srbMinerGpuIntensity: DEFAULT_SRBMINER_GPU_INTENSITY,
         srbMinerCnGpuIntensity: DEFAULT_SRBMINER_CN_GPU_INTENSITY,
         srbMinerApiPort: DEFAULT_SRBMINER_API_PORT,
-        moMinerC29Device: DEFAULT_MOMINER_C29_DEVICE,
+        moMinerC29Device: DEFAULT_MOM_C29_DEVICE,
         targetName: "target",
         emitStartLines: typeof options.emitStartLines === "boolean" ? options.emitStartLines : true
     };

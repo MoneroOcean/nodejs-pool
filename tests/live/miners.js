@@ -377,7 +377,7 @@ function buildMoMinerNoBenchConfig(context) {
         }],
         pool_ids: { primary: 0, donate: null },
         algo_params: Object.fromEntries(MOM_NO_BENCH_ALGOS.map((algorithm) => [algorithm, {
-            dev: algorithm === "c29" || algorithm === "cn/gpu" ? context.momC29Device : "cpu",
+            dev: algorithm === "c29" || algorithm === "cn/gpu" ? context.moMinerC29Device : "cpu",
             perf: 1
         }])),
         default_msrs: {},
