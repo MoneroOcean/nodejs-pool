@@ -73,12 +73,16 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
             return;
         }
 
-        state.run = await createLivePoolRun(liveConfig());
-        state.target = {
-            name: state.run.config.targetName,
-            host: state.run.config.targetHost,
-            port: state.run.config.targetPort
-        };
+        try {
+            state.run = await createLivePoolRun(liveConfig());
+            state.target = {
+                name: state.run.config.targetName,
+                host: state.run.config.targetHost,
+                port: state.run.config.targetPort
+            };
+        } catch (error) {
+            fail(error, { fatal: true });
+        }
     });
 
     test.describe("block submit coverage", { concurrency: false }, () => {

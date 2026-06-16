@@ -1,5 +1,8 @@
 "use strict";
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -24,7 +27,10 @@ const {
     summarizeBlockSubmitLog
 } = require("./live/protocol.js");
 const { BLOCK_SUBMIT_LIVE_CASES } = require("./live/block_submit.js");
-const { expectedLiveProtocolProbeSkipReason } = require("./live/skips.js");
+const {
+    expectedLiveMinerSkipReason,
+    expectedLiveProtocolProbeSkipReason
+} = require("./live/skips.js");
 
 test.describe("live miner helpers", { concurrency: false }, () => {
     test("SRBMiner cn/gpu args include conservative stability controls", () => {
@@ -224,6 +230,16 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         }
     });
 
+    test("cryptonote block-submit candidates prefer stable non-ARQ coins", () => {
+        const testCase = BLOCK_SUBMIT_LIVE_CASES.find((entry) => entry.name === "cryptonote-submitblock");
+        assert.ok(testCase);
+        const candidates = testCase.buildCandidates({});
+
+        assert.deepEqual(candidates.map((candidate) => candidate.coin), ["RYO/CCX", "XLA", "ARQ"]);
+        assert.deepEqual(candidates.map((candidate) => candidate.algo), ["cn/gpu", "panthera", "rx/arq"]);
+        assert.deepEqual(candidates[0].expectation.includeAnyChains, ["RYO/", "CCX/"]);
+    });
+
     test("xtm-c block-submit coverage skips live SubmitBlock response stalls", () => {
         const testCase = BLOCK_SUBMIT_LIVE_CASES.find((entry) => entry.name === "xtm-c-submitblock");
         assert.ok(testCase);
@@ -234,6 +250,36 @@ test.describe("live miner helpers", { concurrency: false }, () => {
                 }]
             }),
             "live XTM-C daemon did not return a synthetic SubmitBlock response"
+        );
+    });
+
+    test("cryptonote block-submit coverage skips live no-template logins", () => {
+        const testCase = BLOCK_SUBMIT_LIVE_CASES.find((entry) => entry.name === "cryptonote-submitblock");
+        assert.ok(testCase);
+        assert.equal(
+            testCase.expectedNoCandidateSkipReason({
+                failures: [{
+                    detail: 'Error: Default login failed: {"code":-1,"message":"No block template yet. Please wait."}'
+                }]
+            }),
+            "live pool did not have a Cryptonote altcoin block template ready"
+        );
+        assert.equal(
+            testCase.expectedNoCandidateSkipReason({
+                failures: [{
+                    detail: "Error: Timed out waiting for login response for cryptonote-submitblock from localhost:20001"
+                }]
+            }),
+            "live pool did not have a Cryptonote altcoin block template ready"
+        );
+        assert.equal(
+            testCase.expectedNoCandidateSkipReason({
+                failures: [
+                    { detail: 'Error: Default login failed: {"code":-1,"message":"No block template yet. Please wait."}' },
+                    { detail: "Error: Submit was not accepted: synthetic failure" }
+                ]
+            }),
+            ""
         );
     });
 
@@ -267,6 +313,27 @@ test.describe("live miner helpers", { concurrency: false }, () => {
                 jobReceived: true
             }),
             ""
+        );
+    });
+
+    test("rx/arq miner coverage skips live no-template windows", (t) => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nodejs-pool-live-skip-"));
+        t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+        const stdoutPath = path.join(tempDir, "stdout.log");
+        fs.writeFileSync(stdoutPath, [
+            'net localhost:20001 error: "No block template yet. Please wait.", code: -1',
+            'net localhost:20001 read error: "end of file"'
+        ].join("\n"));
+
+        assert.equal(
+            expectedLiveMinerSkipReason({
+                algorithm: "rx/arq",
+                failureReason: "connection-failure",
+                jobReceived: false,
+                rawStdoutPath: stdoutPath,
+                error: 'net localhost:20001 read error: "end of file"'
+            }),
+            "live pool did not have an rx/arq block template ready"
         );
     });
 

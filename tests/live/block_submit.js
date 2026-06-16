@@ -40,6 +40,12 @@ const {
 } = require("./protocol.js");
 
 const BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES = Object.freeze([null, 10, 100, 1000, 10000, 100000, 1000000]);
+const NO_BLOCK_TEMPLATE_MESSAGE = "No block template yet. Please wait.";
+const CRYPTONOTE_ALT_SUBMIT_VARIANTS = Object.freeze([
+    { name: "cn-gpu", coin: "RYO/CCX", algo: "cn/gpu", expectation: { exactFailureCount: 1, includeAnyChains: ["RYO/", "CCX/"] } },
+    { name: "xla", coin: "XLA", algo: "panthera", expectation: { exactFailureCount: 1, includeChains: ["XLA/"] } },
+    { name: "arq", coin: "ARQ", algo: "rx/arq", expectation: { exactFailureCount: 1, includeChains: ["ARQ/"] } }
+]);
 function hasObservedSubmitOutcome(failures) {
     return failures.some((entry) => entry && entry.summary && entry.summary.outcomeCount > 0);
 }
@@ -54,6 +60,21 @@ function hasFailureDetail(failures, text) {
     return failures.some((entry) => String(entry && entry.detail || "").includes(text));
 }
 
+function failureHasDetail(entry, text) {
+    return String(entry && entry.detail || "").includes(text);
+}
+
+function isNoBlockTemplateFailure(entry, caseName) {
+    return failureHasDetail(entry, NO_BLOCK_TEMPLATE_MESSAGE)
+        || failureHasDetail(entry, `Timed out waiting for login response for ${caseName}`);
+}
+
+function noBlockTemplateSkipReason(label, caseName) {
+    return ({ failures }) => failures.length > 0 && failures.every((entry) => isNoBlockTemplateFailure(entry, caseName))
+        ? `live pool did not have a ${label} block template ready`
+        : "";
+}
+
 function ethNotifySkipReason(label) {
     return ({ failures }) => hasFailureDetail(failures, "Timed out waiting for mining.notify")
         ? `live pool did not send a ${label} mining.notify job`
@@ -64,6 +85,27 @@ function xtmCSubmitSkipReason() {
     return ({ failures }) => hasFailureDetail(failures, "Timed out waiting for submit response for xtm-c-submitblock")
         ? "live XTM-C daemon did not return a synthetic SubmitBlock response"
         : "";
+}
+
+function buildCryptonoteAltSubmitCandidates() {
+    return CRYPTONOTE_ALT_SUBMIT_VARIANTS.map((variant) => ({
+        ...variant,
+        loginDiff: null,
+        resultHex: CRYPTONOTE_HIGH_DIFF_RESULT_HEX
+    }));
+}
+
+function effectiveTestCase(testCase, candidate) {
+    if (!candidate || (!candidate.algo && !candidate.expectation)) return testCase;
+    return {
+        ...testCase,
+        algo: candidate.algo || testCase.algo,
+        expectation: candidate.expectation || testCase.expectation
+    };
+}
+
+function candidateLogLabel(candidate) {
+    return [candidate.coin, candidate.algo].filter(Boolean).join("/") || "default";
 }
 
 const BLOCK_SUBMIT_LIVE_CASES = Object.freeze([
@@ -96,7 +138,7 @@ const BLOCK_SUBMIT_LIVE_CASES = Object.freeze([
         },
         buildCandidates(context) { return buildCandidateMatrix(buildLowDiffResultHexes(context.xmrTemplate), BLOCK_SUBMIT_LOGIN_DIFF_CANDIDATES); }
     },
-    { name: "cryptonote-submitblock", protocol: "default-standard", algo: "rx/arq", expectation: { exactFailureCount: 1, includeAnyChains: ["ARQ/", "SAL/", "ZEPH/", "RYO/", "XLA/"] }, buildCandidates() { return buildCandidateMatrix([CRYPTONOTE_HIGH_DIFF_RESULT_HEX], [null]); } },
+    { name: "cryptonote-submitblock", protocol: "default-standard", algo: "cn/gpu", expectation: { exactFailureCount: 1, includeChains: ["RYO/"] }, expectedNoCandidateSkipReason: noBlockTemplateSkipReason("Cryptonote altcoin", "cryptonote-submitblock"), buildCandidates: buildCryptonoteAltSubmitCandidates },
     { name: "btc-submitblock", protocol: "raven", algo: "kawpow", expectation: { exactFailureCount: 1, includeAnyChains: ["RVN/", "XNA/"] }, buildCandidates() { return buildCandidateMatrix([ETHASH_HIGH_DIFF_RESULT_HEX], [null]); } },
     { name: "xtm-c-submitblock", protocol: "default-c29", algo: "c29", expectation: { exactFailureCount: 1, includeChains: ["XTM-C/"] }, expectedNoCandidateSkipReason: xtmCSubmitSkipReason(), buildCandidates() { return buildCandidateMatrix([CRYPTONOTE_HIGH_DIFF_RESULT_HEX], [null]); } },
     { name: "eth-submitwork", protocol: "eth", algo: "etchash", expectation: { exactFailureCount: 1, includeChains: ["ETC/"] }, expectedNoCandidateSkipReason: ethNotifySkipReason("etchash"), buildCandidates() { return buildCandidateMatrix([ETHASH_HIGH_DIFF_RESULT_HEX], [null]); } },
@@ -240,7 +282,7 @@ function withFixedDifficulty(wallet, loginDiff) { return loginDiff ? `${wallet}+
 function blockSubmitAttemptTimeout(run) { return Math.min(run.config.timeoutMs, BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS); }
 
 async function withBlockSubmitAttemptClient(run, target, logPaths, testCase, candidate, fn) {
-    const files = createBlockSubmitAttemptFiles(run, `${testCase.name}-${candidate.loginDiff || "auto"}-${candidate.resultHex.slice(0, 8)}`);
+    const files = createBlockSubmitAttemptFiles(run, `${testCase.name}-${candidate.name || "default"}-${candidate.loginDiff || "auto"}-${candidate.resultHex.slice(0, 8)}`);
     await ensureDir(files.attemptDir);
     const streams = openLogStreams(files.rawStdoutPath, files.rawStderrPath);
     const startOffsets = { err: logPaths.err ? await getFileSize(logPaths.err) : 0, out: logPaths.out ? await getFileSize(logPaths.out) : 0 };
@@ -333,22 +375,26 @@ async function runLiveBlockSubmitCase(run, target, logPaths, testCase, context) 
     const failures = [];
 
     for (const candidate of candidates) {
+        const attemptCase = effectiveTestCase(testCase, candidate);
         if (run.config.emitStartLines) {
-            emitLiveStatus("try", `block submit ${testCase.name}`, `diff=${candidate.loginDiff || "auto"} result=${candidate.resultHex.slice(0, 8)}`);
+            emitLiveStatus("try", `block submit ${testCase.name}`, `${candidateLogLabel(candidate)} diff=${candidate.loginDiff || "auto"} result=${candidate.resultHex.slice(0, 8)}`);
         }
         run.logger.event("block-submit-coverage.case.candidate", {
             name: testCase.name,
+            candidate: candidate.name || "",
+            coin: candidate.coin || "",
+            algo: attemptCase.algo,
             loginDiff: candidate.loginDiff,
             resultHex: candidate.resultHex
         });
 
         try {
-            const attempt = testCase.protocol === "eth"
-                ? await runEthBlockSubmitAttempt(run, target, logPaths, testCase, candidate)
-                : testCase.protocol === "raven"
-                    ? await runRavenBlockSubmitAttempt(run, target, logPaths, testCase, candidate)
-                    : await runDefaultBlockSubmitAttempt(run, target, logPaths, testCase, candidate);
-            if (matchesBlockSubmitExpectation(attempt.logText, testCase.expectation, attempt.worker)) return attempt.logText;
+            const attempt = attemptCase.protocol === "eth"
+                ? await runEthBlockSubmitAttempt(run, target, logPaths, attemptCase, candidate)
+                : attemptCase.protocol === "raven"
+                    ? await runRavenBlockSubmitAttempt(run, target, logPaths, attemptCase, candidate)
+                    : await runDefaultBlockSubmitAttempt(run, target, logPaths, attemptCase, candidate);
+            if (matchesBlockSubmitExpectation(attempt.logText, attemptCase.expectation, attempt.worker)) return attempt.logText;
             lastFailure = `unexpected-log ${JSON.stringify(attempt.summary)}\n${attempt.logText.trimEnd()}`;
             failures.push({ candidate, summary: attempt.summary, detail: lastFailure });
         } catch (error) {
