@@ -36,8 +36,8 @@ function fixBlockRewardFromRpc(options) {
                     console.log("Changing raw block reward from " + block.value + " to " + body.reward);
                     block.value = body.reward;
                     txn.putBinary(database, key, proto.encode(block));
-                    txn.commit();
                     cursor.close();
+                    txn.commit();
                     console.log("Changed " + label);
                     process.exit(0);
                 });
