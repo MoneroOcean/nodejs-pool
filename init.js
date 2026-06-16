@@ -114,21 +114,18 @@ function installGracefulShutdown(name) {
         process.exit(0);
     }
 
-    ["SIGINT", "SIGTERM"].forEach(function registerSignal(signal) {
-        process.on(signal, function onSignal() {
-            handleSignal(signal).catch(function onUnhandled(error) {
-                console.error("Graceful shutdown failed for " + name + ": " + shutdownErrorMessage(error));
-                process.exit(1);
-            });
-        });
-    });
-
-    process.on("disconnect", function onDisconnect() {
-        handleSignal("disconnect").catch(function onUnhandled(error) {
+    function triggerShutdown(signal) {
+        handleSignal(signal).catch(function onUnhandled(error) {
             console.error("Graceful shutdown failed for " + name + ": " + shutdownErrorMessage(error));
             process.exit(1);
         });
+    }
+
+    ["SIGINT", "SIGTERM"].forEach(function registerSignal(signal) {
+        process.on(signal, function onSignal() { triggerShutdown(signal); });
     });
+
+    process.on("disconnect", function onDisconnect() { triggerShutdown("disconnect"); });
 
     // Final safety net: close the LMDB env (which frees this process's reader slots) on any exit
     // path the graceful handler does not cover - process.exit() on a load error, an uncaught
