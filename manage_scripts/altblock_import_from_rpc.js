@@ -27,7 +27,7 @@ cli.init(function() {
       if ((Date.now() / 1000) < body_header.timestamp) body_header.timestamp = parseInt(body_header.timestamp / 1000);
       if (!body_header.difficulty) body_header.difficulty = argv.diff;
       if (!body_header.difficulty) {
-        console.error("Can't get block difficilty: " + JSON.stringify(body_header));
+        console.error("Can't get block difficulty: " + JSON.stringify(body_header));
         process.exit(1);
       }
       if (!body_header.height) {
