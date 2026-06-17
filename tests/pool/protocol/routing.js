@@ -22,7 +22,7 @@ function assertLoginAccepted(reply) {
     assert.equal(reply.replies[0].result.status, "OK");
 }
 
-async function withLoggedInMiner(id, params, callback) {
+async function _withLoggedInMiner(id, params, callback) {
     const { runtime } = await startHarness();
     const socket = {};
 

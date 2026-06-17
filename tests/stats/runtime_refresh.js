@@ -460,7 +460,7 @@ test("startPoolStats initializes pool and network caches without waiting for pri
             pplns_stats: { hash: 99, minerCount: 4 },
             pplns_stats2: { totalHashes: 900, roundHashes: 180 }
         },
-        mysqlQuery(sql, params) {
+        mysqlQuery(sql, _params) {
             if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") {
                 return [{ miner_count: 0 }];
             }
@@ -618,7 +618,7 @@ test("second stats refresh reuses tiny history caches and avoids full DB rescans
             EUR: 1,
             BTC: 1
         },
-        mysqlQuery(sql, params) {
+        mysqlQuery(sql, _params) {
             if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") {
                 return [{ miner_count: 0 }];
             }

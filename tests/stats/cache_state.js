@@ -287,7 +287,7 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
             EUR: 140,
             BTC: 0.005
         },
-        mysqlQuery(sql, params) {
+        mysqlQuery(sql, _params) {
             if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") {
                 return [{ miner_count: 3 }];
             }

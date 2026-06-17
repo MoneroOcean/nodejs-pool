@@ -16,7 +16,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-async function waitForCondition(check, timeoutMs) {
+async function _waitForCondition(check, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (check()) return;
@@ -25,7 +25,7 @@ async function waitForCondition(check, timeoutMs) {
     throw new Error("Condition not met within " + timeoutMs + "ms");
 }
 
-function listenOnPort(port) {
+function _listenOnPort(port) {
     return new Promise((resolve, reject) => {
         const server = http.createServer();
         server.once("error", reject);
@@ -36,7 +36,7 @@ function listenOnPort(port) {
     });
 }
 
-function closeServer(server) {
+function _closeServer(server) {
     return new Promise((resolve, reject) => {
         server.close(function onClose(error) {
             if (error) {

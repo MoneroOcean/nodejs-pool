@@ -10,7 +10,6 @@ const {
     DEFAULT_WALLET,
     BASE_DIFF,
     postJson,
-    readTextFileIfExists,
     isTcpReachable
 } = require("./shared.js");
 

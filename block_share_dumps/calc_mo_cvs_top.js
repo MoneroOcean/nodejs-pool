@@ -11,7 +11,7 @@ process.stdin.on('data', function(data) {
   stdin += data.toString();
 });
 
-function human_hashrate(hashes) {
+function _human_hashrate(hashes) {
   const power = Math.pow(10, 2 || 0);
   if (hashes > 1000000000000) return String(Math.round((hashes / 1000000000000) * power) / power) +  " TH/s";
   if (hashes > 1000000000)    return String(Math.round((hashes / 1000000000) * power) / power) +  " GH/s";
@@ -21,17 +21,17 @@ function human_hashrate(hashes) {
 };
 
 process.stdin.on('end', function() {
-  let pplns_window      = 0;
+  let _pplns_window     = 0;
   let oldest_timestamp  = 0;
   let newest_timestamp  = 0;
 
   let wallets = {};
 
-  let my_share_count    = 0;
-  let my_xmr_diff       = 0;
-  let my_xmr_diff_payed = 0;
-  let my_coin_raw_diff  = {};
-  let my_coin_xmr_diff  = {};
+  let _my_share_count    = 0;
+  let _my_xmr_diff       = 0;
+  let _my_xmr_diff_payed = 0;
+  let _my_coin_raw_diff  = {};
+  let _my_coin_xmr_diff  = {};
 
   for (let line of stdin.split("\n")) {
     if (line.substring(0, 1) == "#") continue;
@@ -47,7 +47,7 @@ process.stdin.on('end', function() {
     const coin           = items[4];
     const xmr_diff       = parseInt(items[5]);
     const xmr_diff_payed = items[6] == "" ? xmr_diff : parseInt(items[6]);
-    pplns_window += xmr_diff;
+    _pplns_window += xmr_diff;
     if (!oldest_timestamp || timestamp < oldest_timestamp) oldest_timestamp = timestamp;
     if (newest_timestamp < timestamp) newest_timestamp = timestamp;
     if (!(wallet in wallets)) wallets[wallet] = {
