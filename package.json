@@ -14,6 +14,7 @@
   },
   "scripts": {
     "lint": "eslint .",
+    "pretest": "npm run lint",
     "test": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/all.js",
     "test:deploy": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/deploy.js",
     "test:live": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/live.js",
