@@ -60,7 +60,7 @@ function request(port, options) {
                 let json = null;
                 try {
                     json = text ? JSON.parse(text) : null;
-                } catch (_error) {}
+                } catch (_error) { /* non-JSON body; leave json as null */ }
                 resolve({ statusCode: res.statusCode, headers: res.headers, text: text, json: json });
             });
         });

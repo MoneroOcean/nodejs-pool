@@ -446,7 +446,7 @@ test("pending block jobs retry until a reward is available and then store the bl
             line.includes("Pending block:") &&
             line.includes("chain=XMR/18081") &&
             line.includes('status=waiting-header-reward') &&
-            line.includes('detail=\"Core is busy\"')
+            line.includes('detail="Core is busy"')
         ), true);
 
         const retryJob = Array.from(storage.jobs.values())[0];
@@ -531,7 +531,7 @@ test("pending block jobs do not orphan wallet reward lookup misses", () => {
         assert.equal(logs.some((line) =>
             line.includes("Pending block:") &&
             line.includes("status=waiting-header-reward") &&
-            line.includes('detail=\"Transaction not found.\"')
+            line.includes('detail="Transaction not found."')
         ), true);
         assert.equal(logs.some((line) =>
             line.includes("status=waiting-orphan-confirmation") ||
@@ -595,7 +595,7 @@ test("pending altblock jobs keep orphan detail in module logs and suppress raw d
             line.includes("chain=WOW/19994") &&
             line.includes("height=1000") &&
             line.includes("status=waiting-orphan-confirmation") &&
-            line.includes('detail=\"Transaction not found.\"')
+            line.includes('detail="Transaction not found."')
         ), true);
     } finally {
         pendingJobs.close();
@@ -668,7 +668,7 @@ test("pending altblock jobs do not orphan wallet reward lookup misses", () => {
         assert.equal(logs.some((line) =>
             line.includes("Pending altblock:") &&
             line.includes("status=waiting-header-reward") &&
-            line.includes('detail=\"Transaction not found.\"')
+            line.includes('detail="Transaction not found."')
         ), true);
         assert.equal(logs.some((line) =>
             line.includes("status=waiting-orphan-confirmation") ||

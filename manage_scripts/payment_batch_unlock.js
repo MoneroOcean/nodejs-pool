@@ -94,11 +94,11 @@ async function withPaymentsAdvisoryLock(mysql, work, lockName) {
         if (lockHeld) {
             try {
                 await connection.query("SELECT RELEASE_LOCK(?) AS released", [advisoryLockName]);
-            } catch (_releaseLockError) {}
+            } catch (_releaseLockError) { /* best-effort advisory lock release; ignore errors */ }
         }
         try {
             connection.release();
-        } catch (_releaseError) {}
+        } catch (_releaseError) { /* best-effort connection release; ignore errors */ }
     }
 }
 
@@ -262,7 +262,7 @@ async function unlockBatch(options) {
         } catch (error) {
             try {
                 await connection.rollback();
-            } catch (_rollbackError) {}
+            } catch (_rollbackError) { /* swallow so the original error is the one thrown */ }
             throw error;
         }
     }, opts.advisoryLockName);

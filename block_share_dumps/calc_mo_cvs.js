@@ -14,7 +14,7 @@ process.stdin.on('data', function(data) {
 });
 
 function human_hashrate(hashes) {
-  const power = Math.pow(10, 2 || 0);
+  const power = Math.pow(10, 2);
   if (hashes > 1000000000000) return String(Math.round((hashes / 1000000000000) * power) / power) +  " TH/s";
   if (hashes > 1000000000)    return String(Math.round((hashes / 1000000000) * power) / power) +  " GH/s";
   if (hashes > 1000000)       return String(Math.round((hashes / 1000000) * power) / power) +  " MH/s";

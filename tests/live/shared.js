@@ -33,6 +33,7 @@ const SRBMINER_DOWNLOAD_PREFIX = "https://github.com/doktor83/SRBMiner-Multi/rel
 const MOM_RELEASE_API = "https://api.github.com/repos/MoneroOcean/mo-miner/releases/latest";
 const MOM_DOWNLOAD_PREFIX = "https://github.com/MoneroOcean/mo-miner/releases/download/";
 
+// eslint-disable-next-line no-control-regex -- intentional ANSI escape
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
 const USER_AGENT = "nodejs-pool-live-tests";
 const DIFF_SCALE = { "": 1, h: 1e2, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };

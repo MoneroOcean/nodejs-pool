@@ -90,7 +90,7 @@ function closeDatabaseEnv() {
 
 function installGracefulShutdown(name) {
     let shuttingDown = false;
-    const kind = argv.hasOwnProperty('module') ? 'module' : 'tool';
+    const kind = Object.hasOwn(argv, 'module') ? 'module' : 'tool';
 
     async function handleSignal(signal) {
         if (shuttingDown) return;
@@ -195,13 +195,13 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
     }
     global.database = new comms();
     global.database.initEnv();
-    installGracefulShutdown(argv.hasOwnProperty('module') ? argv.module : (argv.hasOwnProperty('tool') ? argv.tool : 'process'));
+    installGracefulShutdown(Object.hasOwn(argv, 'module') ? argv.module : (Object.hasOwn(argv, 'tool') ? argv.tool : 'process'));
     global.coinFuncs.blockedAddresses.push(global.config.pool.address);
     global.coinFuncs.blockedAddresses.push(global.config.payout.feeAddress);
-    if (argv.hasOwnProperty('tool') && fs.existsSync('./tools/'+argv.tool+'.js')) {
+    if (Object.hasOwn(argv, 'tool') && fs.existsSync('./tools/'+argv.tool+'.js')) {
         logStartup("tool", argv.tool);
         activeModule = require('./tools/'+argv.tool+'.js');
-    } else if (argv.hasOwnProperty('module')){
+    } else if (Object.hasOwn(argv, 'module')){
         const loader = moduleLoaders[argv.module];
         if (!loader) {
             console.error("Invalid module provided.  Please provide a valid module");

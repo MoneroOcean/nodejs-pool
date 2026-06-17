@@ -32,7 +32,7 @@ cli.init(function() {
             txn.commit();
         } catch (error) {
             // Abort the open write txn so the env's single writer lock is released immediately.
-            try { txn.abort(); } catch (_error) {}
+            try { txn.abort(); } catch (_error) { /* best-effort txn abort; ignore if already aborted */ }
             throw error;
         }
     process.exit(0);

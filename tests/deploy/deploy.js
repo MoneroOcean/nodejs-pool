@@ -209,7 +209,7 @@ async function waitForPm2Processes(context, expectedNames, timeoutMs = 30000) {
                     await writePm2Snapshot(context, "pm2 status", lastPayload);
                     return lastPayload;
                 }
-            } catch (_error) {}
+            } catch (_error) { /* pm2 status not ready yet; retry loop continues */ }
         }
 
         const logResult = await execInContainer(context.containerName, "if [ -d /home/user/.pm2/logs ]; then find /home/user/.pm2/logs -maxdepth 1 -type f -printf '%f\\n'; fi", {

@@ -21,19 +21,19 @@ module.exports = [
     },
     rules: {
       "no-unused-vars": ["error", { args: "after-used", argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "all", caughtErrorsIgnorePattern: "^_" }],
-      // Allow the codebase's deliberate best-effort "try { cleanup } catch (_e) {}" pattern.
-      "no-empty": ["error", { allowEmptyCatch: true }],
-      // The codebase uses obj.hasOwnProperty(...) on plain config/cache objects throughout.
-      "no-prototype-builtins": "off",
-      // Existing regex/string literals (email validation, escaped quotes in test fixtures)
-      // intentionally carry these escapes; rewriting them risks changing matching behavior.
-      "no-useless-escape": "off",
-      // Email-body assertion regexes match exact runtime formatting with literal runs of spaces.
-      "no-regex-spaces": "off",
-      // ANSI escape-stripping regex intentionally matches a terminal control character.
-      "no-control-regex": "off",
-      // Helper scripts use defensive "x || 0" / "n || default" guards that are statically constant.
-      "no-constant-binary-expression": "off"
+      // Intentionally-empty best-effort cleanup catch blocks now carry an explanatory
+      // comment, so the rule is fully strict (no allowEmptyCatch).
+      "no-empty": "error",
+      // hasOwnProperty calls were rewritten to Object.hasOwn / Object.prototype.hasOwnProperty.call.
+      "no-prototype-builtins": "error",
+      // Useless escapes were removed where provably behavior-preserving.
+      "no-useless-escape": "error",
+      // Literal multi-space regex runs were rewritten with explicit { N } quantifiers.
+      "no-regex-spaces": "error",
+      // The one intentional ANSI control-char regex carries a scoped inline disable.
+      "no-control-regex": "error",
+      // Statically-constant binary expressions were simplified to their constant value.
+      "no-constant-binary-expression": "error"
     }
   }
 ];

@@ -19,7 +19,7 @@ function closeEnv() {
     envClosed = true;
     try {
         env.close();
-    } catch (_error) {}
+    } catch (_error) { /* best-effort close on shutdown; ignore errors */ }
 }
 
 function init(callback) {
