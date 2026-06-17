@@ -473,6 +473,30 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
+    test("user delete refuses a balance row reserved by a payment batch", async function testUserDeletePendingBatch() {
+        const globals = installAccountGlobals({
+            rows: {
+                users: [{ username: "addr" }],
+                balance: [{ payment_address: "addr", payment_id: null, amount: 1, last_edited: "2026-01-01 00:00:00", pending_batch_id: 7 }],
+                payments: []
+            }
+        });
+        try {
+            await withCapturedConsole(function runCaptured() {
+                return assert.rejects(
+                    withExitTrap(function runPlan() {
+                        return runUserDelete.buildUserDeletePlan("addr", { force: true });
+                    }),
+                    function matchExit(error) {
+                        return error && error.message === "process.exit" && error.code === 1;
+                    }
+                );
+            });
+        } finally {
+            globals.restore();
+        }
+    });
+
     test("init_mini resolves repo files independently of cwd", async function testInitMiniPaths() {
         const originalLoad = Module._load;
         const originalCwd = process.cwd();

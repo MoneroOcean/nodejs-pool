@@ -49,6 +49,14 @@ async function buildUserDeletePlan(user, options) {
         console.error("Too many users were selected!");
         process.exit(1);
     }
+    // Refuse (even under --force) to delete a balance row reserved by an in-flight payment batch:
+    // removing a row whose pending_batch_id is set would make the payment finalizer's reserved-row
+    // update mismatch and wedge payout recovery. Mirrors the same guard in user_balance_move.
+    if (balanceRows.length === 1 && balanceRows[0].pending_batch_id !== null && balanceRows[0].pending_batch_id !== undefined) {
+        console.error("Balance row is reserved by in-flight payment batch " + balanceRows[0].pending_batch_id +
+            "; refusing to delete. Wait for the batch to settle (or clear its pending_batch_id) and retry.");
+        process.exit(1);
+    }
     if (!options.force && balanceRows.length === 1 && balanceRows[0].amount >= global.support.decimalToCoin(global.config.payout.walletMin)) {
         console.error("Remaining payment is too large: " + global.support.coinToDecimal(balanceRows[0].amount));
         process.exit(1);
