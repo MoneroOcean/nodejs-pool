@@ -106,9 +106,9 @@ function createFakeEnvironment(options = {}) {
 
     const env = {
         writeCommits: 0,
-        beginTxn(options = {}) {
+        beginTxn(txnOptions = {}) {
             const operations = [];
-            const readOnly = !!options.readOnly;
+            const readOnly = Boolean(txnOptions.readOnly);
 
             return {
                 del(db, key) {
@@ -236,32 +236,32 @@ test("cleanCacheDB prunes stale workers, orphan worker families, stale account h
     const staleHistoryAddress = "6".repeat(95);
     const state = createFakeEnvironment({
         cacheEntries: [
-            ["identifiers:" + address, JSON.stringify(["rigA", "rigB"])],
-            ["stats:" + address + "_rigA", JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
-            ["stats:" + address + "_rigB", JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
-            ["identifiers:" + address + "-broken", "{not-json"],
-            ["stats:" + address, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 8 * 24 * 60 * 60 * 1000, other: 9 })],
-            ["history:" + address, HISTORY_FIXTURE_VALUE],
+            [`identifiers:${  address}`, JSON.stringify(["rigA", "rigB"])],
+            [`stats:${  address  }_rigA`, JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
+            [`stats:${  address  }_rigB`, JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
+            [`identifiers:${  address  }-broken`, "{not-json"],
+            [`stats:${  address}`, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 8 * 24 * 60 * 60 * 1000, other: 9 })],
+            [`history:${  address}`, HISTORY_FIXTURE_VALUE],
             [freshAddress, JSON.stringify({ totalHashes: 12 })],
-            ["stats:" + freshAddress, JSON.stringify({ hash: 0, hash2: 0, lastHash: now, other: 7 })],
-            ["history:" + freshAddress, HISTORY_FIXTURE_VALUE],
+            [`stats:${  freshAddress}`, JSON.stringify({ hash: 0, hash2: 0, lastHash: now, other: 7 })],
+            [`history:${  freshAddress}`, HISTORY_FIXTURE_VALUE],
             [staleHistoryAddress, JSON.stringify({ totalHashes: 34 })],
-            ["stats:" + staleHistoryAddress, JSON.stringify({ hash: 0, hash2: 0, lastHash: now - 31 * 24 * 60 * 60 * 1000, other: 8 })],
-            ["history:" + staleHistoryAddress, HISTORY_FIXTURE_VALUE],
-            [address + "_oldworker", JSON.stringify({ value: 1 })],
-            ["history:" + address + "_oldworker", HISTORY_FIXTURE_VALUE],
-            ["stats:" + address + "_oldworker", JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
-            [address + "_missingHistory", JSON.stringify({ value: 2 })],
-            ["stats:" + address + "_missingHistory", JSON.stringify({ lastHash: now })],
-            [address + "_missingStats", JSON.stringify({ value: 3 })],
-            ["history:" + address + "_missingStats", HISTORY_FIXTURE_VALUE],
-            ["stats:" + address + "_orphanStatsOnly", JSON.stringify({ lastHash: now })],
-            ["history:" + address + "_orphanHistoryOnly", HISTORY_FIXTURE_VALUE],
-            ["stats:" + address + "_orphanFamily", JSON.stringify({ lastHash: now })],
-            ["history:" + address + "_orphanFamily", HISTORY_FIXTURE_VALUE],
-            [address + "_fresh", JSON.stringify({ value: 4 })],
-            ["history:" + address + "_fresh", HISTORY_FIXTURE_VALUE],
-            ["stats:" + address + "_fresh", JSON.stringify({ lastHash: now })],
+            [`stats:${  staleHistoryAddress}`, JSON.stringify({ hash: 0, hash2: 0, lastHash: now - 31 * 24 * 60 * 60 * 1000, other: 8 })],
+            [`history:${  staleHistoryAddress}`, HISTORY_FIXTURE_VALUE],
+            [`${address  }_oldworker`, JSON.stringify({ value: 1 })],
+            [`history:${  address  }_oldworker`, HISTORY_FIXTURE_VALUE],
+            [`stats:${  address  }_oldworker`, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
+            [`${address  }_missingHistory`, JSON.stringify({ value: 2 })],
+            [`stats:${  address  }_missingHistory`, JSON.stringify({ lastHash: now })],
+            [`${address  }_missingStats`, JSON.stringify({ value: 3 })],
+            [`history:${  address  }_missingStats`, HISTORY_FIXTURE_VALUE],
+            [`stats:${  address  }_orphanStatsOnly`, JSON.stringify({ lastHash: now })],
+            [`history:${  address  }_orphanHistoryOnly`, HISTORY_FIXTURE_VALUE],
+            [`stats:${  address  }_orphanFamily`, JSON.stringify({ lastHash: now })],
+            [`history:${  address  }_orphanFamily`, HISTORY_FIXTURE_VALUE],
+            [`${address  }_fresh`, JSON.stringify({ value: 4 })],
+            [`history:${  address  }_fresh`, HISTORY_FIXTURE_VALUE],
+            [`stats:${  address  }_fresh`, JSON.stringify({ lastHash: now })],
             ["tiny_old", JSON.stringify({ untouched: true })]
         ]
     });
@@ -269,31 +269,31 @@ test("cleanCacheDB prunes stale workers, orphan worker families, stale account h
 
     longRunner.cleanCacheDB();
 
-    assert.equal(state.cacheStore.has("identifiers:" + address), false);
-    assert.deepEqual(JSON.parse(state.cacheStore.get("stats:" + address)), {
+    assert.equal(state.cacheStore.has(`identifiers:${  address}`), false);
+    assert.deepEqual(JSON.parse(state.cacheStore.get(`stats:${  address}`)), {
         hash: 0,
         hash2: 0,
         lastHash: now - 8 * 24 * 60 * 60 * 1000,
         other: 9
     });
-    assert.equal(state.cacheStore.has("history:" + address), true);
-    assert.equal(state.cacheStore.has("history:" + freshAddress), true);
-    assert.equal(state.cacheStore.has("history:" + staleHistoryAddress), false);
-    assert.equal(state.cacheStore.has(address + "_oldworker"), false);
-    assert.equal(state.cacheStore.has("history:" + address + "_oldworker"), false);
-    assert.equal(state.cacheStore.has("stats:" + address + "_oldworker"), false);
-    assert.equal(state.cacheStore.has(address + "_missingHistory"), false);
-    assert.equal(state.cacheStore.has("stats:" + address + "_missingHistory"), false);
-    assert.equal(state.cacheStore.has(address + "_missingStats"), false);
-    assert.equal(state.cacheStore.has("history:" + address + "_missingStats"), false);
-    assert.equal(state.cacheStore.has("stats:" + address + "_orphanStatsOnly"), false);
-    assert.equal(state.cacheStore.has("history:" + address + "_orphanHistoryOnly"), false);
-    assert.equal(state.cacheStore.has("stats:" + address + "_orphanFamily"), false);
-    assert.equal(state.cacheStore.has("history:" + address + "_orphanFamily"), false);
-    assert.equal(state.cacheStore.has(address + "_fresh"), true);
-    assert.equal(state.cacheStore.has("history:" + address + "_fresh"), true);
-    assert.equal(state.cacheStore.has("stats:" + address + "_fresh"), true);
-    assert.equal(state.cacheStore.get("identifiers:" + address + "-broken"), "{not-json");
+    assert.equal(state.cacheStore.has(`history:${  address}`), true);
+    assert.equal(state.cacheStore.has(`history:${  freshAddress}`), true);
+    assert.equal(state.cacheStore.has(`history:${  staleHistoryAddress}`), false);
+    assert.equal(state.cacheStore.has(`${address  }_oldworker`), false);
+    assert.equal(state.cacheStore.has(`history:${  address  }_oldworker`), false);
+    assert.equal(state.cacheStore.has(`stats:${  address  }_oldworker`), false);
+    assert.equal(state.cacheStore.has(`${address  }_missingHistory`), false);
+    assert.equal(state.cacheStore.has(`stats:${  address  }_missingHistory`), false);
+    assert.equal(state.cacheStore.has(`${address  }_missingStats`), false);
+    assert.equal(state.cacheStore.has(`history:${  address  }_missingStats`), false);
+    assert.equal(state.cacheStore.has(`stats:${  address  }_orphanStatsOnly`), false);
+    assert.equal(state.cacheStore.has(`history:${  address  }_orphanHistoryOnly`), false);
+    assert.equal(state.cacheStore.has(`stats:${  address  }_orphanFamily`), false);
+    assert.equal(state.cacheStore.has(`history:${  address  }_orphanFamily`), false);
+    assert.equal(state.cacheStore.has(`${address  }_fresh`), true);
+    assert.equal(state.cacheStore.has(`history:${  address  }_fresh`), true);
+    assert.equal(state.cacheStore.has(`stats:${  address  }_fresh`), true);
+    assert.equal(state.cacheStore.get(`identifiers:${  address  }-broken`), "{not-json");
     assert.equal(state.cacheStore.get("tiny_old"), JSON.stringify({ untouched: true }));
 });
 
@@ -302,16 +302,16 @@ test("cleanCacheDB trims inactive identifiers while keeping recent workers", () 
     const address = "4".repeat(95);
     const state = createFakeEnvironment({
         cacheEntries: [
-            ["identifiers:" + address, JSON.stringify(["old", "recent"])],
-            ["stats:" + address + "_old", JSON.stringify({ lastHash: now - 25 * 60 * 60 * 1000 })],
-            ["stats:" + address + "_recent", JSON.stringify({ lastHash: now - 23 * 60 * 60 * 1000 })]
+            [`identifiers:${  address}`, JSON.stringify(["old", "recent"])],
+            [`stats:${  address  }_old`, JSON.stringify({ lastHash: now - 25 * 60 * 60 * 1000 })],
+            [`stats:${  address  }_recent`, JSON.stringify({ lastHash: now - 23 * 60 * 60 * 1000 })]
         ]
     });
     const longRunner = loadLongRunner();
 
     longRunner.cleanCacheDB();
 
-    assert.deepEqual(JSON.parse(state.cacheStore.get("identifiers:" + address)), ["recent"]);
+    assert.deepEqual(JSON.parse(state.cacheStore.get(`identifiers:${  address}`)), ["recent"]);
 });
 
 test("cleanCacheDB flushes large delete sets in multiple LMDB write transactions", () => {
@@ -320,10 +320,10 @@ test("cleanCacheDB flushes large delete sets in multiple LMDB write transactions
     const cacheEntries = [];
 
     for (let i = 0; i < 200; ++i) {
-        const worker = address + "_stale" + i;
+        const worker = `${address  }_stale${  i}`;
         cacheEntries.push([worker, JSON.stringify({ value: i })]);
-        cacheEntries.push(["history:" + worker, HISTORY_FIXTURE_VALUE]);
-        cacheEntries.push(["stats:" + worker, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })]);
+        cacheEntries.push([`history:${  worker}`, HISTORY_FIXTURE_VALUE]);
+        cacheEntries.push([`stats:${  worker}`, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })]);
     }
 
     const state = createFakeEnvironment({ cacheEntries });
@@ -338,14 +338,14 @@ test("cleanCacheDB flushes large delete sets in multiple LMDB write transactions
 test("cleanCacheDB ignores MDB_NOTFOUND when a queued key disappears before delete flush", () => {
     const now = Date.now();
     const address = "4".repeat(95);
-    const worker = address + "_stale";
+    const worker = `${address  }_stale`;
     const state = createFakeEnvironment({
         cacheEntries: [
             [worker, JSON.stringify({ value: 1 })],
-            ["history:" + worker, HISTORY_FIXTURE_VALUE],
-            ["stats:" + worker, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })]
+            [`history:${  worker}`, HISTORY_FIXTURE_VALUE],
+            [`stats:${  worker}`, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })]
         ],
-        deleteNotFoundKeys: ["history:" + worker]
+        deleteNotFoundKeys: [`history:${  worker}`]
     });
     const longRunner = loadLongRunner();
 
@@ -353,8 +353,8 @@ test("cleanCacheDB ignores MDB_NOTFOUND when a queued key disappears before dele
         longRunner.cleanCacheDB();
     });
     assert.equal(state.cacheStore.has(worker), false);
-    assert.equal(state.cacheStore.has("history:" + worker), false);
-    assert.equal(state.cacheStore.has("stats:" + worker), false);
+    assert.equal(state.cacheStore.has(`history:${  worker}`), false);
+    assert.equal(state.cacheStore.has(`stats:${  worker}`), false);
 });
 
 test("cleanCacheDB yields identical results when the scan spans multiple chunks", () => {
@@ -362,17 +362,17 @@ test("cleanCacheDB yields identical results when the scan spans multiple chunks"
     const address = "4".repeat(95);
     function buildEntries() {
         return [
-            ["identifiers:" + address, JSON.stringify(["rigA", "rigB"])],
-            ["stats:" + address + "_rigA", JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
-            ["stats:" + address + "_rigB", JSON.stringify({ lastHash: now - 23 * 60 * 60 * 1000 })],
-            ["stats:" + address, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
-            ["history:" + address, HISTORY_FIXTURE_VALUE],
-            [address + "_oldworker", JSON.stringify({ value: 1 })],
-            ["history:" + address + "_oldworker", HISTORY_FIXTURE_VALUE],
-            ["stats:" + address + "_oldworker", JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
-            [address + "_fresh", JSON.stringify({ value: 4 })],
-            ["history:" + address + "_fresh", HISTORY_FIXTURE_VALUE],
-            ["stats:" + address + "_fresh", JSON.stringify({ lastHash: now })],
+            [`identifiers:${  address}`, JSON.stringify(["rigA", "rigB"])],
+            [`stats:${  address  }_rigA`, JSON.stringify({ lastHash: now - 2 * 24 * 60 * 60 * 1000 })],
+            [`stats:${  address  }_rigB`, JSON.stringify({ lastHash: now - 23 * 60 * 60 * 1000 })],
+            [`stats:${  address}`, JSON.stringify({ hash: 10, hash2: 5, lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
+            [`history:${  address}`, HISTORY_FIXTURE_VALUE],
+            [`${address  }_oldworker`, JSON.stringify({ value: 1 })],
+            [`history:${  address  }_oldworker`, HISTORY_FIXTURE_VALUE],
+            [`stats:${  address  }_oldworker`, JSON.stringify({ lastHash: now - 8 * 24 * 60 * 60 * 1000 })],
+            [`${address  }_fresh`, JSON.stringify({ value: 4 })],
+            [`history:${  address  }_fresh`, HISTORY_FIXTURE_VALUE],
+            [`stats:${  address  }_fresh`, JSON.stringify({ lastHash: now })],
             ["tiny_old", JSON.stringify({ untouched: true })]
         ];
     }
@@ -413,7 +413,7 @@ test("cleanAltBlockDB removes only unlocked overflow or expired rows", () => {
 
 test("cleanBlockBalanceTable keeps locked and recent hashes and deletes stale rows in SQL batches", async () => {
     const staleHexes = Array.from({ length: 251 }, function (_entry, index) {
-        return "stale-" + index;
+        return `stale-${  index}`;
     });
     const deleteBatches = [];
     createFakeEnvironment({
@@ -430,7 +430,7 @@ test("cleanBlockBalanceTable keeps locked and recent hashes and deletes stale ro
                 deleteBatches.push(params[0].slice());
                 return { affectedRows: params[0].length };
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     const longRunner = loadLongRunner();
@@ -501,7 +501,7 @@ test("start_long_runner executes all startup tasks once and schedules recurring 
             if (sql.indexOf("SELECT hex FROM paid_blocks") === 0) return [];
             if (sql.indexOf("SELECT DISTINCT hex FROM block_balance") === 0) return [];
             if (sql.indexOf("DELETE FROM block_balance") === 0) return { affectedRows: 0 };
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
 

@@ -13,11 +13,11 @@ process.stdin.on('data', function(data) {
 
 function _human_hashrate(hashes) {
   const power = Math.pow(10, 2);
-  if (hashes > 1000000000000) return String(Math.round((hashes / 1000000000000) * power) / power) +  " TH/s";
-  if (hashes > 1000000000)    return String(Math.round((hashes / 1000000000) * power) / power) +  " GH/s";
-  if (hashes > 1000000)       return String(Math.round((hashes / 1000000) * power) / power) +  " MH/s";
-  if (hashes > 1000)          return String(Math.round((hashes / 1000) * power) / power) +  " KH/s";
-  return Math.floor( hashes || 0 ) + " H/s"
+  if (hashes > 1000000000000) return `${String(Math.round((hashes / 1000000000000) * power) / power)   } TH/s`;
+  if (hashes > 1000000000)    return `${String(Math.round((hashes / 1000000000) * power) / power)   } GH/s`;
+  if (hashes > 1000000)       return `${String(Math.round((hashes / 1000000) * power) / power)   } MH/s`;
+  if (hashes > 1000)          return `${String(Math.round((hashes / 1000) * power) / power)   } KH/s`;
+  return `${Math.floor( hashes || 0 )  } H/s`
 };
 
 process.stdin.on('end', function() {
@@ -25,19 +25,19 @@ process.stdin.on('end', function() {
   let oldest_timestamp  = 0;
   let newest_timestamp  = 0;
 
-  let wallets = {};
+  const wallets = {};
 
-  let _my_share_count    = 0;
-  let _my_xmr_diff       = 0;
-  let _my_xmr_diff_payed = 0;
-  let _my_coin_raw_diff  = {};
-  let _my_coin_xmr_diff  = {};
+  const _my_share_count    = 0;
+  const _my_xmr_diff       = 0;
+  const _my_xmr_diff_payed = 0;
+  const _my_coin_raw_diff  = {};
+  const _my_coin_xmr_diff  = {};
 
-  for (let line of stdin.split("\n")) {
-    if (line.substring(0, 1) == "#") continue;
+  for (const line of stdin.split("\n")) {
+    if (line.substring(0, 1) === "#") continue;
     const items = line.split('\t');
     if (items.length < 7) {
-      console.error("Skipped invalid line: " + line);
+      console.error(`Skipped invalid line: ${  line}`);
       continue;
     }
     const wallet         = items[0];
@@ -46,7 +46,7 @@ process.stdin.on('end', function() {
     const count          = parseInt(items[3]);
     const coin           = items[4];
     const xmr_diff       = parseInt(items[5]);
-    const xmr_diff_payed = items[6] == "" ? xmr_diff : parseInt(items[6]);
+    const xmr_diff_payed = items[6] === "" ? xmr_diff : parseInt(items[6]);
     _pplns_window += xmr_diff;
     if (!oldest_timestamp || timestamp < oldest_timestamp) oldest_timestamp = timestamp;
     if (newest_timestamp < timestamp) newest_timestamp = timestamp;
@@ -66,8 +66,8 @@ process.stdin.on('end', function() {
     wallets[wallet].coin_xmr_diff[coin] += xmr_diff;
   }
 
-  for (let wallet of Object.keys(wallets).sort((a, b) => (wallets[a].xmr_diff < wallets[b].xmr_diff) ? 1 : -1)) {
-    console.log(wallet + ": " + wallets[wallet].xmr_diff);
+  for (const wallet of Object.keys(wallets).sort((a, b) => (wallets[a].xmr_diff < wallets[b].xmr_diff) ? 1 : -1)) {
+    console.log(`${wallet  }: ${  wallets[wallet].xmr_diff}`);
   }
 
   process.exit(0);

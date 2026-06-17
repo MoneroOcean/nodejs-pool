@@ -31,12 +31,12 @@ function nowSqlTimestamp(support, timestampMs) {
     if (support && typeof support.formatDate === "function") return support.formatDate(timestampMs);
     const date = new Date(timestampMs);
     const pad = function pad(value) { return String(value).padStart(2, "0"); };
-    return date.getUTCFullYear() + "-" +
-        pad(date.getUTCMonth() + 1) + "-" +
-        pad(date.getUTCDate()) + " " +
-        pad(date.getUTCHours()) + ":" +
-        pad(date.getUTCMinutes()) + ":" +
-        pad(date.getUTCSeconds());
+    return `${date.getUTCFullYear()  }-${ 
+        pad(date.getUTCMonth() + 1)  }-${ 
+        pad(date.getUTCDate())  } ${ 
+        pad(date.getUTCHours())  }:${ 
+        pad(date.getUTCMinutes())  }:${ 
+        pad(date.getUTCSeconds())}`;
 }
 
 function describeItem(item) { return item.payment_address; }
@@ -58,10 +58,10 @@ function collectUnsafeUnlockFlags(batch, confirmWalletHistoryChecked) {
 
 function collectRiskFlags(batch, items, reservedBalances) {
     const flags = [];
-    if (!SAFE_BATCH_STATUSES.has(batch.status)) flags.push("status is " + batch.status);
+    if (!SAFE_BATCH_STATUSES.has(batch.status)) flags.push(`status is ${  batch.status}`);
     if (isPresent(batch.released_at)) flags.push("released_at is already set");
     if (Array.isArray(items) && Array.isArray(reservedBalances) && reservedBalances.length !== items.length) {
-        flags.push("reserved balance rows (" + reservedBalances.length + ") do not match batch items (" + items.length + ")");
+        flags.push(`reserved balance rows (${  reservedBalances.length  }) do not match batch items (${  items.length  })`);
     }
     return flags;
 }
@@ -84,7 +84,7 @@ async function withPaymentsAdvisoryLock(mysql, work, lockName) {
         const locked = await querySingleValue(connection, "SELECT GET_LOCK(?, 0) AS locked", [advisoryLockName], "locked");
         if (locked !== 1) {
             throw createUnlockError(
-                "Payment advisory lock is busy for " + advisoryLockName + ". Stop the payments runtime before unlocking batches.",
+                `Payment advisory lock is busy for ${  advisoryLockName  }. Stop the payments runtime before unlocking batches.`,
                 { code: "lock_busy", connectionId }
             );
         }
@@ -105,7 +105,7 @@ async function withPaymentsAdvisoryLock(mysql, work, lockName) {
 async function loadBatchState(connection, batchId) {
     const batches = await connection.query("SELECT * FROM payment_batches WHERE id = ?", [batchId]);
     if (!Array.isArray(batches) || batches.length === 0) {
-        throw createUnlockError("Payment batch " + batchId + " was not found", { code: "missing_batch" });
+        throw createUnlockError(`Payment batch ${  batchId  } was not found`, { code: "missing_batch" });
     }
     const batch = batches[0];
     const items = await connection.query(
@@ -123,14 +123,14 @@ function assertUnlockAllowed(batchId, batch, items, reservedBalances, force, con
     const unsafeFlags = collectUnsafeUnlockFlags(batch, confirmWalletHistoryChecked);
     if (unsafeFlags.length) {
         throw createUnlockError(
-            "Refusing to unlock payment batch " + batchId + " because it may already have crossed the wallet submit boundary.",
+            `Refusing to unlock payment batch ${  batchId  } because it may already have crossed the wallet submit boundary.`,
             { code: "unsafe_batch", flags: unsafeFlags, items, reservedBalances }
         );
     }
     const riskFlags = collectRiskFlags(batch, items, reservedBalances);
     if (riskFlags.length && !force) {
         throw createUnlockError(
-            "Refusing to unlock payment batch " + batchId + " without --force.",
+            `Refusing to unlock payment batch ${  batchId  } without --force.`,
             { code: "force_required", flags: riskFlags, items, reservedBalances }
         );
     }
@@ -189,15 +189,15 @@ async function assertWalletHistoryClear(batchId, loaded, walletMatchChecker, dep
     if (matchResult && matchResult.status === "no_match") return;
     if (matchResult && matchResult.status === "match_found") {
         throw createUnlockError(
-            "Refusing to unlock payment batch " + batchId + ": wallet history shows a matching transfer (" +
-                matchResult.txid + "); the batch was already sent.",
+            `Refusing to unlock payment batch ${  batchId  }: wallet history shows a matching transfer (${ 
+                matchResult.txid  }); the batch was already sent.`,
             { code: "wallet_tx_match", txid: matchResult.txid, items: loaded.items, reservedBalances: loaded.reservedBalances }
         );
     }
     throw createUnlockError(
-        "Refusing to unlock payment batch " + batchId + ": could not verify wallet history (" +
-            ((matchResult && matchResult.message) || (matchResult && matchResult.status) || "no result") +
-            "). Re-run once the wallet is reachable.",
+        `Refusing to unlock payment batch ${  batchId  }: could not verify wallet history (${ 
+            (matchResult && matchResult.message) || (matchResult && matchResult.status) || "no result" 
+            }). Re-run once the wallet is reachable.`,
         { code: "wallet_unavailable", items: loaded.items, reservedBalances: loaded.reservedBalances }
     );
 }
@@ -227,8 +227,8 @@ async function unlockBatch(options) {
             await assertWalletHistoryClear(batchId, loaded, walletMatchChecker, { support, config });
         }
         const releasedAt = nowSqlTimestamp(support, nowMs);
-        const note = "manually released for retry by manage_scripts/payment_batch_unlock.js at " + releasedAt +
-            (confirmWalletHistoryChecked ? " (wallet history checked and confirmed no tx match)" : "");
+        const note = `manually released for retry by manage_scripts/payment_batch_unlock.js at ${  releasedAt 
+            }${confirmWalletHistoryChecked ? " (wallet history checked and confirmed no tx match)" : ""}`;
 
         await connection.beginTransaction();
         try {
@@ -248,7 +248,7 @@ async function unlockBatch(options) {
                     ["retryable", releasedAt, releasedAt, note, batchId, "reserved", "retrying"]
                 );
             if (!batchResult || batchResult.affectedRows !== 1) {
-                throw new Error("Payment batch " + batchId + " changed while unlocking; re-read it before retrying");
+                throw new Error(`Payment batch ${  batchId  } changed while unlocking; re-read it before retrying`);
             }
             await connection.commit();
             return {
@@ -270,20 +270,20 @@ async function unlockBatch(options) {
 
 function printUnlockError(error, batchId) {
     if (!error || typeof error !== "object") {
-        exitWithError("Failed to unlock payment batch " + batchId + ": " + String(error));
+        exitWithError(`Failed to unlock payment batch ${  batchId  }: ${  String(error)}`);
         return;
     }
     if (error.code === "force_required" || error.code === "unsafe_batch") {
         console.error(error.message);
         console.error(error.code === "unsafe_batch" ? "Unsafe flags:" : "Risk flags:");
         (error.flags || []).forEach(function printFlag(flag) {
-            console.error(" - " + flag);
+            console.error(` - ${  flag}`);
         });
         const items = Array.isArray(error.items) ? error.items : [];
-        console.error("Destinations: " + (items.length ? items.map(describeItem).join(", ") : "(none)"));
+        console.error(`Destinations: ${  items.length ? items.map(describeItem).join(", ") : "(none)"}`);
         process.exit(1);
     }
-    exitWithError("Failed to unlock payment batch " + batchId + ": " + (error.message || String(error)));
+    exitWithError(`Failed to unlock payment batch ${  batchId  }: ${  error.message || String(error)}`);
 }
 
 function runCli() {
@@ -303,19 +303,19 @@ function runCli() {
                     mysql: global.mysql,
                     support: global.support
                 });
-                console.log("Unlocked payment batch " + batchId + " for retry.");
-                console.log("Previous status: " + result.batch.status);
-                console.log("Cleared pending balance rows: " + result.clearedPendingRows);
-                console.log("Batch destinations: " + (result.items.length ? result.items.map(describeItem).join(", ") : "(none)"));
+                console.log(`Unlocked payment batch ${  batchId  } for retry.`);
+                console.log(`Previous status: ${  result.batch.status}`);
+                console.log(`Cleared pending balance rows: ${  result.clearedPendingRows}`);
+                console.log(`Batch destinations: ${  result.items.length ? result.items.map(describeItem).join(", ") : "(none)"}`);
                 if (result.riskFlags.length) {
-                    console.log("Forced despite risk flags: " + result.riskFlags.join("; "));
+                    console.log(`Forced despite risk flags: ${  result.riskFlags.join("; ")}`);
                 }
                 process.exit(0);
             } catch (error) {
                 printUnlockError(error, batchId);
             }
         })().catch(function onError(error) {
-            exitWithError("Script failed: " + (error && error.message ? error.message : String(error)));
+            exitWithError(`Script failed: ${  error && error.message ? error.message : String(error)}`);
         });
     });
 }

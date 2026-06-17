@@ -56,7 +56,7 @@ function applyPaymentBatchUpdate(store, sql, params) {
             continue;
         }
         if (!whereClause.trim()) break;
-        throw new Error("Unhandled payment_batches WHERE clause: " + whereClause);
+        throw new Error(`Unhandled payment_batches WHERE clause: ${  whereClause}`);
     }
 
     if (!allowed) return { affectedRows: 0 };
@@ -151,7 +151,7 @@ function createFakeMysql(options = {}) {
 
     function handleQuery(sql, params, context) {
         maybeFail(sql, params, context);
-        state.queryCalls.push({ sql, params, connectionId: context.connectionId || 0, transactional: !!context.store });
+        state.queryCalls.push({ sql, params, connectionId: context.connectionId || 0, transactional: Boolean(context.store) });
         const store = activeStore(context);
 
         if (sql === "SELECT CONNECTION_ID() AS connection_id") {
@@ -353,7 +353,7 @@ function createFakeMysql(options = {}) {
             });
             return { affectedRows };
         }
-        throw new Error("Unhandled SQL: " + sql);
+        throw new Error(`Unhandled SQL: ${  sql}`);
     }
 
     const mysql = {

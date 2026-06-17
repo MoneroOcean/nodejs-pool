@@ -25,11 +25,11 @@ function getBridgeSymbol(tradeContext) {
         const route = Array.isArray(tradeContext.route) ? tradeContext.route : [];
         const symbol = typeof route[1] === "string" ? route[1] : "";
         if (!symbol || symbol === "ALT" || symbol === "BTC" || symbol === "USDT" || symbol === "XMR") {
-            throw new Error("altblock_exchange_trade is missing a valid BASE bridge symbol: " + formatJson(tradeContext));
+            throw new Error(`altblock_exchange_trade is missing a valid BASE bridge symbol: ${  formatJson(tradeContext)}`);
         }
         return symbol;
     }
-    throw new Error("altblock_exchange_trade is not at an intermediate bridge-credit stage: " + formatJson(tradeContext));
+    throw new Error(`altblock_exchange_trade is not at an intermediate bridge-credit stage: ${  formatJson(tradeContext)}`);
 }
 
 function buildTradeContextFix(tradeContext, currentBridgeBalance, options) {
@@ -37,21 +37,21 @@ function buildTradeContextFix(tradeContext, currentBridgeBalance, options) {
     const bridgeSymbol = getBridgeSymbol(tradeContext);
     const expectedIncrease = asFiniteNumber(
         tradeContext.expectedIncreases && tradeContext.expectedIncreases[bridgeSymbol],
-        "altblock_exchange_trade is missing expected " + bridgeSymbol + " increase"
+        `altblock_exchange_trade is missing expected ${  bridgeSymbol  } increase`
     );
     if (expectedIncrease <= 0) {
-        throw new Error("altblock_exchange_trade has invalid expected " + bridgeSymbol + " increase: " + formatJson(tradeContext));
+        throw new Error(`altblock_exchange_trade has invalid expected ${  bridgeSymbol  } increase: ${  formatJson(tradeContext)}`);
     }
     const baseline = asFiniteNumber(
         tradeContext.baselineBalances && tradeContext.baselineBalances[bridgeSymbol],
-        "altblock_exchange_trade is missing " + bridgeSymbol + " baseline"
+        `altblock_exchange_trade is missing ${  bridgeSymbol  } baseline`
     );
-    const currentBalance = asFiniteNumber(currentBridgeBalance, "Current exchange " + bridgeSymbol + " balance is invalid");
+    const currentBalance = asFiniteNumber(currentBridgeBalance, `Current exchange ${  bridgeSymbol  } balance is invalid`);
     if (currentBalance < baseline) {
         throw new Error(
-            "Current exchange " + bridgeSymbol + " balance " + currentBalance.toFixed(8) +
-            " is below stored baseline " + baseline.toFixed(8) +
-            "; this script only supports credited-balance recovery"
+            `Current exchange ${  bridgeSymbol  } balance ${  currentBalance.toFixed(8) 
+            } is below stored baseline ${  baseline.toFixed(8) 
+            }; this script only supports credited-balance recovery`
         );
     }
     if (currentOptions.activeOrders === true) {
@@ -63,8 +63,8 @@ function buildTradeContextFix(tradeContext, currentBridgeBalance, options) {
     const observedIncrease = currentBalance - baseline;
     if (observedIncrease <= 0) {
         throw new Error(
-            "Current exchange " + bridgeSymbol + " balance " + currentBalance.toFixed(8) +
-            " does not show credited balance above the stored baseline " + baseline.toFixed(8)
+            `Current exchange ${  bridgeSymbol  } balance ${  currentBalance.toFixed(8) 
+            } does not show credited balance above the stored baseline ${  baseline.toFixed(8)}`
         );
     }
 
@@ -78,7 +78,7 @@ function buildTradeContextFix(tradeContext, currentBridgeBalance, options) {
         cacheKey: "altblock_exchange_trade",
         currentValue: clone(tradeContext),
         nextValue: nextTradeContext,
-        summary: "updated expected " + bridgeSymbol + " bridge credit to " + observedIncrease.toFixed(8)
+        summary: `updated expected ${  bridgeSymbol  } bridge credit to ${  observedIncrease.toFixed(8)}`
     };
 }
 

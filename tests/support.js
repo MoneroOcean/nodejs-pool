@@ -368,7 +368,7 @@ test.describe("support", { concurrency: false }, () => {
         try {
             const wallet = "4".repeat(95);
             const options = {
-                batchKey: "worker-stopped:" + wallet,
+                batchKey: `worker-stopped:${  wallet}`,
                 batchSubject: "Workers stopped hashing"
             };
             support.sendEmail("miner@example.com", "Worker stopped hashing: rig01", "Worker: rig01", wallet, options);
@@ -607,7 +607,7 @@ test.describe("support", { concurrency: false }, () => {
             const baseTs = 1710000000000;
             function buildBody(events, helpers) {
                 return events.map(function mapEvent(event) {
-                    return helpers.formatTime(event.ts) + " " + event.detail;
+                    return `${helpers.formatTime(event.ts)  } ${  event.detail}`;
                 }).join("\n");
             }
 
@@ -724,14 +724,14 @@ test.describe("support", { concurrency: false }, () => {
 
         Object.keys(support.emailDefaults.general).forEach(function assertGeneralDefault(item) {
             assert.ok(
-                baseSql.includes("('general', '" + item + "', '" + sqlString(support.emailDefaults.general[item]) + "',"),
-                "missing general." + item + " default in deployment/base.sql"
+                baseSql.includes(`('general', '${  item  }', '${  sqlString(support.emailDefaults.general[item])  }',`),
+                `missing general.${  item  } default in deployment/base.sql`
             );
         });
         Object.keys(support.emailDefaults.email).forEach(function assertEmailDefault(item) {
             assert.ok(
-                baseSql.includes("('email', '" + item + "', '" + sqlString(support.emailDefaults.email[item]) + "',"),
-                "missing email." + item + " default in deployment/base.sql"
+                baseSql.includes(`('email', '${  item  }', '${  sqlString(support.emailDefaults.email[item])  }',`),
+                `missing email.${  item  } default in deployment/base.sql`
             );
         });
     });

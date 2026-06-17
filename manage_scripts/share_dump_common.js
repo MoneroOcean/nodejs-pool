@@ -1,7 +1,7 @@
 "use strict";
 module.exports = function dumpShares(depth, shouldPrint) {
-    depth = Number(depth);
-    if (!Number.isInteger(depth) || depth <= 0) {
+    const numericDepth = Number(depth);
+    if (!Number.isInteger(numericDepth) || numericDepth <= 0) {
         console.error("Depth must be a positive integer");
         process.exit(1);
     }
@@ -15,14 +15,14 @@ module.exports = function dumpShares(depth, shouldPrint) {
         const txn = global.database.env.beginTxn({ readOnly: true });
         const cursor = new global.database.lmdb.Cursor(txn, global.database.shareDB);
 
-        for (let blockID = lastBlock; blockID > lastBlock - depth; --blockID) {
+        for (let blockID = lastBlock; blockID > lastBlock - numericDepth; --blockID) {
             // shareDB keys are block heights with duplicate values; only walk dups when an exact key match exists.
             for (let found = cursor.goToRange(parseInt(blockID)) === blockID; found; found = cursor.goToNextDup()) {
                 cursor.getCurrentBinary(function (_key, data) {
                     const shareData = global.protos.Share.decode(data);
                     if (!shouldPrint(shareData)) return;
                     const date = new Date(shareData.timestamp);
-                    console.log(date.toString() + ": " + JSON.stringify(shareData));
+                    console.log(`${date.toString()  }: ${  JSON.stringify(shareData)}`);
                 }); // jshint ignore:line
             }
         }

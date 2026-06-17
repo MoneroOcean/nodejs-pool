@@ -188,7 +188,7 @@ function buildEthSubmitNonce(extraNonce, suffix) {
     // so the miner-supplied portion shrinks by the extranonce length; otherwise it spans all 16.
     const isSharedNonceProfile = global.coinFuncs.portBlobType(ETH_PORT) === 102;
     const nonceLength = isSharedNonceProfile ? 16 - extraNonce.length : 16;
-    return "0x" + suffix.padStart(nonceLength, "0");
+    return `0x${  suffix.padStart(nonceLength, "0")}`;
 }
 
 function submitEthBlockCandidate(socket, id, notifyPush, result = ZERO_RESULT) {

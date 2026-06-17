@@ -56,14 +56,14 @@ function findTariSourceFile(relativePath) {
 }
 
 function readRustIntegerConst(source, name) {
-    const match = source.match(new RegExp("\\bconst\\s+" + name + "\\s*:\\s*[^=]+\\s*=\\s*(\\d+)\\s*;"));
-    assert.notEqual(match, null, "missing Tari source const " + name);
+    const match = source.match(new RegExp(`\\bconst\\s+${  name  }\\s*:\\s*[^=]+\\s*=\\s*(\\d+)\\s*;`));
+    assert.notEqual(match, null, `missing Tari source const ${  name}`);
     return Number(match[1]);
 }
 
 function readRustMatchArm(source, currentArm, nextArm) {
-    const match = source.match(new RegExp(currentArm + "\\s*=>\\s*\\{([\\s\\S]*?)\\n\\s*\\},\\n\\s*" + nextArm));
-    assert.notEqual(match, null, "missing Tari source match arm " + currentArm);
+    const match = source.match(new RegExp(`${currentArm  }\\s*=>\\s*\\{([\\s\\S]*?)\\n\\s*\\},\\n\\s*${  nextArm}`));
+    assert.notEqual(match, null, `missing Tari source match arm ${  currentArm}`);
     return match[1];
 }
 
@@ -330,7 +330,7 @@ test("eth submitted block hash lookup preserves coinFuncs receiver when delayed"
             assert.equal(this, delayedCoinFuncs);
             assert.equal(port, 8645);
             assert.equal(nonce, "0xnonce");
-            callback("0x" + "ab".repeat(32));
+            callback(`0x${  "ab".repeat(32)}`);
         }
     };
 

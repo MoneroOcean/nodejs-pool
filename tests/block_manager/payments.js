@@ -210,7 +210,7 @@ function createPaymentEnvironment(options = {}) {
             });
             return { affectedRows };
         }
-        throw new Error("Unhandled SQL: " + sql);
+        throw new Error(`Unhandled SQL: ${  sql}`);
     }
 
     const mysql = {
@@ -283,7 +283,7 @@ function createPaymentEnvironment(options = {}) {
             return String(value);
         },
         formatDate(timestamp) {
-            return "ts:" + timestamp;
+            return `ts:${  timestamp}`;
         },
         sendEmail() {}
     };
@@ -316,8 +316,8 @@ function createPaymentEnvironment(options = {}) {
 
 function sortRows(rows) {
     return rows.slice().sort(function (left, right) {
-        const leftKey = left.hex + ":" + left.payment_address + ":" + (left.payment_id || "");
-        const rightKey = right.hex + ":" + right.payment_address + ":" + (right.payment_id || "");
+        const leftKey = `${left.hex  }:${  left.payment_address  }:${  left.payment_id || ""}`;
+        const rightKey = `${right.hex  }:${  right.payment_address  }:${  right.payment_id || ""}`;
         return leftKey.localeCompare(rightKey);
     });
 }

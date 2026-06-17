@@ -91,7 +91,7 @@ function buildSummary(run, coveredResults) {
         })),
         coveragePlan: run.coveragePlan.map((entry) => ({
             algorithm: entry.algorithm,
-            covered: !!entry.miner || !!entry.protocolProbe,
+            covered: Boolean(entry.miner) || Boolean(entry.protocolProbe),
             miner: entry.miner ? entry.miner.name : null,
             protocolProbe: entry.protocolProbe || null
         })),
@@ -283,7 +283,7 @@ const isDefaultTargetReachable = () => isPoolEndpointReachable(DEFAULT_TARGET_HO
 
 function parseCliOptions(argv) {
     const parsed = parseArgv(argv, {});
-    return { help: !!(parsed.help || parsed.h), targetHost: parsed["target-host"] };
+    return { help: Boolean(parsed.help || parsed.h), targetHost: parsed["target-host"] };
 }
 
 function renderCliHelp() {

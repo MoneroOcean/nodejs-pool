@@ -273,7 +273,7 @@ test("successful logins prune stale tracked agents and cap stored agent length",
         process.env.WORKER_ID = "1";
         runtime.getState().minerAgents["stale-agent"] = Date.now() - 48 * 60 * 60 * 1000;
 
-        const longAgent = "Agent/" + "x".repeat(400);
+        const longAgent = `Agent/${  "x".repeat(400)}`;
         const loginReply = invokePoolMethod({
             method: "login",
             params: {

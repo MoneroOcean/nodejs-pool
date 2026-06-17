@@ -42,11 +42,11 @@ function createCli(options) {
         get(name, fallback = null) {
             return typeof argv[name] === "undefined" ? fallback : argv[name];
         },
-        forEachBinaryEntry(database, iterator, options = {}) {
-            forEachEntry(database, "getCurrentBinary", iterator, options.reverse);
+        forEachBinaryEntry(database, iterator, iterOptions = {}) {
+            forEachEntry(database, "getCurrentBinary", iterator, iterOptions.reverse);
         },
-        forEachStringEntry(database, iterator, options = {}) {
-            forEachEntry(database, "getCurrentString", iterator, options.reverse);
+        forEachStringEntry(database, iterator, iterOptions = {}) {
+            forEachEntry(database, "getCurrentString", iterator, iterOptions.reverse);
         },
         jsonArg(name, missingMessage, invalidPrefix) {
             const value = arg(name, missingMessage);

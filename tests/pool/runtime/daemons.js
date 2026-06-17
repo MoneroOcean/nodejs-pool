@@ -101,7 +101,7 @@ test("submit failure email marks local hash mismatches as non-actionable even wh
             processSend() {},
             clearWalletSessionTrust() {},
             getThreadName() { return ""; },
-            formatCoinPort(_coin, port) { return "XMR:" + port; },
+            formatCoinPort(_coin, port) { return `XMR:${  port}`; },
             getLastMinerLogTime() { return {}; },
             setLastMinerLogTime() {}
         });
@@ -180,7 +180,7 @@ test("xmr submit failures are retried once before final success", async () => {
             return {
                 pool: {
                     acceptSubmittedBlock({ rpcResult }) {
-                        return !!(rpcResult && rpcResult.result && rpcResult.result.status === "OK");
+                        return Boolean(rpcResult && rpcResult.result && rpcResult.result.status === "OK");
                     },
                     resolveSubmittedBlockHash(_ctx, callback) {
                         callback("bb".repeat(32));
@@ -217,7 +217,7 @@ test("xmr submit failures are retried once before final success", async () => {
             processSend() {},
             clearWalletSessionTrust() {},
             getThreadName() { return ""; },
-            formatCoinPort(_coin, port) { return "XMR:" + port; },
+            formatCoinPort(_coin, port) { return `XMR:${  port}`; },
             getLastMinerLogTime() { return {}; },
             setLastMinerLogTime() {}
         });
@@ -318,7 +318,7 @@ test("non-xmr submit failures are not retried", async () => {
             processSend() {},
             clearWalletSessionTrust() {},
             getThreadName() { return ""; },
-            formatCoinPort(coin, port) { return coin + ":" + port; },
+            formatCoinPort(coin, port) { return `${coin  }:${  port}`; },
             getLastMinerLogTime() { return {}; },
             setLastMinerLogTime() {}
         });
@@ -423,8 +423,8 @@ test("submitter exceptions are reported as submit failures instead of escaping",
             processSend() {},
             clearWalletSessionTrust() {},
             getThreadName() { return ""; },
-            formatCoinPort(coin, port) { return coin + ":" + port; },
-            formatPoolEvent(label, details) { return label + ": " + JSON.stringify(details); },
+            formatCoinPort(coin, port) { return `${coin  }:${  port}`; },
+            formatPoolEvent(label, details) { return `${label  }: ${  JSON.stringify(details)}`; },
             getLastMinerLogTime() { return {}; },
             setLastMinerLogTime() {}
         });

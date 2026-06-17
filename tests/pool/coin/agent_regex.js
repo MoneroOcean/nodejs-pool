@@ -9,7 +9,7 @@ const constants = createConstants({ get_merged_mining_nonce_size: () => 0 });
 
 function version(re, agent) {
     const match = re.exec(agent);
-    return match ? match[1] + "." + match[2] + "." + match[3] : null;
+    return match ? `${match[1]  }.${  match[2]  }.${  match[3]}` : null;
 }
 
 test.describe("coin agent regexes", { concurrency: false }, function agentRegexSuite() {
@@ -26,8 +26,8 @@ test.describe("coin agent regexes", { concurrency: false }, function agentRegexS
         // A run of word characters longer than the {1,64} bound immediately before
         // "-stak" still matches, because the engine anchors the bounded run on the
         // characters right before "-stak". So no real agent loses its version match.
-        assert.equal(version(constants.reXMRSTAK, "x".repeat(100) + "-stak/9.9.9"), "9.9.9");
-        assert.equal(version(constants.reXMRSTAKRX, "y".repeat(300) + "-stak-rx/1.2.3"), "1.2.3");
+        assert.equal(version(constants.reXMRSTAK, `${"x".repeat(100)  }-stak/9.9.9`), "9.9.9");
+        assert.equal(version(constants.reXMRSTAKRX, `${"y".repeat(300)  }-stak-rx/1.2.3`), "1.2.3");
     });
 
     test("an oversized login agent cannot stall the event loop (ReDoS bound)", () => {
@@ -41,8 +41,8 @@ test.describe("coin agent regexes", { concurrency: false }, function agentRegexS
         const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
         assert.ok(
             elapsedMs < 1000,
-            "agent regexes on a 102KB agent took " + elapsedMs.toFixed(0) +
-            "ms (expected well under 1000ms; unbounded backtracking would be thousands of ms)"
+            `agent regexes on a 102KB agent took ${  elapsedMs.toFixed(0) 
+            }ms (expected well under 1000ms; unbounded backtracking would be thousands of ms)`
         );
     });
 });

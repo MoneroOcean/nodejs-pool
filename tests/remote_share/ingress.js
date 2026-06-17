@@ -20,7 +20,7 @@ async function waitForCondition(check, timeoutMs) {
         if (check()) return;
         await wait(10);
     }
-    throw new Error("Condition not met within " + timeoutMs + "ms");
+    throw new Error(`Condition not met within ${  timeoutMs  }ms`);
 }
 
 function listenOnPort(port) {
@@ -63,8 +63,8 @@ async function captureConsole(run) {
     console.log = function captureLog() { logs.push(Array.from(arguments).join(" ")); };
     console.error = function captureError() { errors.push(Array.from(arguments).join(" ")); };
     try {
-        await run({ logs: logs, errors: errors });
-        return { logs: logs, errors: errors };
+        await run({ logs, errors });
+        return { logs, errors };
     } finally {
         console.log = originalLog;
         console.error = originalError;
@@ -78,8 +78,8 @@ function createFakeCluster(options) {
 
     function workerRecord(id, pid) {
         return {
-            id: id,
-            process: { pid: pid },
+            id,
+            process: { pid },
             on() {},
             off() {},
             removeListener() {}
@@ -655,7 +655,7 @@ test("remote_share cluster worker listen logs use pool-style worker prefixes", a
             await runtime.stop();
         });
 
-        assert.ok(output.logs.some((line) => line.startsWith("[S6:" + process.pid + "] Listen: service=remote-share host=127.0.0.1 port=")));
+        assert.ok(output.logs.some((line) => line.startsWith(`[S6:${  process.pid  }] Listen: service=remote-share host=127.0.0.1 port=`)));
     } finally {
         restore();
     }

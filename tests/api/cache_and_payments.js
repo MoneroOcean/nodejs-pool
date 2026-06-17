@@ -27,10 +27,10 @@ function request(port, options) {
     return new Promise((resolve, reject) => {
         const req = http.request({
             host: "127.0.0.1",
-            port: port,
+            port,
             method: options.method || "GET",
             path: options.path,
-            headers: headers
+            headers
         }, (res) => {
             const chunks = [];
             res.setEncoding("utf8");
@@ -41,7 +41,7 @@ function request(port, options) {
                 try {
                     json = text ? JSON.parse(text) : null;
                 } catch (_error) { /* non-JSON body; leave json as null */ }
-                resolve({ statusCode: res.statusCode, headers: res.headers, text: text, json: json });
+                resolve({ statusCode: res.statusCode, headers: res.headers, text, json });
             });
         });
         req.on("error", reject);
@@ -114,21 +114,21 @@ function createDatabase(options) {
     };
 
     return {
-        state: state,
+        state,
         thread_id: "",
         getCache(key) {
             state.cacheGets.push(key);
             return caches.has(key) ? caches.get(key) : false;
         },
         getBlockList(poolType, start, end) {
-            state.blockListCalls.push({ poolType: poolType, start: start, end: end });
+            state.blockListCalls.push({ poolType, start, end });
             if (typeof options.getBlockList === "function") return options.getBlockList(poolType, start, end);
-            return [{ poolType: poolType, start: start, end: end }];
+            return [{ poolType, start, end }];
         },
         getAltBlockList(poolType, coinPort, start, end) {
-            state.altBlockListCalls.push({ poolType: poolType, coinPort: coinPort, start: start, end: end });
+            state.altBlockListCalls.push({ poolType, coinPort, start, end });
             if (typeof options.getAltBlockList === "function") return options.getAltBlockList(poolType, coinPort, start, end);
-            return [{ poolType: poolType, coinPort: coinPort, start: start, end: end }];
+            return [{ poolType, coinPort, start, end }];
         }
     };
 }
@@ -136,9 +136,9 @@ function createDatabase(options) {
 function createMysql(handler) {
     const calls = [];
     return {
-        calls: calls,
+        calls,
         async query(sql, params) {
-            calls.push({ sql: sql, params: params });
+            calls.push({ sql, params });
             return handler(sql, params, calls);
         }
     };
@@ -198,7 +198,7 @@ test.describe("api cache and payments", { concurrency: false }, () => {
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
-            database: database,
+            database,
             mysql: createMysql(async () => []),
             support: createSupport()
         }, async (port) => {
@@ -258,8 +258,8 @@ test.describe("api cache and payments", { concurrency: false }, () => {
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
-            config: config,
-            database: database,
+            config,
+            database,
             mysql: createMysql(async () => []),
             now: () => nowValue,
             responseCacheMaxEntries: 1,
@@ -351,14 +351,14 @@ test.describe("api cache and payments", { concurrency: false }, () => {
                     { id: 21, transaction_hash: "tx21", mixin: 5 }
                 ];
             }
-            throw new Error("Unexpected SQL: " + sql + " calls=" + calls.length + " params=" + JSON.stringify(params));
+            throw new Error(`Unexpected SQL: ${  sql  } calls=${  calls.length  } params=${  JSON.stringify(params)}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
-            config: config,
+            config,
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             support: createSupport()
         }, async (port) => {
             const typedPoolPayments = await request(port, { path: "/pool/payments/pplns?limit=2&page=0" });
@@ -392,7 +392,7 @@ test.describe("api cache and payments", { concurrency: false }, () => {
                 ];
             }
             if (sql.startsWith("SELECT hex, amount FROM block_balance")) return [];
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         });
         const attack = "wallet' OR 1=1 -- ";
 
@@ -400,10 +400,10 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             support: createSupport()
         }, async (port) => {
-            const response = await request(port, { path: "/miner/" + encodeURIComponent(attack) + "/block_payments" });
+            const response = await request(port, { path: `/miner/${  encodeURIComponent(attack)  }/block_payments` });
             assert.equal(response.statusCode, 200);
             assert.equal(mysql.calls.length, 2);
             assert.match(mysql.calls[1].sql, /payment_address = \?/);
@@ -427,14 +427,14 @@ test.describe("api cache and payments", { concurrency: false }, () => {
                 balanceCalls += 1;
                 return [{ hex: "hex1", amount: 0.5 }];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             support: createSupport()
         }, async (port) => {
             const a = await request(port, { path: "/miner/walletA/block_payments?limit=15&page=0" });
@@ -455,14 +455,14 @@ test.describe("api cache and payments", { concurrency: false }, () => {
             if (sql.includes("FROM transactions ORDER BY id DESC")) {
                 return [{ id: 1, transaction_hash: "h1", mixin: 7, payees: 1, fees: 2, xmr_amt: 3, submitted_time: "2024-01-02T00:00:00Z" }];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             support: createSupport()
         }, async (port) => {
             const res = await request(port, { path: "/pool/payments/pplns?limit=15&page=0" });
@@ -480,7 +480,7 @@ test.describe("api cache and payments", { concurrency: false }, () => {
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
-            database: database,
+            database,
             mysql: createMysql(async () => []),
             support: createSupport()
         }, async (port) => {

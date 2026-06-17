@@ -10,7 +10,7 @@ if (!Number.isInteger(parsedPort) || parsedPort <= 0) {
         process.exit(1);
 }
 
-console.log("Dumping shares for " + port + " port");
+console.log(`Dumping shares for ${  port  } port`);
 
 cli.init(function() {
         dumpShares(depth, function (shareData) {

@@ -51,9 +51,9 @@ function hasKey(txn, key) {
 
 function hasRelatedCache(txn, baseKey) {
     return hasKey(txn, baseKey) ||
-        hasKey(txn, "stats:" + baseKey) ||
-        hasKey(txn, "history:" + baseKey) ||
-        hasKey(txn, "identifiers:" + baseKey);
+        hasKey(txn, `stats:${  baseKey}`) ||
+        hasKey(txn, `history:${  baseKey}`) ||
+        hasKey(txn, `identifiers:${  baseKey}`);
 }
 
 function isRuntimeActiveKey(txn, key) {
@@ -63,20 +63,20 @@ function isRuntimeActiveKey(txn, key) {
     if (key.indexOf("identifiers:") === 0) {
         const baseKey = key.slice("identifiers:".length);
         return hasKey(txn, baseKey) ||
-            hasKey(txn, "stats:" + baseKey) ||
-            hasKey(txn, "history:" + baseKey);
+            hasKey(txn, `stats:${  baseKey}`) ||
+            hasKey(txn, `history:${  baseKey}`);
     }
 
     if (key.indexOf("stats:") === 0) {
         const baseKey = key.slice("stats:".length);
-        return hasKey(txn, baseKey) || hasKey(txn, "identifiers:" + baseKey);
+        return hasKey(txn, baseKey) || hasKey(txn, `identifiers:${  baseKey}`);
     }
 
     if (key.indexOf("history:") === 0) {
         const baseKey = key.slice("history:".length);
         return hasKey(txn, baseKey) ||
-            hasKey(txn, "stats:" + baseKey) ||
-            hasKey(txn, "identifiers:" + baseKey);
+            hasKey(txn, `stats:${  baseKey}`) ||
+            hasKey(txn, `identifiers:${  baseKey}`);
     }
 
     return hasRelatedCache(txn, key);
@@ -145,19 +145,19 @@ require("../init_mini.js").init(function () {
     try {
         for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
             cursor.getCurrentString(function (key, data) {  // jshint ignore:line
-                key = String(key);
+                const keyStr = String(key);
                 ++scannedCount;
 
                 if (scannedCount % PROGRESS_EVERY === 0) {
-                    console.error("Scanned " + scannedCount + " cache keys, found " + foundCount + " unused");
+                    console.error(`Scanned ${  scannedCount  } cache keys, found ${  foundCount  } unused`);
                 }
 
-                if (isRuntimeActiveKey(txn, key)) return;
-                if (isLongRunnerManagedKey(txn, key, minKeyLength)) return;
+                if (isRuntimeActiveKey(txn, keyStr)) return;
+                if (isLongRunnerManagedKey(txn, keyStr, minKeyLength)) return;
 
                 const row = {
-                    key: key,
-                    reason: classifyReason(txn, key, minKeyLength)
+                    key: keyStr,
+                    reason: classifyReason(txn, keyStr, minKeyLength)
                 };
 
                 if (argv.value) row.value = String(data);
@@ -178,9 +178,9 @@ require("../init_mini.js").init(function () {
                 }
 
                 if (argv.value) {
-                    console.log(row.reason + "\t" + row.key + "\t" + row.value);
+                    console.log(`${row.reason  }\t${  row.key  }\t${  row.value}`);
                 } else {
-                    console.log(row.reason + "\t" + row.key);
+                    console.log(`${row.reason  }\t${  row.key}`);
                 }
             });
         }
@@ -197,13 +197,13 @@ require("../init_mini.js").init(function () {
         if (wroteJsonRow) process.stdout.write("\n");
         process.stdout.write("]\n");
     } else {
-        console.error("Found " + foundCount + " cache keys outside runtime usage and long_runner cleanup");
+        console.error(`Found ${  foundCount  } cache keys outside runtime usage and long_runner cleanup`);
     }
 
     if (argv.delete) {
-        console.error("Deleted " + deletedCount + " cache keys");
+        console.error(`Deleted ${  deletedCount  } cache keys`);
     }
-    console.error("Scanned " + scannedCount + " cache keys total");
+    console.error(`Scanned ${  scannedCount  } cache keys total`);
     process.exit(0);
 });
 }

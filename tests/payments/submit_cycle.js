@@ -90,15 +90,15 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
         assert.match(output.log.join("\n"), /tx_key=/);
         assert.match(output.log.join("\n"), /https:\/\/xmrchain\.net\/prove\//);
         assert.ok(paymentEmail);
-        assert.equal(paymentEmail.subject, "Payment sent: " + (harness.mysql.state.store.payments[0].amount / COIN) + " XMR");
+        assert.equal(paymentEmail.subject, `Payment sent: ${  harness.mysql.state.store.payments[0].amount / COIN  } XMR`);
         assert.match(paymentEmail.body, /Payment sent\n\nPool: MoneroOcean\nStatus: confirmed\nCoin: XMR/);
-        assert.match(paymentEmail.body, new RegExp("Paid amount: " + (harness.mysql.state.store.payments[0].amount / COIN) + " XMR"));
-        assert.match(paymentEmail.body, new RegExp("Fee charged: " + (harness.mysql.state.store.payments[0].transfer_fee / COIN) + " XMR"));
-        assert.match(paymentEmail.body, new RegExp("Balance decrease: " + ((harness.mysql.state.store.payments[0].amount + harness.mysql.state.store.payments[0].transfer_fee) / COIN) + " XMR"));
-        assert.match(paymentEmail.body, new RegExp("Destination: " + INTEGRATED));
-        assert.match(paymentEmail.body, new RegExp("Transaction hash: " + "a".repeat(64)));
-        assert.match(paymentEmail.body, new RegExp("Transaction key: " + longTxKey));
-        assert.match(paymentEmail.body, new RegExp("Proof URL: https://xmrchain\\.net/prove/" + "a".repeat(64) + "/" + INTEGRATED + "/" + longTxKey));
+        assert.match(paymentEmail.body, new RegExp(`Paid amount: ${  harness.mysql.state.store.payments[0].amount / COIN  } XMR`));
+        assert.match(paymentEmail.body, new RegExp(`Fee charged: ${  harness.mysql.state.store.payments[0].transfer_fee / COIN  } XMR`));
+        assert.match(paymentEmail.body, new RegExp(`Balance decrease: ${  (harness.mysql.state.store.payments[0].amount + harness.mysql.state.store.payments[0].transfer_fee) / COIN  } XMR`));
+        assert.match(paymentEmail.body, new RegExp(`Destination: ${  INTEGRATED}`));
+        assert.match(paymentEmail.body, new RegExp(`Transaction hash: ${  "a".repeat(64)}`));
+        assert.match(paymentEmail.body, new RegExp(`Transaction key: ${  longTxKey}`));
+        assert.match(paymentEmail.body, new RegExp(`Proof URL: https://xmrchain\\.net/prove/${  "a".repeat(64)  }/${  INTEGRATED  }/${  longTxKey}`));
         assert.match(paymentEmail.body, /Unsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/test-token/);
     });
 
@@ -474,7 +474,7 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
                     };
                 },
                 get_transfer_by_txid(params) {
-                    if (params.txid !== integratedTxHash) return { error: { message: "Unknown txid " + params.txid } };
+                    if (params.txid !== integratedTxHash) return { error: { message: `Unknown txid ${  params.txid}` } };
                     return {
                         result: {
                             transfer: txTransferRecord(harness.clock, [{ address: INTEGRATED, amount: integratedTransferAmount }], {

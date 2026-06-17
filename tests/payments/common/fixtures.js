@@ -111,12 +111,12 @@ function createSupport(clock, sentEmails) {
         formatDate(timestampMs) {
             const date = new Date(timestampMs);
             const pad = function pad(value) { return String(value).padStart(2, "0"); };
-            return date.getUTCFullYear() + "-" +
-                pad(date.getUTCMonth() + 1) + "-" +
-                pad(date.getUTCDate()) + " " +
-                pad(date.getUTCHours()) + ":" +
-                pad(date.getUTCMinutes()) + ":" +
-                pad(date.getUTCSeconds());
+            return `${date.getUTCFullYear()  }-${ 
+                pad(date.getUTCMonth() + 1)  }-${ 
+                pad(date.getUTCDate())  } ${ 
+                pad(date.getUTCHours())  }:${ 
+                pad(date.getUTCMinutes())  }:${ 
+                pad(date.getUTCSeconds())}`;
         },
         formatTemplate(template, values) {
             return template.replace(/%\(([^)]+)\)s/g, function replaceValue(_match, key) {
@@ -129,7 +129,7 @@ function createSupport(clock, sentEmails) {
         },
         sendEmail(to, subject, body, wallet) {
             const emailBody = wallet
-                ? body + "\n\nUnsubscribe: https://api.moneroocean.stream/user/unsubscribeEmail/test-token"
+                ? `${body  }\n\nUnsubscribe: https://api.moneroocean.stream/user/unsubscribeEmail/test-token`
                 : body;
             sentEmails.push({ to, subject, body: emailBody });
         },
@@ -167,7 +167,7 @@ function createWallet(script) {
         const handler = plan[method];
         if (typeof handler === "function") return handler(params, calls);
         if (Array.isArray(handler)) {
-            if (!handler.length) throw new Error("No scripted wallet reply left for " + method);
+            if (!handler.length) throw new Error(`No scripted wallet reply left for ${  method}`);
             const next = handler.shift();
             return typeof next === "function" ? next(params, calls) : next;
         }

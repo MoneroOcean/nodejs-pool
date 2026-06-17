@@ -104,7 +104,7 @@ test("pool state thread names use short master and worker prefixes", () => {
         assert.equal(poolState.formatCoinPort("ALT", 39002), "ALT/39002");
         assert.equal(poolState.formatCoinPort("ALT"), "ALT/39002");
         assert.equal(poolState.formatPoolEvent("Verify", { action: "wallet-add", wallet: "test-wallet" }), "Verify: action=wallet-add wallet=test-wallet");
-        assert.equal("IMPORTANT: " + poolState.formatPoolEvent("Summary", { total: 10, trusted: "7(70.00%)" }), "IMPORTANT: Summary: total=10 trusted=\"7(70.00%)\"");
+        assert.equal(`IMPORTANT: ${  poolState.formatPoolEvent("Summary", { total: 10, trusted: "7(70.00%)" })}`, "IMPORTANT: Summary: total=10 trusted=\"7(70.00%)\"");
 
         poolState.resetRuntimeState();
         global.database = {};

@@ -41,13 +41,13 @@ function summarizeEntry(port, entry, blockLookup) {
 
 function printSummary(summary) {
     console.log(
-        "coin=" + summary.coin +
-        " port=" + summary.port +
-        " blocks=" + summary.blocks +
-        " created_at=" + summary.created_at +
-        " wallet_balance=" + summary.wallet_balance +
-        (summary.first_height !== null ? " first_height=" + summary.first_height : "") +
-        (summary.last_height !== null ? " last_height=" + summary.last_height : "")
+        `coin=${  summary.coin 
+        } port=${  summary.port 
+        } blocks=${  summary.blocks 
+        } created_at=${  summary.created_at 
+        } wallet_balance=${  summary.wallet_balance 
+        }${summary.first_height !== null ? ` first_height=${  summary.first_height}` : "" 
+        }${summary.last_height !== null ? ` last_height=${  summary.last_height}` : ""}`
     );
 }
 

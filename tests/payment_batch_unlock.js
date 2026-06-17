@@ -136,7 +136,7 @@ function createMysql(options = {}) {
             row.last_error_text = params[3];
             return { affectedRows: 1 };
         }
-        throw new Error("Unhandled SQL: " + sql);
+        throw new Error(`Unhandled SQL: ${  sql}`);
     }
 
     return {
@@ -187,12 +187,12 @@ function createSupport() {
         formatDate(timestampMs) {
             const date = new Date(timestampMs);
             const pad = function pad(value) { return String(value).padStart(2, "0"); };
-            return date.getUTCFullYear() + "-" +
-                pad(date.getUTCMonth() + 1) + "-" +
-                pad(date.getUTCDate()) + " " +
-                pad(date.getUTCHours()) + ":" +
-                pad(date.getUTCMinutes()) + ":" +
-                pad(date.getUTCSeconds());
+            return `${date.getUTCFullYear()  }-${ 
+                pad(date.getUTCMonth() + 1)  }-${ 
+                pad(date.getUTCDate())  } ${ 
+                pad(date.getUTCHours())  }:${ 
+                pad(date.getUTCMinutes())  }:${ 
+                pad(date.getUTCSeconds())}`;
         }
     };
 }

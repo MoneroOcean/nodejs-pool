@@ -25,7 +25,7 @@ function fixBlockRewardFromRpc(options) {
                 const block = proto.decode(data);
                 if (foundBlock || block.hash !== hash) return;
                 foundBlock = true;
-                console.log("Found " + label + " with " + block.hash + " hash");
+                console.log(`Found ${  label  } with ${  block.hash  } hash`);
                 global.coinFuncs.getPortAnyBlockHeaderByHash(getPort(block), hash, false, function onHeader(error, body) {
                     if (error) {
                         cursor.close();
@@ -33,12 +33,12 @@ function fixBlockRewardFromRpc(options) {
                         console.error("Can't get block header");
                         process.exit(1);
                     }
-                    console.log("Changing raw block reward from " + block.value + " to " + body.reward);
+                    console.log(`Changing raw block reward from ${  block.value  } to ${  body.reward}`);
                     block.value = body.reward;
                     txn.putBinary(database, key, proto.encode(block));
                     cursor.close();
                     txn.commit();
-                    console.log("Changed " + label);
+                    console.log(`Changed ${  label}`);
                     process.exit(0);
                 });
             });
@@ -47,7 +47,7 @@ function fixBlockRewardFromRpc(options) {
         if (!foundBlock) {
             cursor.close();
             txn.commit();
-            console.log("Not found " + label + " with " + hash + " hash");
+            console.log(`Not found ${  label  } with ${  hash  } hash`);
             process.exit(1);
         }
     });

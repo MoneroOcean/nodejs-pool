@@ -526,7 +526,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
                                 if (fileName === configPath) return JSON.stringify({ mysql: {}, coin: "test" });
                                 if (fileName === coinConfigPath) return JSON.stringify({ test: { funcFile: "./fake_coin.js" } });
                                 if (fileName === dataProtoPath) return "message Test {}";
-                                throw new Error("unexpected read: " + fileName);
+                                throw new Error(`unexpected read: ${  fileName}`);
                             }
                         };
                     }

@@ -40,24 +40,24 @@ function paymentWhere(account, allowEmptyPaymentId) {
 }
 
 function sqlTable(name) {
-    if (!SAFE_SQL_NAME.test(name)) throw new Error("Unsafe SQL table name: " + name);
-    return "`" + name + "`";
+    if (!SAFE_SQL_NAME.test(name)) throw new Error(`Unsafe SQL table name: ${  name}`);
+    return `\`${  name  }\``;
 }
 
 function formatPaymentId(paymentId) { return paymentId === null ? "(none)" : paymentId; }
 
 function logUser(label, account) {
-    console.log(label + "Address: " + account.address);
-    console.log(label + "Payment ID: " + formatPaymentId(account.paymentId));
+    console.log(`${label  }Address: ${  account.address}`);
+    console.log(`${label  }Payment ID: ${  formatPaymentId(account.paymentId)}`);
 }
 
 function forEachCacheKey(user, iterator) {
-    [user, "stats:" + user, "history:" + user, "identifiers:" + user].forEach(iterator);
+    [user, `stats:${  user}`, `history:${  user}`, `identifiers:${  user}`].forEach(iterator);
 }
 
 function logCacheKeys(user) {
     forEachCacheKey(user, function (key) {
-        if (global.database.getCache(key) !== false) console.log("Existing LMDB cache key: " + key);
+        if (global.database.getCache(key) !== false) console.log(`Existing LMDB cache key: ${  key}`);
     });
 }
 

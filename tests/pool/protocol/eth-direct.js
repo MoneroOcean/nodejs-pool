@@ -52,11 +52,11 @@ function setEasyEthShare(runtime, socket, header) {
 function expectedEthProxyTarget(coinDiff) {
     const difficulty = Number(coinDiff);
     const max = (1n << 256n) - 1n;
-    if (!Number.isFinite(difficulty) || difficulty <= 0) return "0x" + max.toString(16);
+    if (!Number.isFinite(difficulty) || difficulty <= 0) return `0x${  max.toString(16)}`;
     const scale = 1000000n;
     const scaledDifficulty = BigInt(Math.max(1, Math.floor(difficulty * Number(scale))));
     const target = (max * scale) / scaledDifficulty;
-    return "0x" + (target > max ? max : target).toString(16).padStart(64, "0");
+    return `0x${  (target > max ? max : target).toString(16).padStart(64, "0")}`;
 }
 
 test.describe("pool protocol: eth direct", { concurrency: false }, () => {

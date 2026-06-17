@@ -1,12 +1,12 @@
 "use strict";
-let mysql = require("promise-mysql");
-let fs = require("fs");
-let cluster = require("cluster");
-let argv = require('./parse_args')(process.argv.slice(2));
-let config = fs.readFileSync("./config.json");
-let coinConfig = fs.readFileSync("./coinConfig.json");
-let protobuf = require('protocol-buffers');
-let path = require('path');
+const mysql = require("promise-mysql");
+const fs = require("fs");
+const cluster = require("cluster");
+const argv = require('./parse_args')(process.argv.slice(2));
+const config = fs.readFileSync("./config.json");
+const coinConfig = fs.readFileSync("./coinConfig.json");
+const protobuf = require('protocol-buffers');
+const path = require('path');
 const applyConfigRows = require("./lib/common/config_rows.js");
 const isPrimaryProcess = require("./lib/common/is_primary_process.js");
 
@@ -23,13 +23,13 @@ const { formatLogEvent } = require("./lib/common/logging.js");
 function logEvent(label, fields) { console.log(formatLogEvent(label, fields)); }
 
 function logStartup(kind, name) {
-    console.log("=== STARTING " + kind.toUpperCase() + ": " + name + " ===");
+    console.log(`=== STARTING ${  kind.toUpperCase()  }: ${  name  } ===`);
 }
 
 function hasClusterWorkers(clusterApi) {
     if (!clusterApi || !clusterApi.workers) return false;
     return Object.keys(clusterApi.workers).some(function hasWorker(id) {
-        return !!clusterApi.workers[id];
+        return Boolean(clusterApi.workers[id]);
     });
 }
 
@@ -84,7 +84,7 @@ function closeDatabaseEnv() {
     try {
         env.close();
     } catch (error) {
-        console.error("LMDB close failed: " + shutdownErrorMessage(error));
+        console.error(`LMDB close failed: ${  shutdownErrorMessage(error)}`);
     }
 }
 
@@ -101,7 +101,7 @@ function installGracefulShutdown(name) {
             try {
                 await fn();
             } catch (error) {
-                console.error(label + " failed: " + shutdownErrorMessage(error));
+                console.error(`${label  } failed: ${  shutdownErrorMessage(error)}`);
             }
         }
 
@@ -116,7 +116,7 @@ function installGracefulShutdown(name) {
 
     function triggerShutdown(signal) {
         handleSignal(signal).catch(function onUnhandled(error) {
-            console.error("Graceful shutdown failed for " + name + ": " + shutdownErrorMessage(error));
+            console.error(`Graceful shutdown failed for ${  name  }: ${  shutdownErrorMessage(error)}`);
             process.exit(1);
         });
     }
@@ -157,26 +157,26 @@ function loadPoolModule() {
 function loadOptionalLib2Module(relativePath, moduleName) {
     const absolutePath = path.join(__dirname, relativePath);
     if (!fs.existsSync(absolutePath)) {
-        throw new Error("Optional module '" + moduleName + "' requires lib2 at " + absolutePath);
+        throw new Error(`Optional module '${  moduleName  }' requires lib2 at ${  absolutePath}`);
     }
     return require(relativePath);
 }
 
 const moduleLoaders = {
     pool: loadPoolModule,
-    block_manager: function () {
+    block_manager () {
         const runtime = require('./lib/block_manager.js').createBlockManagerRuntime();
         runtime.start();
         return runtime;
     },
-    altblock_manager: function () { return loadOptionalLib2Module('./lib2/altblock_manager.js', 'altblock_manager'); },
-    altblock_exchange: function () { return loadOptionalLib2Module('./lib2/altblock_exchange.js', 'altblock_exchange'); },
-    payments: function () { return require('./lib/payments.js'); },
-    api: function () { return require('./lib/api.js'); },
-    remote_share: function () { return require('./lib/remote_share.js'); },
-    worker: function () { return require('./lib/worker.js'); },
-    pool_stats: function () { return require('./lib/pool_stats.js'); },
-    long_runner: function () { return require('./lib/long_runner.js'); }
+    altblock_manager () { return loadOptionalLib2Module('./lib2/altblock_manager.js', 'altblock_manager'); },
+    altblock_exchange () { return loadOptionalLib2Module('./lib2/altblock_exchange.js', 'altblock_exchange'); },
+    payments () { return require('./lib/payments.js'); },
+    api () { return require('./lib/api.js'); },
+    remote_share () { return require('./lib/remote_share.js'); },
+    worker () { return require('./lib/worker.js'); },
+    pool_stats () { return require('./lib/pool_stats.js'); },
+    long_runner () { return require('./lib/long_runner.js'); }
 };
 
 // Config Table Layout
@@ -198,9 +198,9 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
     installGracefulShutdown(Object.hasOwn(argv, 'module') ? argv.module : (Object.hasOwn(argv, 'tool') ? argv.tool : 'process'));
     global.coinFuncs.blockedAddresses.push(global.config.pool.address);
     global.coinFuncs.blockedAddresses.push(global.config.payout.feeAddress);
-    if (Object.hasOwn(argv, 'tool') && fs.existsSync('./tools/'+argv.tool+'.js')) {
+    if (Object.hasOwn(argv, 'tool') && fs.existsSync(`./tools/${argv.tool}.js`)) {
         logStartup("tool", argv.tool);
-        activeModule = require('./tools/'+argv.tool+'.js');
+        activeModule = require(`./tools/${argv.tool}.js`);
     } else if (Object.hasOwn(argv, 'module')){
         const loader = moduleLoaders[argv.module];
         if (!loader) {
@@ -216,15 +216,15 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
         }).then(function(loadedModule) {
             activeModule = loadedModule;
         }).catch(function onLoaderError(error) {
-            console.error("Failed to load module " + argv.module + ": " + shutdownErrorMessage(error));
+            console.error(`Failed to load module ${  argv.module  }: ${  shutdownErrorMessage(error)}`);
             process.exit(1);
         });
     } else {
         console.error("Invalid module/tool provided.  Please provide a valid module/tool");
-        console.error("Valid Modules: " + Object.keys(moduleLoaders).join(", "));
-        console.error("Valid Tools: " + fs.readdirSync("./tools/").map(function(line) {
+        console.error(`Valid Modules: ${  Object.keys(moduleLoaders).join(", ")}`);
+        console.error(`Valid Tools: ${  fs.readdirSync("./tools/").map(function(line) {
             return path.parse(line).name;
-        }).join(", "));
+        }).join(", ")}`);
         process.exit(1);
     }
 });

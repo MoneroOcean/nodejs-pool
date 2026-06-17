@@ -40,7 +40,7 @@ function createInstanceIdWord(poolId, pid) {
         ...createBaseTemplate({
             coin: "",
             port: MAIN_PORT,
-            idHash: "instance-id-" + poolId + "-" + pid,
+            idHash: `instance-id-${  poolId  }-${  pid}`,
             height: 501
         }),
         port: realMainPort
@@ -121,7 +121,7 @@ test("getPortLastBlockHeaderMM labels merged-mining header failures", () => {
     global.coinFuncs.getPortLastBlockHeader = function (port, callback) {
         if (port === mainPort) return callback(null, { height: 501 });
         if (port === mmPort) return callback(new Error("getlastblockheader timeout"));
-        return callback(new Error("unexpected port " + port));
+        return callback(new Error(`unexpected port ${  port}`));
     };
 
     try {
@@ -329,12 +329,12 @@ test("BTC-style block rewards only credit coinbase outputs paid to the pool addr
 
     try {
         for (const entry of cases) {
-            const poolAddress = "POOL_" + entry.coin + "_ADDRESS";
+            const poolAddress = `POOL_${  entry.coin  }_ADDRESS`;
             global.config.pool[entry.addressKey] = poolAddress;
             global.support.rpcPortDaemon2 = function rpcPortDaemon2(port, method, params, callback) {
                 assert.equal(port, entry.port);
                 assert.equal(method, "");
-                assert.deepEqual(params, { method: "getblock", params: [entry.coin.toLowerCase() + "-block", 2] });
+                assert.deepEqual(params, { method: "getblock", params: [`${entry.coin.toLowerCase()  }-block`, 2] });
                 callback({
                     result: {
                         difficulty: 2,
@@ -352,8 +352,8 @@ test("BTC-style block rewards only credit coinbase outputs paid to the pool addr
 
             try {
                 const header = await new Promise((resolve, reject) => {
-                    coinFuncs.getPortAnyBlockHeaderByHash(entry.port, entry.coin.toLowerCase() + "-block", true, (err, body) => {
-                        if (err) return reject(new Error("unexpected " + entry.coin + " block header error"));
+                    coinFuncs.getPortAnyBlockHeaderByHash(entry.port, `${entry.coin.toLowerCase()  }-block`, true, (err, body) => {
+                        if (err) return reject(new Error(`unexpected ${  entry.coin  } block header error`));
                         return resolve(body);
                     });
                 });
@@ -382,12 +382,12 @@ test("BTC-style network tip rewards fall back to max coinbase output for history
 
     try {
         for (const entry of cases) {
-            const poolAddress = "POOL_" + entry.coin + "_ADDRESS";
+            const poolAddress = `POOL_${  entry.coin  }_ADDRESS`;
             global.config.pool[entry.addressKey] = poolAddress;
             global.support.rpcPortDaemon2 = function rpcPortDaemon2(port, method, params, callback) {
                 assert.equal(port, entry.port);
                 assert.equal(method, "");
-                assert.deepEqual(params, { method: "getblock", params: [entry.coin.toLowerCase() + "-tip", 2] });
+                assert.deepEqual(params, { method: "getblock", params: [`${entry.coin.toLowerCase()  }-tip`, 2] });
                 callback({
                     result: {
                         difficulty: 2,
@@ -404,8 +404,8 @@ test("BTC-style network tip rewards fall back to max coinbase output for history
 
             try {
                 const header = await new Promise((resolve, reject) => {
-                    coinFuncs.getPortAnyBlockHeaderByHash(entry.port, entry.coin.toLowerCase() + "-tip", false, (err, body) => {
-                        if (err) return reject(new Error("unexpected " + entry.coin + " network tip header error"));
+                    coinFuncs.getPortAnyBlockHeaderByHash(entry.port, `${entry.coin.toLowerCase()  }-tip`, false, (err, body) => {
+                        if (err) return reject(new Error(`unexpected ${  entry.coin  } network tip header error`));
                         return resolve(body);
                     });
                 });

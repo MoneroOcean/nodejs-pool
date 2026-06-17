@@ -4,6 +4,6 @@ const hash = cli.arg("hash", "Please specify block hash to unlock it (and avoid 
 
 cli.init(function() {
     global.database.unlockBlock(hash);
-    console.log("Block with " + hash + " hash un-locked! Exiting!");
+    console.log(`Block with ${  hash  } hash un-locked! Exiting!`);
     process.exit(0);
 });

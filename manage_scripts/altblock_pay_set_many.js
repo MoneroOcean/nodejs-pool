@@ -7,9 +7,9 @@ cli.init(function onInit() {
     const changed = updateAltBlocks(cli.argv["--"], function setPayValue(block) {
         block.pay_value = global.support.decimalToCoin(pay);
         block.unlocked = false;
-        console.log("Put " + block.pay_value + " pay_value to block");
+        console.log(`Put ${  block.pay_value  } pay_value to block`);
     });
     if (!changed) console.log("Not found altblocks with specified hashes");
-    else console.log("Changed " + changed + " blocks");
+    else console.log(`Changed ${  changed  } blocks`);
     process.exit(0);
 });

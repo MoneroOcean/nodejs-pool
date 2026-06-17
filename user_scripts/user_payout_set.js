@@ -11,7 +11,7 @@ cli.init(function() {
         }
         const pay = global.support.decimalToCoin(payValue);
 	userDb.requireExistingUser(user, "User settings row does not exist").then(function () {
-		return userDb.runLoggedQuery("UPDATE users SET payout_threshold=? WHERE username=?", [pay, user], "UPDATE users SET payout_threshold=" + pay + " WHERE username=" + user);
+		return userDb.runLoggedQuery("UPDATE users SET payout_threshold=? WHERE username=?", [pay, user], `UPDATE users SET payout_threshold=${  pay  } WHERE username=${  user}`);
 	}).then(function () {
 		userDb.finish("Done.");
 	});

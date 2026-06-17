@@ -6,9 +6,9 @@ const worker = cli.get("worker");
 const depth = cli.get("depth", 10);
 const dumpShares = require("./share_dump_common.js");
 
-console.log("Dumping shares for " + user + " user");
-if (paymentid) console.log("Dumping shares for " + paymentid + " paymentid");
-if (worker)    console.log("Dumping shares for " + worker + " worker");
+console.log(`Dumping shares for ${  user  } user`);
+if (paymentid) console.log(`Dumping shares for ${  paymentid  } paymentid`);
+if (worker)    console.log(`Dumping shares for ${  worker  } worker`);
 
 cli.init(function() {
         dumpShares(depth, function (shareData) {

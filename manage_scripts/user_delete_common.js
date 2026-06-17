@@ -11,31 +11,31 @@ function requireForceConfirmation(options) {
 function printPreview(plan, options) {
     const prefix = options && options.force === true ? "FORCE " : "";
     if (options && options.force === true) {
-        console.log("In 10 seconds " + prefix + "user delete will remove:");
+        console.log(`In 10 seconds ${  prefix  }user delete will remove:`);
     }
-    console.log("Rows in users table: " + plan.userRows.length);
-    console.log("Rows in balance table: " + plan.balanceRows.length);
-    console.log("Rows in payments table: " + plan.paymentRows.length);
+    console.log(`Rows in users table: ${  plan.userRows.length}`);
+    console.log(`Rows in balance table: ${  plan.balanceRows.length}`);
+    console.log(`Rows in payments table: ${  plan.paymentRows.length}`);
     plan.extraRows.forEach(function printTable(table) {
-        console.log("Rows in " + table.name + " table: " + table.rows.length);
+        console.log(`Rows in ${  table.name  } table: ${  table.rows.length}`);
     });
     accountUtils.logCacheKeys(plan.user);
 }
 
 async function buildUserDeletePlan(user, options) {
-    options = options || {};
+    const opts = options || {};
     const account = accountUtils.splitUserOrExit(user);
     const where = accountUtils.paymentWhere(account, true);
-    const extraTables = (options.extraTables || []).map(function toExtraTable(name) {
+    const extraTables = (opts.extraTables || []).map(function toExtraTable(name) {
         return { name, sql: accountUtils.sqlTable(name) };
     });
     const queryRows = function queryRows(table) {
-        return global.mysql.query("SELECT * FROM " + table + " WHERE " + where.clause, where.params);
+        return global.mysql.query(`SELECT * FROM ${  table  } WHERE ${  where.clause}`, where.params);
     };
     let rows2remove = 0;
 
     accountUtils.logUser("Target ", account);
-    console.log("Maximum allowed remaining payment: " + global.config.payout.walletMin);
+    console.log(`Maximum allowed remaining payment: ${  global.config.payout.walletMin}`);
 
     const userRows = await global.mysql.query("SELECT * FROM users WHERE username = ?", [user]);
     if (userRows.length > 1) {
@@ -53,16 +53,16 @@ async function buildUserDeletePlan(user, options) {
     // removing a row whose pending_batch_id is set would make the payment finalizer's reserved-row
     // update mismatch and wedge payout recovery. Mirrors the same guard in user_balance_move.
     if (balanceRows.length === 1 && balanceRows[0].pending_batch_id !== null && balanceRows[0].pending_batch_id !== undefined) {
-        console.error("Balance row is reserved by in-flight payment batch " + balanceRows[0].pending_batch_id +
-            "; refusing to delete. Wait for the batch to settle (or clear its pending_batch_id) and retry.");
+        console.error(`Balance row is reserved by in-flight payment batch ${  balanceRows[0].pending_batch_id 
+            }; refusing to delete. Wait for the batch to settle (or clear its pending_batch_id) and retry.`);
         process.exit(1);
     }
-    if (!options.force && balanceRows.length === 1 && balanceRows[0].amount >= global.support.decimalToCoin(global.config.payout.walletMin)) {
-        console.error("Remaining payment is too large: " + global.support.coinToDecimal(balanceRows[0].amount));
+    if (!opts.force && balanceRows.length === 1 && balanceRows[0].amount >= global.support.decimalToCoin(global.config.payout.walletMin)) {
+        console.error(`Remaining payment is too large: ${  global.support.coinToDecimal(balanceRows[0].amount)}`);
         process.exit(1);
     }
-    if (options.requireStaleBalance === true && balanceRows.length) {
-        console.log("Balance last update time: " + balanceRows[0].last_edited);
+    if (opts.requireStaleBalance === true && balanceRows.length) {
+        console.log(`Balance last update time: ${  balanceRows[0].last_edited}`);
         if (Date.now() / 1000 - global.support.formatDateFromSQL(balanceRows[0].last_edited) < 12 * 60 * 60) {
             console.error("There was recent amount update. Refusing to continue!");
             process.exit(1);
@@ -90,20 +90,20 @@ async function buildUserDeletePlan(user, options) {
 
 async function applyUserDeletePlan(plan) {
     const deleteRows = function deleteRows(table) {
-        return global.mysql.query("DELETE FROM " + table + " WHERE " + plan.where.clause, plan.where.params);
+        return global.mysql.query(`DELETE FROM ${  table  } WHERE ${  plan.where.clause}`, plan.where.params);
     };
 
     const user = plan.user;
     await global.mysql.query("DELETE FROM users WHERE username = ?", [user]);
-    console.log("Executed SQL: DELETE FROM users WHERE username = " + user);
+    console.log(`Executed SQL: DELETE FROM users WHERE username = ${  user}`);
     await deleteRows("balance");
-    console.log("Executed SQL: DELETE FROM balance WHERE " + plan.where.clause);
+    console.log(`Executed SQL: DELETE FROM balance WHERE ${  plan.where.clause}`);
     await deleteRows("payments");
-    console.log("Executed SQL: DELETE FROM payments WHERE " + plan.where.clause);
+    console.log(`Executed SQL: DELETE FROM payments WHERE ${  plan.where.clause}`);
 
     for (const table of plan.extraRows) {
         await deleteRows(table.sql);
-        console.log("Executed SQL: DELETE FROM " + table.name + " WHERE " + plan.where.clause);
+        console.log(`Executed SQL: DELETE FROM ${  table.name  } WHERE ${  plan.where.clause}`);
     }
 
     console.log("Deleting LMDB cache keys...");
@@ -112,11 +112,11 @@ async function applyUserDeletePlan(plan) {
 }
 
 async function runUserDelete(user, options) {
-    options = options || {};
-    requireForceConfirmation(options);
-    const plan = await buildUserDeletePlan(user, options);
-    printPreview(plan, options);
-    const delayMs = Number(options.delayMs) || 0;
+    const opts = options || {};
+    requireForceConfirmation(opts);
+    const plan = await buildUserDeletePlan(user, opts);
+    printPreview(plan, opts);
+    const delayMs = Number(opts.delayMs) || 0;
     if (delayMs > 0) {
         await new Promise(function wait(resolve) {
             setTimeout(resolve, delayMs);

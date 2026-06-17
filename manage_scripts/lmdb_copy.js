@@ -5,7 +5,7 @@ const cli = require("../script_utils.js")();
 const dir = cli.arg("dir", "Please specify output lmdb dir");
 const size = cli.arg("size", "Please specify output lmdb size in GB");
 
-if (fs.existsSync(dir + "/data.mdb")) {
+if (fs.existsSync(`${dir  }/data.mdb`)) {
     console.error("Please specify empty output lmdb dir");
     process.exit(1);
 }
@@ -16,7 +16,7 @@ cli.init(function() {
     // this with the pool stopped, otherwise a large copy can drive a live source DB to map-full.
     console.log("Note: copying holds a read snapshot of the source DB; run with the pool stopped.");
 
-    let env2 = new lmdb.Env();
+    const env2 = new lmdb.Env();
     env2.open({
         path: dir,
         maxDbs: 10,
@@ -59,7 +59,7 @@ cli.init(function() {
         ];
 
         databases.forEach(function copyDb(database) {
-            console.log("Copying " + database.label);
+            console.log(`Copying ${  database.label}`);
             const txn = global.database.env.beginTxn({ readOnly: true });
             const cursor = new global.database.lmdb.Cursor(txn, database.source);
             const txn2 = env2.beginTxn();

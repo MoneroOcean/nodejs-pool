@@ -434,7 +434,7 @@ test.describe("submit review", { concurrency: false }, function submitReviewSuit
         assert.equal(harness.mysql.state.store.paymentBatches[0].tx_key, null);
         assert.equal(harness.mysql.state.store.transactions.length, 0);
         assert.equal(harness.mysql.state.store.payments.length, 0);
-        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, new RegExp("wallet transfer succeeded but tx " + txHash + " is not visible in wallet history yet"));
+        assert.match(harness.mysql.state.store.paymentBatches[0].last_error_text, new RegExp(`wallet transfer succeeded but tx ${  txHash  } is not visible in wallet history yet`));
         assert.equal(harness.wallet.calls.filter(function isTransferByTxid(call) { return call.method === "get_transfer_by_txid"; }).length, 5);
         assert.equal(harness.wallet.calls.filter(function isTransfers(call) { return call.method === "get_transfers"; }).length, 0);
     });

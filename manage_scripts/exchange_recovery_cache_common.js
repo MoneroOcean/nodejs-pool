@@ -57,7 +57,7 @@ function runPendingCacheCli(options) {
             }
             const entry = pending[targetPort];
             if (!entry) {
-                console.error("No pending " + entryLabel + " entry for port " + targetPort);
+                console.error(`No pending ${  entryLabel  } entry for port ${  targetPort}`);
                 process.exit(1);
             }
             if (!parseBooleanOption(cli.get(confirmOption))) {
@@ -76,7 +76,7 @@ function runPendingCacheCli(options) {
         if (targetPort) {
             const entry = pending[targetPort];
             if (!entry) {
-                console.error("No pending " + entryLabel + " entry for port " + targetPort);
+                console.error(`No pending ${  entryLabel  } entry for port ${  targetPort}`);
                 process.exit(1);
             }
             printSummary(summarizeEntry(targetPort, entry, blockLookup));

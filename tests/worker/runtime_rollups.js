@@ -24,15 +24,15 @@ function loadWorkerHistory() {
 }
 
 function createFakeEnvironment(options) {
-    options = options || {};
+    const opts = options || {};
 
     const cacheDB = { name: "cache" };
     const shareDB = { name: "share" };
-    const cacheStore = new Map(options.cacheEntries || []);
+    const cacheStore = new Map(opts.cacheEntries || []);
     const shareStore = new Map();
     const emails = [];
 
-    (options.shares || []).forEach(function (entry) {
+    (opts.shares || []).forEach(function (entry) {
         const bucket = shareStore.get(entry.height) || [];
         bucket.push(entry.share);
         shareStore.set(entry.height, bucket);
@@ -81,7 +81,7 @@ function createFakeEnvironment(options) {
         commits: [],
         beginTxn(txnOptions) {
             const operations = [];
-            const readOnly = !!(txnOptions && txnOptions.readOnly);
+            const readOnly = Boolean(txnOptions && txnOptions.readOnly);
 
             return {
                 getString(db, key) {
@@ -118,8 +118,8 @@ function createFakeEnvironment(options) {
         general: {
             adminEmail: "admin@example.com",
             emailSig: "sig",
-            statsBufferHours: options.statsBufferHours || 1,
-            statsBufferLength: options.statsBufferLength || 9
+            statsBufferHours: opts.statsBufferHours || 1,
+            statsBufferLength: opts.statsBufferLength || 9
         },
         email: {
             workerNotHashingBody: "stopped",
@@ -129,10 +129,10 @@ function createFakeEnvironment(options) {
         }
     };
     global.database = {
-        cacheDB: cacheDB,
-        env: env,
-        lmdb: { Cursor: Cursor },
-        shareDB: shareDB
+        cacheDB,
+        env,
+        lmdb: { Cursor },
+        shareDB
     };
     global.mysql = {
         query() {
@@ -169,9 +169,9 @@ function createFakeEnvironment(options) {
     };
 
     return {
-        cacheStore: cacheStore,
-        emails: emails,
-        env: env
+        cacheStore,
+        emails,
+        env
     };
 }
 
@@ -285,9 +285,9 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
 
         await runUpdate(runtime, 2);
 
-        const workerStats = JSON.parse(state.cacheStore.get("stats:" + address + "_" + workerName));
-        const addressStats = JSON.parse(state.cacheStore.get("stats:" + address));
-        const identifiers = JSON.parse(state.cacheStore.get("identifiers:" + address));
+        const workerStats = JSON.parse(state.cacheStore.get(`stats:${  address  }_${  workerName}`));
+        const addressStats = JSON.parse(state.cacheStore.get(`stats:${  address}`));
+        const identifiers = JSON.parse(state.cacheStore.get(`identifiers:${  address}`));
 
         assert.equal(workerStats.hash, (600 + 1200) / (10 * 60));
         assert.equal(workerStats.hash2, (300 + 900) / (10 * 60));
@@ -334,8 +334,8 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
 
         await runUpdate(runtime, 1);
 
-        assert.equal(JSON.parse(state.cacheStore.get("stats:" + address + "_" + workerName)).lastShareAlgo, "rx/0");
-        assert.equal(JSON.parse(state.cacheStore.get("stats:" + address)).lastShareAlgo, "rx/0");
+        assert.equal(JSON.parse(state.cacheStore.get(`stats:${  address  }_${  workerName}`)).lastShareAlgo, "rx/0");
+        assert.equal(JSON.parse(state.cacheStore.get(`stats:${  address}`)).lastShareAlgo, "rx/0");
     });
 
     test("worker retains inactive identifiers and zeros stopped worker stats", async () => {
@@ -344,15 +344,15 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         const address = "4".repeat(95);
         const activeWorker = "rigActive";
         const stoppedWorker = "rigStopped";
-        const stoppedKey = address + "_" + stoppedWorker;
+        const stoppedKey = `${address  }_${  stoppedWorker}`;
         const stoppedHistory = JSON.stringify({ hashHistory: [{ ts: now - 30 * 60 * 1000, hs: 50, hs2: 40 }] });
         const state = createFakeEnvironment({
             cacheEntries: [
                 ["minerSet", JSON.stringify({ [stoppedKey]: 1 })],
-                ["identifiers:" + address, JSON.stringify([stoppedWorker])],
+                [`identifiers:${  address}`, JSON.stringify([stoppedWorker])],
                 [stoppedKey, JSON.stringify({ totalHashes: 100, goodShares: 4 })],
-                ["stats:" + stoppedKey, JSON.stringify({ hash: 50, hash2: 40, lastHash: now - 30 * 60 * 1000, lastShareAlgo: "rx/0" })],
-                ["history:" + stoppedKey, stoppedHistory]
+                [`stats:${  stoppedKey}`, JSON.stringify({ hash: 50, hash2: 40, lastHash: now - 30 * 60 * 1000, lastShareAlgo: "rx/0" })],
+                [`history:${  stoppedKey}`, stoppedHistory]
             ],
             shares: [
                 {
@@ -372,9 +372,9 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
 
         await runUpdate(runtime, 1);
 
-        assert.deepEqual(JSON.parse(state.cacheStore.get("identifiers:" + address)), [activeWorker, stoppedWorker]);
-        assert.deepEqual(JSON.parse(state.cacheStore.get("stats:" + stoppedKey)), { hash: 0, hash2: 0, lastHash: now - 30 * 60 * 1000, lastShareAlgo: "rx/0" });
-        assert.equal(state.cacheStore.get("history:" + stoppedKey), stoppedHistory);
+        assert.deepEqual(JSON.parse(state.cacheStore.get(`identifiers:${  address}`)), [activeWorker, stoppedWorker]);
+        assert.deepEqual(JSON.parse(state.cacheStore.get(`stats:${  stoppedKey}`)), { hash: 0, hash2: 0, lastHash: now - 30 * 60 * 1000, lastShareAlgo: "rx/0" });
+        assert.equal(state.cacheStore.get(`history:${  stoppedKey}`), stoppedHistory);
     });
 
     test("worker skips unchanged LMDB writes between identical non-history cycles", async () => {
@@ -438,7 +438,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         Date.now = function () { return fakeNow; };
         const address = "4".repeat(95);
         const workerName = "rigRecover";
-        const workerStatsKey = "stats:" + address + "_" + workerName;
+        const workerStatsKey = `stats:${  address  }_${  workerName}`;
         const globalStatsKey = "global_stats";
         const state = createFakeEnvironment({
             shares: [
@@ -542,7 +542,7 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
                 height: 1,
                 share: createShare({
                     paymentAddress: address,
-                    identifier: "rig" + index,
+                    identifier: `rig${  index}`,
                     rawShares: 600 + index,
                     shares2: 300 + index,
                     timestamp: now - 30 * 1000
@@ -561,15 +561,15 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
             })
         });
 
-        const state = createFakeEnvironment({ shares: shares, statsBufferLength: 27, statsBufferHours: 4 });
+        const state = createFakeEnvironment({ shares, statsBufferLength: 27, statsBufferHours: 4 });
         const worker = loadWorker();
         const runtime = worker.createWorkerRuntime();
 
         await runUpdate(runtime, 1);
 
         assert.ok(state.env.writeCommits >= 2);
-        assert.equal(state.cacheStore.has("stats:" + address + "_rig0"), true);
-        assert.equal(state.cacheStore.has("history:" + address + "_rig0"), true);
+        assert.equal(state.cacheStore.has(`stats:${  address  }_rig0`), true);
+        assert.equal(state.cacheStore.has(`history:${  address  }_rig0`), true);
     });
 
 });

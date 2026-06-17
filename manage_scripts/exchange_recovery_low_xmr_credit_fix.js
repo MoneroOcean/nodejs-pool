@@ -22,7 +22,7 @@ function normalizeCoinAmount(value) { return Number(asFiniteNumber(value, "Inval
 function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
     if (!tradeContext || typeof tradeContext !== "object") throw new Error("altblock_exchange_trade is not found");
     if (tradeContext.stage !== "Exchange XMR trade") {
-        throw new Error("altblock_exchange_trade is not at Exchange XMR trade stage: " + formatJson(tradeContext));
+        throw new Error(`altblock_exchange_trade is not at Exchange XMR trade stage: ${  formatJson(tradeContext)}`);
     }
 
     const currentOptions = options || {};
@@ -30,7 +30,7 @@ function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
         tradeContext.expectedIncreases && tradeContext.expectedIncreases.XMR,
         "altblock_exchange_trade is missing expected XMR increase"
     );
-    if (expectedIncrease <= 0) throw new Error("altblock_exchange_trade has invalid expected XMR increase: " + formatJson(tradeContext));
+    if (expectedIncrease <= 0) throw new Error(`altblock_exchange_trade has invalid expected XMR increase: ${  formatJson(tradeContext)}`);
     const baseline = asFiniteNumber(
         tradeContext.baselineBalances && tradeContext.baselineBalances.XMR,
         "altblock_exchange_trade is missing XMR baseline"
@@ -39,9 +39,9 @@ function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
     const currentBalance = asFiniteNumber(currentXmrBalance, "Current exchange XMR balance is invalid");
     if (currentBalance < baseline) {
         throw new Error(
-            "Current exchange XMR balance " + currentBalance.toFixed(8) +
-            " is below the stored baseline " + baseline.toFixed(8) +
-            "; use exchange_recovery_xmr_balance_fix.js for backward-balance cases"
+            `Current exchange XMR balance ${  currentBalance.toFixed(8) 
+            } is below the stored baseline ${  baseline.toFixed(8) 
+            }; use exchange_recovery_xmr_balance_fix.js for backward-balance cases`
         );
     }
     if (currentOptions.activeOrders === true) {
@@ -50,13 +50,13 @@ function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
 
     const observedIncrease = normalizeCoinAmount(Math.max(0, currentBalance - baseline));
     if (observedIncrease <= 0) {
-        throw new Error("Current exchange XMR balance has not increased above baseline: " + currentBalance.toFixed(8));
+        throw new Error(`Current exchange XMR balance has not increased above baseline: ${  currentBalance.toFixed(8)}`);
     }
     if (observedIncrease >= expectedIncrease) {
         throw new Error(
-            "Observed XMR increase " + observedIncrease.toFixed(8) +
-            " is not below the stored expectation " + expectedIncrease.toFixed(8) +
-            "; this script is only for low-credit / precision-mismatch cases"
+            `Observed XMR increase ${  observedIncrease.toFixed(8) 
+            } is not below the stored expectation ${  expectedIncrease.toFixed(8) 
+            }; this script is only for low-credit / precision-mismatch cases`
         );
     }
     if (currentOptions.reviewedCredit !== true) {
@@ -73,7 +73,7 @@ function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
         cacheKey: "altblock_exchange_trade",
         currentValue: clone(tradeContext),
         nextValue: nextTradeContext,
-        summary: "rewrote expected XMR increase from " + expectedIncrease.toFixed(8) + " to " + observedIncrease.toFixed(8)
+        summary: `rewrote expected XMR increase from ${  expectedIncrease.toFixed(8)  } to ${  observedIncrease.toFixed(8)}`
     };
 }
 

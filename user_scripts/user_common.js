@@ -3,19 +3,19 @@ function queryUsers(user) { return global.mysql.query("SELECT * FROM users WHERE
 
 function requireExistingUser(user, errorMessage, options = {}) {
     return queryUsers(user).then(function (rows) {
-        if (rows.length != 1) {
+        if (rows.length !== 1) {
             console.error(errorMessage);
             process.exit(1);
         }
-        if (options.logFound === true) console.log("Found rows in users table: " + rows.length);
+        if (options.logFound === true) console.log(`Found rows in users table: ${  rows.length}`);
     });
 }
 
 function requireMissingUser(user, errorMessage, options = {}) {
     return queryUsers(user).then(function (rows) {
-        if (rows.length == 1) {
+        if (rows.length === 1) {
             console.error(errorMessage);
-            if (options.logRowsOnFailure === true) console.log("Found rows in users table: " + rows.length);
+            if (options.logRowsOnFailure === true) console.log(`Found rows in users table: ${  rows.length}`);
             process.exit(1);
         }
     });

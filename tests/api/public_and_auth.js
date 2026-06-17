@@ -17,7 +17,7 @@ async function waitForCondition(check, timeoutMs) {
         if (check()) return;
         await wait(10);
     }
-    throw new Error("Condition not met within " + timeoutMs + "ms");
+    throw new Error(`Condition not met within ${  timeoutMs  }ms`);
 }
 
 function createDeferred() {
@@ -47,10 +47,10 @@ function request(port, options) {
     return new Promise((resolve, reject) => {
         const req = http.request({
             host: "127.0.0.1",
-            port: port,
+            port,
             method: options.method || "GET",
             path: options.path,
-            headers: headers
+            headers
         }, (res) => {
             const chunks = [];
             res.setEncoding("utf8");
@@ -61,7 +61,7 @@ function request(port, options) {
                 try {
                     json = text ? JSON.parse(text) : null;
                 } catch (_error) { /* non-JSON body; leave json as null */ }
-                resolve({ statusCode: res.statusCode, headers: res.headers, text: text, json: json });
+                resolve({ statusCode: res.statusCode, headers: res.headers, text, json });
             });
         });
         req.on("error", reject);
@@ -73,9 +73,9 @@ function request(port, options) {
 function requestJson(port, method, path, payload) {
     const body = JSON.stringify(payload);
     return request(port, {
-        method: method,
-        path: path,
-        body: body,
+        method,
+        path,
+        body,
         headers: { "Content-Type": "application/json" }
     });
 }
@@ -143,21 +143,21 @@ function createDatabase(options) {
     };
 
     return {
-        state: state,
+        state,
         thread_id: "",
         getCache(key) {
             state.cacheGets.push(key);
             return caches.has(key) ? caches.get(key) : false;
         },
         getBlockList(poolType, start, end) {
-            state.blockListCalls.push({ poolType: poolType, start: start, end: end });
+            state.blockListCalls.push({ poolType, start, end });
             if (typeof options.getBlockList === "function") return options.getBlockList(poolType, start, end);
-            return [{ poolType: poolType, start: start, end: end }];
+            return [{ poolType, start, end }];
         },
         getAltBlockList(poolType, coinPort, start, end) {
-            state.altBlockListCalls.push({ poolType: poolType, coinPort: coinPort, start: start, end: end });
+            state.altBlockListCalls.push({ poolType, coinPort, start, end });
             if (typeof options.getAltBlockList === "function") return options.getAltBlockList(poolType, coinPort, start, end);
-            return [{ poolType: poolType, coinPort: coinPort, start: start, end: end }];
+            return [{ poolType, coinPort, start, end }];
         }
     };
 }
@@ -165,9 +165,9 @@ function createDatabase(options) {
 function createMysql(handler) {
     const calls = [];
     return {
-        calls: calls,
+        calls,
         async query(sql, params) {
-            calls.push({ sql: sql, params: params });
+            calls.push({ sql, params });
             return handler(sql, params, calls);
         }
     };
@@ -196,8 +196,8 @@ async function captureConsole(run) {
     console.log = function captureLog(...args) { logs.push(args.map(String).join(" ")); };
     console.error = function captureError(...args) { errors.push(args.map(String).join(" ")); };
     try {
-        await run({ logs: logs, errors: errors });
-        return { logs: logs, errors: errors };
+        await run({ logs, errors });
+        return { logs, errors };
     } finally {
         console.log = originalLog;
         console.error = originalError;
@@ -211,8 +211,8 @@ function createFakeCluster(options) {
 
     function workerRecord(id, pid) {
         return {
-            id: id,
-            process: { pid: pid },
+            id,
+            process: { pid },
             on() {},
             off() {},
             removeListener() {}
@@ -260,7 +260,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
             database: createDatabase({ caches: {} }),
             mysql: createMysql(async function handler(sql) {
                 dbCalls += 1;
-                throw new Error("Unexpected SQL: " + sql);
+                throw new Error(`Unexpected SQL: ${  sql}`);
             }),
             support: createSupport()
         }, async (port) => {
@@ -290,14 +290,14 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 }
                 return { affectedRows: 1 };
             }
-            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+            throw new Error(`Unexpected SQL: ${  sql  } params=${  JSON.stringify(params)}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             now: () => nowValue,
             support: createSupport()
         }, async (port) => {
@@ -358,14 +358,14 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 assert.deepEqual(params, [1, "new@example.com", "wallet", "old@example.com"]);
                 return { affectedRows: 1 };
             }
-            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+            throw new Error(`Unexpected SQL: ${  sql  } params=${  JSON.stringify(params)}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             now: () => nowValue,
             support: createSupport()
         }, async (port) => {
@@ -403,14 +403,14 @@ test.describe("api public and auth", { concurrency: false }, () => {
 
     test("subscribeEmail rejects non-string body fields before they reach SQL", async () => {
         const mysql = createMysql(async function handler(sql, params) {
-            throw new Error("query must not run for rejected input: " + sql + " params=" + JSON.stringify(params));
+            throw new Error(`query must not run for rejected input: ${  sql  } params=${  JSON.stringify(params)}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             support: createSupport()
         }, async (port) => {
             // Array username would render as `WHERE username = 4` (mass match) if it reached SQL.
@@ -443,14 +443,14 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 assert.deepEqual(params, [1, "wallet"]);
                 return { affectedRows: 1 };
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: {} }),
-            mysql: mysql,
+            mysql,
             support: createSupport()
         }, async (port) => {
             const ok = await requestJson(port, "POST", "/user/subscribeEmail", {
@@ -466,7 +466,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
         const mysql = createMysql(async function handler(sql) {
             if (sql.startsWith("SELECT id FROM users WHERE username = ? AND payout_threshold_lock = '1'")) return [];
             if (sql.startsWith("INSERT INTO users (username, payout_threshold)")) return { affectedRows: 1 };
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         });
 
         await withRuntime({
@@ -480,7 +480,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
                     "stats:wallet_rig01": { hash: 10, hash2: 5, lastHash: 1700000000000, lastShareAlgo: "rx/0" }
                 }
             }),
-            mysql: mysql,
+            mysql,
             support: createSupport()
         }, async (port) => {
             const threshold = await requestJson(port, "POST", "/user/updateThreshold", { username: "wallet", threshold: 0 });
@@ -545,7 +545,7 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 assert.equal(params[0], "wallet");
                 return [{ payout_threshold: 250, enable_email: 1 }];
             }
-            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+            throw new Error(`Unexpected SQL: ${  sql  } params=${  JSON.stringify(params)}`);
         });
         const database = createDatabase({
             caches: {
@@ -562,8 +562,8 @@ test.describe("api public and auth", { concurrency: false }, () => {
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
-            database: database,
-            mysql: mysql,
+            database,
+            mysql,
             support: createSupport()
         }, async (port) => {
             const poolStats = await request(port, { path: "/pool/stats" });
@@ -613,14 +613,14 @@ test.describe("api public and auth", { concurrency: false }, () => {
             if (sql.startsWith("INSERT INTO users (username, enable_email, email) VALUES (?, ?, ?)")) {
                 throw new Error("duplicate email");
             }
-            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+            throw new Error(`Unexpected SQL: ${  sql  } params=${  JSON.stringify(params)}`);
         });
 
         await withRuntime({
             blockTemplate: createBlockTemplate(),
             config: createConfig(),
             database: createDatabase({ caches: { wallet: { seen: true } } }),
-            mysql: mysql,
+            mysql,
             now: () => nowValue,
             support: createSupport()
         }, async (port) => {
@@ -679,25 +679,25 @@ test.describe("api public and auth", { concurrency: false }, () => {
                 });
                 return row ? [{ payout_threshold: row.payout_threshold, enable_email: row.enable_email }] : [];
             }
-            throw new Error("Unexpected SQL: " + sql + " params=" + JSON.stringify(params));
+            throw new Error(`Unexpected SQL: ${  sql  } params=${  JSON.stringify(params)}`);
         });
 
         try {
             await withRuntime({
                 blockTemplate: createBlockTemplate(),
-                config: config,
+                config,
                 database: createDatabase({ caches: {} }),
-                mysql: mysql,
-                support: support
+                mysql,
+                support
             }, async (port) => {
                 const staleToken = support.createEmailUnsubscribeToken("wallet", "old@example.com", Date.now());
-                const staleResponse = await request(port, { path: "/user/unsubscribeEmail/" + encodeURIComponent(staleToken) });
+                const staleResponse = await request(port, { path: `/user/unsubscribeEmail/${  encodeURIComponent(staleToken)}` });
                 assert.equal(staleResponse.statusCode, 401);
                 assert.match(staleResponse.headers["content-type"], /text\/html/);
                 assert.equal(users[0].enable_email, 1);
 
                 const token = support.createEmailUnsubscribeToken("wallet", "miner@example.com", Date.now());
-                const tokenResponse = await request(port, { path: "/user/unsubscribeEmail/" + encodeURIComponent(token) });
+                const tokenResponse = await request(port, { path: `/user/unsubscribeEmail/${  encodeURIComponent(token)}` });
                 assert.equal(tokenResponse.statusCode, 200);
                 assert.match(tokenResponse.headers["content-type"], /text\/html/);
                 assert.match(tokenResponse.text, /Email unsubscribed/);
@@ -789,6 +789,6 @@ test.describe("api public and auth", { concurrency: false }, () => {
             await runtime.stop();
         });
 
-        assert.ok(captured.logs.some((line) => line.startsWith("[S7:" + process.pid + "] Listen: service=api host=127.0.0.1 port=")));
+        assert.ok(captured.logs.some((line) => line.startsWith(`[S7:${  process.pid  }] Listen: service=api host=127.0.0.1 port=`)));
     });
 });

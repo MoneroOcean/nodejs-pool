@@ -44,7 +44,7 @@ test.describe("recovery cycle", { concurrency: false }, function recoveryCycleSu
                 tx_hash: txHash,
                 tx_key: txKey,
                 transaction_id: null,
-                last_error_text: "wallet transfer succeeded but tx " + txHash + " is not visible in wallet history yet"
+                last_error_text: `wallet transfer succeeded but tx ${  txHash  } is not visible in wallet history yet`
             }],
             paymentBatchItems: [{
                 id: 1,

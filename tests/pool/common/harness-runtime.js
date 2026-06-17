@@ -234,7 +234,7 @@ function waitForSocketJson(socket, timeout = 1000) {
 
 async function startHarness(extra = {}) {
     installTestGlobals();
-    global.coinFuncs.__testUseRealMainPow = !!extra.realMainPow;
+    global.coinFuncs.__testUseRealMainPow = Boolean(extra.realMainPow);
     global.coinFuncs.__testMainPowVectors = extra.mainPowVectors || null;
 
     const templates = [

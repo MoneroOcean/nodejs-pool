@@ -22,7 +22,7 @@ async function _waitForCondition(check, timeoutMs) {
         if (check()) return;
         await wait(10);
     }
-    throw new Error("Condition not met within " + timeoutMs + "ms");
+    throw new Error(`Condition not met within ${  timeoutMs  }ms`);
 }
 
 function _listenOnPort(port) {

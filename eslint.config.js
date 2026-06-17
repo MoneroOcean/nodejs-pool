@@ -33,7 +33,20 @@ module.exports = [
       // The one intentional ANSI control-char regex carries a scoped inline disable.
       "no-control-regex": "error",
       // Statically-constant binary expressions were simplified to their constant value.
-      "no-constant-binary-expression": "error"
+      "no-constant-binary-expression": "error",
+      // Stricter rule set enabled below; merged behavior-preservingly.
+      "no-throw-literal": "error",
+      "default-case-last": "error",
+      "no-unused-expressions": "error",
+      "no-var": "error",
+      "no-else-return": "error",
+      "prefer-const": "error",
+      "eqeqeq": ["error", "always", { "null": "ignore" }],
+      "no-implicit-coercion": "error",
+      "object-shorthand": "error",
+      "prefer-template": "error",
+      "no-shadow": "error",
+      "no-param-reassign": "error"
     }
   }
 ];

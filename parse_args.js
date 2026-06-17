@@ -6,7 +6,7 @@ module.exports = function parseArgv(args, options = {}) {
     // strict:false + tokens:true lets us accept unknown flags and pair
     // space-separated "--foo bar" by hand (parseArgs leaves bar as a positional).
     const parsed = parseArgs({
-        args: args,
+        args,
         options: {},
         allowPositionals: true,
         strict: false,

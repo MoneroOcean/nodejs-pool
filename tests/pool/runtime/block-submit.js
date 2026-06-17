@@ -29,7 +29,7 @@ const {
     submitEthBlockCandidate
 } = require("../common/runtime-helpers.js");
 
-const HIGH_DIFF_ETH_RESULT = "00".repeat(31) + "01";
+const HIGH_DIFF_ETH_RESULT = `${"00".repeat(31)  }01`;
 
 test.describe("pool runtime: block submit", { concurrency: false }, () => {
 test("successful main-chain block candidates are stored as blocks", async () => {

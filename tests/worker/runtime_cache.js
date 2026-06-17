@@ -27,15 +27,15 @@ function loadWorkerHistory() {
 }
 
 function createFakeEnvironment(options) {
-    options = options || {};
+    const opts = options || {};
 
     const cacheDB = { name: "cache" };
     const shareDB = { name: "share" };
-    const cacheStore = new Map(options.cacheEntries || []);
+    const cacheStore = new Map(opts.cacheEntries || []);
     const shareStore = new Map();
     const emails = [];
 
-    (options.shares || []).forEach(function (entry) {
+    (opts.shares || []).forEach(function (entry) {
         const bucket = shareStore.get(entry.height) || [];
         bucket.push(entry.share);
         shareStore.set(entry.height, bucket);
@@ -84,7 +84,7 @@ function createFakeEnvironment(options) {
         commits: [],
         beginTxn(txnOptions) {
             const operations = [];
-            const readOnly = !!(txnOptions && txnOptions.readOnly);
+            const readOnly = Boolean(txnOptions && txnOptions.readOnly);
 
             return {
                 getString(db, key) {
@@ -124,8 +124,8 @@ function createFakeEnvironment(options) {
         general: {
             adminEmail: "admin@example.com",
             emailSig: "sig",
-            statsBufferHours: options.statsBufferHours || 1,
-            statsBufferLength: options.statsBufferLength || 9
+            statsBufferHours: opts.statsBufferHours || 1,
+            statsBufferLength: opts.statsBufferLength || 9
         },
         email: {
             workerNotHashingBody: "stopped",
@@ -135,10 +135,10 @@ function createFakeEnvironment(options) {
         }
     };
     global.database = {
-        cacheDB: cacheDB,
-        env: env,
-        lmdb: { Cursor: Cursor },
-        shareDB: shareDB
+        cacheDB,
+        env,
+        lmdb: { Cursor },
+        shareDB
     };
     global.mysql = {
         query() {
@@ -170,9 +170,9 @@ function createFakeEnvironment(options) {
     };
 
     return {
-        cacheStore: cacheStore,
-        emails: emails,
-        env: env
+        cacheStore,
+        emails,
+        env
     };
 }
 
@@ -262,7 +262,7 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
                 height: 1,
                 share: createShare({
                     paymentAddress: address,
-                    identifier: "rig" + index,
+                    identifier: `rig${  index}`,
                     rawShares: 600 + index,
                     shares2: 300 + index,
                     timestamp: now - 30 * 1000
@@ -283,7 +283,7 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
 
         const state = createFakeEnvironment({
             cacheEntries: [["cacheUpdate", "1"]],
-            shares: shares,
+            shares,
             statsBufferLength: 27,
             statsBufferHours: 4
         });
@@ -463,7 +463,7 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
                 height: 1,
                 share: createShare({
                     paymentAddress: address,
-                    identifier: "rig" + index,
+                    identifier: `rig${  index}`,
                     rawShares: 600 + index,
                     shares2: 300 + index,
                     timestamp: now - 30 * 1000
@@ -471,7 +471,7 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
             });
         }
 
-        const envState = createFakeEnvironment({ shares: shares, statsBufferLength: 27, statsBufferHours: 4 });
+        const envState = createFakeEnvironment({ shares, statsBufferLength: 27, statsBufferHours: 4 });
         const originalBeginTxn = global.database.env.beginTxn;
         global.database.env.beginTxn = function beginTxnWithMapFull(options) {
             const txn = originalBeginTxn.call(this, options);
@@ -498,8 +498,8 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         const now = 1710000000000;
         Date.now = function () { return now; };
         const address = "4".repeat(95);
-        const canceledMiner = address + "_rigCancel";
-        const noEmailMiner = address + "_rigNoEmail";
+        const canceledMiner = `${address  }_rigCancel`;
+        const noEmailMiner = `${address  }_rigNoEmail`;
 
         createFakeEnvironment();
         const worker = loadWorker();
@@ -524,8 +524,8 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         const now = 1710000000000;
         Date.now = function () { return now; };
         const address = "4".repeat(95);
-        const staleMiner = address + "_rigStale";
-        const freshMiner = address + "_rigFresh";
+        const staleMiner = `${address  }_rigStale`;
+        const freshMiner = `${address  }_rigFresh`;
 
         createFakeEnvironment();
         const worker = loadWorker();
@@ -545,8 +545,8 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         const originalSetTimeout = global.setTimeout;
         let capturedPayload = null;
         const currentTime = Date.UTC(2026, 3, 25, 21, 22, 0);
-        const address = "48abcd" + "e".repeat(85) + "7xYz";
-        const miner = address + "_rig01";
+        const address = `48abcd${  "e".repeat(85)  }7xYz`;
+        const miner = `${address  }_rig01`;
 
         createFakeEnvironment();
         global.config.hostname = "us.moneroocean.stream";

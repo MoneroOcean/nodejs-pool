@@ -35,7 +35,7 @@ async function getExchangeBalance(exchangeApi, exchange, symbol) {
     try {
         return Number(await exchangeApi.get_balance(exchange, symbol)) || 0;
     } catch (error) {
-        throw new Error("Can't get " + symbol + " balance on " + exchange + ": " + (error && error.message ? error.message : String(error)));
+        throw new Error(`Can't get ${  symbol  } balance on ${  exchange  }: ${  error && error.message ? error.message : String(error)}`);
     }
 }
 
@@ -45,7 +45,7 @@ async function getActiveOrders(exchangeApi, exchange) {
         if (active === null || typeof active === "undefined") throw new Error("active order state unavailable");
         return Boolean(active);
     } catch (error) {
-        throw new Error("Can't get active order state on " + exchange + ": " + (error && error.message ? error.message : String(error)));
+        throw new Error(`Can't get active order state on ${  exchange  }: ${  error && error.message ? error.message : String(error)}`);
     }
 }
 
@@ -66,8 +66,8 @@ function loadExchangeApiIfNeeded(cli, balanceOptions) {
         return loadExchangeApi();
     } catch (error) {
         throw new Error(
-            "Unable to load exchange API (" + error.message +
-            "). Rerun with --current-balance=<balance> and --active-orders=false after confirming no open orders."
+            `Unable to load exchange API (${  error.message 
+            }). Rerun with --current-balance=<balance> and --active-orders=false after confirming no open orders.`
         );
     }
 }

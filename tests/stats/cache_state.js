@@ -161,7 +161,7 @@ function createTestEnvironment(options = {}) {
             });
         },
         formatDateFromSQL(value) {
-            return "formatted:" + value;
+            return `formatted:${  value}`;
         },
         rpcPortDaemon(_port, _method, _params, callback) {
             callback({ result: { difficulty: 111 } });
@@ -294,7 +294,7 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
             if (sql === "SELECT count(id) as txn_count FROM transactions") {
                 return [{ txn_count: 9 }];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     const poolStats = loadPoolStats();
@@ -384,7 +384,7 @@ test("refreshPoolInformation keeps pool port output focused on pplns", async () 
                     { poolPort: 4444, difficulty: 2000, portDesc: "TLS only", portType: "pplns", hidden: 0, ssl: 1 }
                 ];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     const poolStats = loadPoolStats();
@@ -493,7 +493,7 @@ test("refreshPoolStats keeps coin metadata when optional lib2 coins are unavaila
         mysqlQuery(sql) {
             if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") return [{ miner_count: 0 }];
             if (sql === "SELECT count(id) as txn_count FROM transactions") return [{ txn_count: 0 }];
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     const originalLoad = Module._load;

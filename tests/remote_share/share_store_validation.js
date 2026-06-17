@@ -29,7 +29,7 @@ function withGlobals(run) {
     global.coinFuncs = { getPoolProfile() { return null; }, COIN2PORT() { return 18081; } };
     global.protos = {
         POOLTYPE: { PPLNS: 0 },
-        Share: { encode(share) { return Buffer.from(JSON.stringify(share)); } }
+        Share: { encode(shareData) { return Buffer.from(JSON.stringify(shareData)); } }
     };
     try {
         return run();

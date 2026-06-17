@@ -24,15 +24,15 @@ function loadWorkerHistory() {
 }
 
 function createFakeEnvironment(options) {
-    options = options || {};
+    const opts = options || {};
 
     const cacheDB = { name: "cache" };
     const shareDB = { name: "share" };
-    const cacheStore = new Map(options.cacheEntries || []);
+    const cacheStore = new Map(opts.cacheEntries || []);
     const shareStore = new Map();
     const emails = [];
 
-    (options.shares || []).forEach(function (entry) {
+    (opts.shares || []).forEach(function (entry) {
         const bucket = shareStore.get(entry.height) || [];
         bucket.push(entry.share);
         shareStore.set(entry.height, bucket);
@@ -81,7 +81,7 @@ function createFakeEnvironment(options) {
         commits: [],
         beginTxn(txnOptions) {
             const operations = [];
-            const readOnly = !!(txnOptions && txnOptions.readOnly);
+            const readOnly = Boolean(txnOptions && txnOptions.readOnly);
 
             return {
                 getString(db, key) {
@@ -118,8 +118,8 @@ function createFakeEnvironment(options) {
         general: {
             adminEmail: "admin@example.com",
             emailSig: "sig",
-            statsBufferHours: options.statsBufferHours || 1,
-            statsBufferLength: options.statsBufferLength || 9
+            statsBufferHours: opts.statsBufferHours || 1,
+            statsBufferLength: opts.statsBufferLength || 9
         },
         email: {
             workerNotHashingBody: "stopped",
@@ -129,10 +129,10 @@ function createFakeEnvironment(options) {
         }
     };
     global.database = {
-        cacheDB: cacheDB,
-        env: env,
-        lmdb: { Cursor: Cursor },
-        shareDB: shareDB
+        cacheDB,
+        env,
+        lmdb: { Cursor },
+        shareDB
     };
     global.mysql = {
         query() {
@@ -164,9 +164,9 @@ function createFakeEnvironment(options) {
     };
 
     return {
-        cacheStore: cacheStore,
-        emails: emails,
-        env: env
+        cacheStore,
+        emails,
+        env
     };
 }
 
@@ -273,8 +273,8 @@ test.describe("worker history imports", { concurrency: false }, () => {
         Date.now = function () { return fakeNow; };
         const address = "4".repeat(95);
         const workerName = "rigB";
-        const workerKey = address + "_" + workerName;
-        const historyKey = "history:" + workerKey;
+        const workerKey = `${address  }_${  workerName}`;
+        const historyKey = `history:${  workerKey}`;
         const shares = [
             {
                 height: 1,
@@ -297,7 +297,7 @@ test.describe("worker history imports", { concurrency: false }, () => {
                 })
             }
         ];
-        createFakeEnvironment({ shares: shares });
+        createFakeEnvironment({ shares });
         const worker = loadWorker();
         const workerHistory = loadWorkerHistory();
         const runtime = worker.createWorkerRuntime();

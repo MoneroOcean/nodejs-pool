@@ -162,7 +162,7 @@ function createTestEnvironment(options = {}) {
             });
         },
         formatDateFromSQL(value) {
-            return "formatted:" + value;
+            return `formatted:${  value}`;
         },
         rpcPortDaemon(port, method, params, callback) {
             supportRpcCalls.push({ port, method, params });
@@ -251,7 +251,7 @@ test("monitorNodes includes header failure details in daemon emails", async () =
             if (sql === "SELECT blockID, xtmBlockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") {
                 return [];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     global.support.sendEmail = function (to, subject, body) {
@@ -316,7 +316,7 @@ test("monitorNodes fixes persistent XMR lag once and respects cooldown", async (
                     { blockID: 106, xtmBlockID: 200, hostname: "peer", ip: "203.0.113.10", port: 18000 }
                 ];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     global.coinFuncs.getPortLastBlockHeaderMM = function (_port, callback) {
@@ -367,7 +367,7 @@ test("monitorNodes fixes persistent XTM aux lag with the XTM recovery mode", asy
                     { blockID: 100, xtmBlockID: 206, hostname: "peer", ip: "203.0.113.10", port: 18000 }
                 ];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     global.coinFuncs.getPortLastBlockHeaderMM = function (_port, callback) {
@@ -416,7 +416,7 @@ test("monitorNodes uses one full-stack recovery when XMR and XTM both lag", asyn
                     { blockID: 105, xtmBlockID: 205, hostname: "peer", ip: "203.0.113.10", port: 18000 }
                 ];
             }
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     global.coinFuncs.getPortLastBlockHeaderMM = function (_port, callback) {
@@ -471,7 +471,7 @@ test("startPoolStats initializes pool and network caches without waiting for pri
             if (sql === "select * from ports where hidden = 0 and pool_id < 1000 and lastSeen >= NOW() - INTERVAL 10 MINUTE") return [];
             if (sql === "SELECT * FROM port_config WHERE hidden = 0") return [];
             if (sql === "SELECT blockID, xtmBlockID, hostname, ip, port FROM pools WHERE last_checkin > date_sub(now(), interval 30 minute)") return [];
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     const pendingPriceCallbacks = [];
@@ -596,10 +596,10 @@ test("second stats refresh reuses tiny history caches and avoids full DB rescans
     const altblocks = [];
 
     for (let i = 1; i <= 1500; ++i) {
-        blocks.push([i, { hash: "block-" + i, timestamp: i * 1000, poolType: 0, valid: true, unlocked: false, value: 1 }]);
+        blocks.push([i, { hash: `block-${  i}`, timestamp: i * 1000, poolType: 0, valid: true, unlocked: false, value: 1 }]);
     }
     for (let i = 1; i <= 12050; ++i) {
-        altblocks.push([i, { hash: "alt-" + i, timestamp: i * 1000, poolType: 0, valid: true, unlocked: false, port: 18081 }]);
+        altblocks.push([i, { hash: `alt-${  i}`, timestamp: i * 1000, poolType: 0, valid: true, unlocked: false, port: 18081 }]);
     }
 
     const state = createTestEnvironment({
@@ -623,7 +623,7 @@ test("second stats refresh reuses tiny history caches and avoids full DB rescans
                 return [{ miner_count: 0 }];
             }
             if (sql === "SELECT count(id) as txn_count FROM transactions") return [{ txn_count: 0 }];
-            throw new Error("Unexpected SQL: " + sql);
+            throw new Error(`Unexpected SQL: ${  sql}`);
         }
     });
     const poolStats = loadPoolStats();

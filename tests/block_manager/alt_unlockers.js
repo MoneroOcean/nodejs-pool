@@ -264,7 +264,7 @@ function createUnlockerEnvironment(options = {}) {
             });
             return { affectedRows: ids.length };
         }
-        throw new Error("Unhandled SQL: " + sql);
+        throw new Error(`Unhandled SQL: ${  sql}`);
     }
 
     const mysql = {
@@ -325,7 +325,7 @@ function createUnlockerEnvironment(options = {}) {
         },
         getBlockHeaderByID(blockId, callback) {
             coinCalls.getBlockHeaderByID += 1;
-            callback(null, headerByHeight[blockId] || { hash: "main-" + blockId, difficulty: 100, reward: 10, height: blockId });
+            callback(null, headerByHeight[blockId] || { hash: `main-${  blockId}`, difficulty: 100, reward: 10, height: blockId });
         },
         getLastBlockHeader(callback) {
             coinCalls.getLastBlockHeader += 1;
@@ -333,13 +333,13 @@ function createUnlockerEnvironment(options = {}) {
         },
         getPortBlockHeaderByHash(port, blockHash, callback) {
             coinCalls.getPortBlockHeaderByHash += 1;
-            const key = port + ":" + blockHash;
+            const key = `${port  }:${  blockHash}`;
             callback(null, portHeaderByHash[key] || { hash: blockHash, reward: 5, height: 100 });
         },
         getPortBlockHeaderByID(port, blockId, callback) {
             coinCalls.getPortBlockHeaderByID += 1;
-            const key = port + ":" + blockId;
-            callback(null, portHeaderByHeight[key] || { hash: "alt-" + blockId, difficulty: 100, reward: 5, height: blockId });
+            const key = `${port  }:${  blockId}`;
+            callback(null, portHeaderByHeight[key] || { hash: `alt-${  blockId}`, difficulty: 100, reward: 5, height: blockId });
         }
     };
 
@@ -372,7 +372,7 @@ function createUnlockerEnvironment(options = {}) {
             return String(value);
         },
         formatDate(timestamp) {
-            return "ts:" + timestamp;
+            return `ts:${  timestamp}`;
         },
         sendEmail() {}
     };
@@ -400,8 +400,8 @@ function createUnlockerEnvironment(options = {}) {
 
 function sortRows(rows) {
     return rows.slice().sort(function (left, right) {
-        const leftKey = left.hex + ":" + left.payment_address + ":" + (left.payment_id || "");
-        const rightKey = right.hex + ":" + right.payment_address + ":" + (right.payment_id || "");
+        const leftKey = `${left.hex  }:${  left.payment_address  }:${  left.payment_id || ""}`;
+        const rightKey = `${right.hex  }:${  right.payment_address  }:${  right.payment_id || ""}`;
         return leftKey.localeCompare(rightKey);
     });
 }

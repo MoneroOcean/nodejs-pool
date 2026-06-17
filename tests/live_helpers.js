@@ -206,8 +206,8 @@ test.describe("live miner helpers", { concurrency: false }, () => {
     });
 
     test("block-submit synthetic high-difficulty hashes are non-zero and endian-specific", () => {
-        assert.equal(CRYPTONOTE_HIGH_DIFF_RESULT_HEX, "01" + "00".repeat(31));
-        assert.equal(ETHASH_HIGH_DIFF_RESULT_HEX, "00".repeat(31) + "01");
+        assert.equal(CRYPTONOTE_HIGH_DIFF_RESULT_HEX, `01${  "00".repeat(31)}`);
+        assert.equal(ETHASH_HIGH_DIFF_RESULT_HEX, `${"00".repeat(31)  }01`);
         assert.notEqual(CRYPTONOTE_HIGH_DIFF_RESULT_HEX, "00".repeat(32));
         assert.notEqual(ETHASH_HIGH_DIFF_RESULT_HEX, "00".repeat(32));
     });

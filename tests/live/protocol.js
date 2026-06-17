@@ -211,7 +211,7 @@ function buildPoolEndpointProbePayload(requestId) {
 }
 
 function isPoolEndpointResponse(message, requestId) {
-    return !!message
+    return Boolean(message)
         && typeof message === "object"
         && message.id === requestId
         && message.jsonrpc === "2.0"
@@ -233,7 +233,7 @@ async function isPoolEndpointReachable(host, port, useTls, timeoutMs = 1500) {
         }
         socket.write(`${JSON.stringify(buildPoolEndpointProbePayload(1))}\n`);
         const line = await Promise.race([once(rl, "line"), delay(timeoutMs, null, { ref: false })]);
-        return !!line && isPoolEndpointResponse(JSON.parse(line[0]), 1);
+        return Boolean(line) && isPoolEndpointResponse(JSON.parse(line[0]), 1);
     } catch (_error) {
         return false;
     } finally {
@@ -242,12 +242,12 @@ async function isPoolEndpointReachable(host, port, useTls, timeoutMs = 1500) {
     }
 }
 
-const hasGpuProtocolProbe = (plan) => !plan.miner && !!plan.protocolProbe;
+const hasGpuProtocolProbe = (plan) => !plan.miner && Boolean(plan.protocolProbe);
 const BLOCK_SUBMIT_ATTEMPT_TIMEOUT_MS = 15000;
 // Result hash of value 1: low enough to clear any block difficulty so the pool forwards it upstream.
 // Cryptonote results are little-endian (leading byte), ethash results big-endian (trailing byte).
-const CRYPTONOTE_HIGH_DIFF_RESULT_HEX = "01" + "00".repeat(31);
-const ETHASH_HIGH_DIFF_RESULT_HEX = "00".repeat(31) + "01";
+const CRYPTONOTE_HIGH_DIFF_RESULT_HEX = `01${  "00".repeat(31)}`;
+const ETHASH_HIGH_DIFF_RESULT_HEX = `${"00".repeat(31)  }01`;
 
 function escapeRegExp(value) { return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
@@ -408,7 +408,7 @@ function summarizeBlockSubmitLog(logText, worker) {
 }
 
 function isSuccessfulSubmitResponse(message) {
-    return !!message && !message.error && (message.result === true || message.result?.status === "OK");
+    return Boolean(message) && !message.error && (message.result === true || message.result?.status === "OK");
 }
 
 // 16 hex-char nonce: the job's extranonce prefix, zero-padded, ending in 1 so the nonce is non-zero.

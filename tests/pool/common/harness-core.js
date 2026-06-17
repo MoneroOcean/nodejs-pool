@@ -283,7 +283,7 @@ function createCoinFuncsStub() {
         blockedAddresses: [],
         niceHashDiff: 1000,
         baseDiff() {
-            return BigInt("0x" + "f".repeat(64));
+            return BigInt(`0x${  "f".repeat(64)}`);
         },
         baseRavenDiff() {
             return 100;
@@ -324,13 +324,13 @@ function createCoinFuncsStub() {
         },
         BlockTemplate: function TestBlockTemplate(template) {
             const mappedPort = mapRealPort(this, template.port);
-            const blockTemplate = new realCoinFuncs.BlockTemplate({ ...template, port: mappedPort });
-            blockTemplate.port = template.port;
-            blockTemplate.coin = template.coin;
-            if (template.idHash) blockTemplate.idHash = template.idHash;
-            if (template.clientPoolLocation !== undefined) blockTemplate.clientPoolLocation = template.clientPoolLocation;
-            if (template.clientNonceLocation !== undefined) blockTemplate.clientNonceLocation = template.clientNonceLocation;
-            return blockTemplate;
+            const templateInstance = new realCoinFuncs.BlockTemplate({ ...template, port: mappedPort });
+            templateInstance.port = template.port;
+            templateInstance.coin = template.coin;
+            if (template.idHash) templateInstance.idHash = template.idHash;
+            if (template.clientPoolLocation !== undefined) templateInstance.clientPoolLocation = template.clientPoolLocation;
+            if (template.clientNonceLocation !== undefined) templateInstance.clientNonceLocation = template.clientNonceLocation;
+            return templateInstance;
         },
         validatePlainAddress(address) {
             return typeof address === "string" && address.length === 95;
@@ -409,8 +409,8 @@ function createCoinFuncsStub() {
             }
             return next;
         },
-        slowHashBuff(buffer, blockTemplate, nonce, mixhash) {
-            if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
+        slowHashBuff(buffer, template, nonce, mixhash) {
+            if (this.__testUseRealMainPow && template.port === MAIN_PORT) {
                 const powVectorMap = this.__testMainPowVectors || {};
                 const vectorNonce = Buffer.from(buffer.subarray(4, 8)).toString("hex");
                 if (vectorNonce in powVectorMap) {
@@ -421,10 +421,10 @@ function createCoinFuncsStub() {
                         0
                     );
                 }
-                return realCoinFuncs.slowHashBuff.call(this, buffer, { ...blockTemplate, port: 18081 }, nonce, mixhash);
+                return realCoinFuncs.slowHashBuff.call(this, buffer, { ...template, port: 18081 }, nonce, mixhash);
             }
-            if (blockTemplate.port === ETH_PORT) {
-                if (this.portBlobType(blockTemplate.port, blockTemplate.block_version) === 102) {
+            if (template.port === ETH_PORT) {
+                if (this.portBlobType(template.port, template.block_version) === 102) {
                     return [ETH_RESULT_BUFFER, ETH_MIXHASH_BUFFER];
                 }
                 if (typeof this.__testKawpowComputedMixhash === "string" &&
@@ -441,25 +441,25 @@ function createCoinFuncsStub() {
             }
             return RAVEN_RESULT_BUFFER;
         },
-        slowHashAsync(buffer, blockTemplate, _wallet, callback, verifyContext) {
-            if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
-                callback(this.slowHashBuff(buffer, blockTemplate).toString("hex"));
+        slowHashAsync(buffer, template, _wallet, callback, verifyContext) {
+            if (this.__testUseRealMainPow && template.port === MAIN_PORT) {
+                callback(this.slowHashBuff(buffer, template).toString("hex"));
                 return;
             }
-            if (blockTemplate.port === ETH_PORT) {
-                const result = this.slowHashBuff(buffer, blockTemplate, verifyContext && verifyContext.nonce, verifyContext && verifyContext.mixhash);
+            if (template.port === ETH_PORT) {
+                const result = this.slowHashBuff(buffer, template, verifyContext && verifyContext.nonce, verifyContext && verifyContext.mixhash);
                 const resultHash = Array.isArray(result) ? result[0] : result;
                 callback(resultHash === false ? false : resultHash.toString("hex"));
                 return;
             }
             callback(VALID_RESULT);
         },
-        slowHashBuffAsync(buffer, blockTemplate, _wallet, callback, verifyContext) {
-            if (this.__testUseRealMainPow && blockTemplate.port === MAIN_PORT) {
-                callback(this.slowHashBuff(buffer, blockTemplate));
+        slowHashBuffAsync(buffer, template, _wallet, callback, verifyContext) {
+            if (this.__testUseRealMainPow && template.port === MAIN_PORT) {
+                callback(this.slowHashBuff(buffer, template));
                 return;
             }
-            callback(this.slowHashBuff(buffer, blockTemplate, verifyContext && verifyContext.nonce, verifyContext && verifyContext.mixhash));
+            callback(this.slowHashBuff(buffer, template, verifyContext && verifyContext.nonce, verifyContext && verifyContext.mixhash));
         },
         getBlockID() {
             return Buffer.from("aa".repeat(32), "hex");

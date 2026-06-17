@@ -3,10 +3,10 @@ const cli = require("../script_utils.js")();
 
 cli.init(function() {
     console.log("Cleaning up the alt block DB. Searching for items to delete");
-        let deleted = [];
-        let block_count = {};
+        const deleted = [];
+        const block_count = {};
     cli.forEachBinaryEntry(global.database.altblockDB, function (key, data) {
-        let blockData = global.protos.AltBlock.decode(data);
+        const blockData = global.protos.AltBlock.decode(data);
                 if (!(blockData.port in block_count)) block_count[blockData.port] = 0;
                 ++ block_count[blockData.port];
                 // Prune unlocked blocks past a per-port cap of 20000 (reverse scan keeps newest) or older than 3 years.
@@ -15,7 +15,7 @@ cli.init(function() {
                 }
     }, { reverse: true });
 
-    console.log("Deleting altblock items: " + deleted.length);
+    console.log(`Deleting altblock items: ${  deleted.length}`);
 
         let chunkSize = 0;
         let txn = global.database.env.beginTxn();

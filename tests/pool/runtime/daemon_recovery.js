@@ -59,8 +59,8 @@ function createLifecycleHarness(rows, template) {
         templateManager: {},
         messageHandler() {},
         startPortServers() {},
-        formatCoinPort(_coin, port) { return "XMR:" + port; },
-        formatPoolEvent(label, fields) { return label + " " + JSON.stringify(fields || {}); }
+        formatCoinPort(_coin, port) { return `XMR:${  port}`; },
+        formatPoolEvent(label, fields) { return `${label  } ${  JSON.stringify(fields || {})}`; }
     });
 
     return { fixes, lifecycle, state };

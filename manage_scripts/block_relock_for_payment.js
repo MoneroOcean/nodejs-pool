@@ -10,13 +10,13 @@ cli.init(function() {
     const blockProto = txn.getBinary(global.database.blockDB, blockHeight);
     if (blockProto === null) {
         txn.commit();
-        console.log("Block on " + height + " height not found! Exiting!");
+        console.log(`Block on ${  height  } height not found! Exiting!`);
         process.exit(1);
     }
     const blockData = global.protos.Block.decode(blockProto);
     blockData.unlocked = false;
     txn.putBinary(global.database.blockDB, blockHeight, global.protos.Block.encode(blockData));
     txn.commit();
-    console.log("Block on " + height + " height re-locked! Exiting!");
+    console.log(`Block on ${  height  } height re-locked! Exiting!`);
     process.exit(0);
 });

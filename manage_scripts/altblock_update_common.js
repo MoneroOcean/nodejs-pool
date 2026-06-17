@@ -12,7 +12,7 @@ function updateAltBlocks(hashes, mutate) {
         cursor.getCurrentBinary(function onBlock(key, data) {
             const block = global.protos.AltBlock.decode(data);
             if (!targetHashes.has(block.hash)) return;
-            console.log("Found altblock with " + block.hash + " hash");
+            console.log(`Found altblock with ${  block.hash  } hash`);
             mutate(block);
             txn.putBinary(global.database.altblockDB, key, global.protos.AltBlock.encode(block));
             console.log("Changed altblock");

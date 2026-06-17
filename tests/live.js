@@ -35,7 +35,7 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
         summary: null,
         printedFailureDetails: false
     };
-    const skipIf = (t, reason) => !!(reason && (t.skip(reason), true));
+    const skipIf = (t, reason) => Boolean(reason && (t.skip(reason), true));
     const liveSkipReason = () => state.skipReason || (state.fatalError ? "Aborted after earlier live-suite failure." : "");
     const blockSubmitSkipReason = () => state.skipReason
         || (state.fatalError && !state.blockSubmitCoverage ? "Aborted after earlier block submit coverage setup failure." : "")
@@ -139,14 +139,14 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
             const minerPlans = state.run.coveredPlans.filter((plan) => plan.miner);
             for (const plan of minerPlans) {
                 const testName = `${plan.algorithm} ${plan.miner.name}`;
-                await t.test(testName, { timeout: state.run.config.timeoutMs + 60 * 1000 }, async (t) => {
+                await t.test(testName, { timeout: state.run.config.timeoutMs + 60 * 1000 }, async (subTest) => {
                     const target = await executeScenario(state.run, plan, state.target);
                     const expectedSkipReason = expectedLiveMinerSkipReason(target);
                     const coveredTarget = expectedSkipReason ? { ...target, skipped: true, skipReason: expectedSkipReason } : target;
                     recordCoveredResult(plan.algorithm, plan.miner ? plan.miner.name : "protocol-probe", coveredTarget);
 
                     if (expectedSkipReason) {
-                        t.skip(expectedSkipReason);
+                        subTest.skip(expectedSkipReason);
                         return;
                     }
 
@@ -173,9 +173,9 @@ test.describe("live miner integration suite", { concurrency: false }, () => {
                 const coveredTarget = expectedSkipReason ? { ...target, skipped: true, skipReason: expectedSkipReason } : target;
                 recordCoveredResult(target.algorithm, target.miner, coveredTarget);
 
-                await t.test(target.algorithm, async (t) => {
+                await t.test(target.algorithm, async (subTest) => {
                     if (expectedSkipReason) {
-                        t.skip(expectedSkipReason);
+                        subTest.skip(expectedSkipReason);
                         return;
                     }
 

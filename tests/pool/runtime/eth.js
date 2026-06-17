@@ -21,7 +21,7 @@ const {
     withCapturedConsoleError
 } = require("../common/runtime-helpers.js");
 
-const HIGH_DIFF_ETH_RESULT = "00".repeat(31) + "01";
+const HIGH_DIFF_ETH_RESULT = `${"00".repeat(31)  }01`;
 
 test.describe("pool runtime: eth submits", { concurrency: false }, () => {
 test("accepted block submits with unresolved zero hashes are dropped before storage and alert admin", async () => {

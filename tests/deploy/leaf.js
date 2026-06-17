@@ -500,12 +500,12 @@ test.describe("leaf.bash matrix", { concurrency: false }, () => {
         }
 
         for (const caseConfig of getRequestedCases().filter(({ script }) => script === "leaf")) {
-            await t.test(`${caseConfig.script}.bash on ${caseConfig.distro}`, { timeout: caseConfig.timeoutMs }, async (t) => {
+            await t.test(`${caseConfig.script}.bash on ${caseConfig.distro}`, { timeout: caseConfig.timeoutMs }, async (subTest) => {
                 try {
                     const context = await runLeafCase(caseConfig);
-                    printLogs(t, context);
+                    printLogs(subTest, context);
                 } catch (error) {
-                    if (error && error.context) printLogs(t, error.context);
+                    if (error && error.context) printLogs(subTest, error.context);
                     throw error;
                 }
             });
