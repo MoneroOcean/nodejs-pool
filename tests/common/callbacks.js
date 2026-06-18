@@ -30,4 +30,19 @@ test.describe("callbacks", { concurrency: false }, () => {
         assert.equal(queue.length(), 0);
         assert.equal(queue.running(), 15);
     });
+
+    test("oldest() returns the earliest-enqueued task for both push and unshift (share-verify cleanup)", () => {
+        // concurrency 0 keeps everything pending so we can inspect oldest().
+        const queue = createTaskQueue(0, function processTask(_task, done) { done(); });
+
+        queue.push({ label: "push-first" });        // enqueued 1st -> the true oldest
+        queue.unshift({ label: "unshift-second" });  // priority-front: array head, but NEWER than push-first
+        queue.push({ label: "push-third" });
+
+        // Positional pending[0] here is "unshift-second"; oldest() must NOT return that.
+        assert.equal(queue.oldest().data.label, "push-first");
+
+        queue.remove(function removeFirst(task) { return task.data.label === "push-first"; });
+        assert.equal(queue.oldest().data.label, "unshift-second");
+    });
 });
