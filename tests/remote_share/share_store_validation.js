@@ -77,4 +77,30 @@ test.describe("remote share store validation", { concurrency: false }, function 
             assert.deepEqual(putBinaryKeys, []);
         });
     });
+
+    test("storeShares drops shares whose raw_shares is non-finite (NaN/Infinity) and keeps the valid ones", () => {
+        withGlobals(() => {
+            const putBinaryKeys = [];
+            const cacheWrites = [];
+            const database = makeFakeDatabase(putBinaryKeys);
+            // Capture cache merges so a poison frame can be shown not to enter the accumulators.
+            database.env.beginTxn().putString = function captureWrite(_db, key, value) {
+                cacheWrites.push({ key, value });
+            };
+            const store = createShareStore({ database });
+            const result = store.storeShares([
+                share({ raw_shares: NaN }),        // wire NaN -> typeof "number" but not finite
+                share({ raw_shares: Infinity }),   // wire Infinity -> likewise
+                share({ raw_shares: 10 })          // valid -> must be stored
+            ]);
+            assert.equal(result, true);
+            assert.deepEqual(putBinaryKeys, [100]);
+            // No accumulated stat may be NaN/Infinity once the poison frames are dropped.
+            for (const write of cacheWrites) {
+                for (const value of Object.values(JSON.parse(write.value))) {
+                    if (typeof value === "number") assert.equal(Number.isFinite(value), true, `non-finite stat written for ${write.key}`);
+                }
+            }
+        });
+    });
 });
