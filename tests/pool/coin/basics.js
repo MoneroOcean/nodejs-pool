@@ -798,6 +798,60 @@ test("eth-style hash lookups propagate nested callback stalls as errors", async 
     }
 });
 
+test("eth-family true orphan is tagged confirmations=-1 (not canonical, no uncle reference)", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const etcRpc = coinFuncs.getRpcSettings("ETC");
+    const ORPHAN = "aa".repeat(32);
+    const CANON = "bb".repeat(32);
+    const result = await new Promise((resolve) => {
+        etcRpc.getAnyBlockHeaderByHash({
+            blockHash: ORPHAN,
+            callback(err, body) { resolve({ err, body }); },
+            isOurBlock: true,
+            noErrorReport: true,
+            port: REAL_ETH_STYLE_PORT,
+            runtime: {
+                coinFuncs: {
+                    // canonical at every scanned height differs from the orphan, and no block lists it as an uncle
+                    getPortBlockHeaderByID(_port, _height, callback) { callback(null, { hash: `0x${  CANON}`, uncles: [] }); }
+                },
+                support: {
+                    rpcPortDaemon2(_port, _method, _params, callback) {
+                        callback({ jsonrpc: "2.0", id: 1, result: { number: "0x10", hash: `0x${  ORPHAN}`, transactions: [], uncles: [] } });
+                    }
+                }
+            }
+        });
+    });
+    assert.equal(result.err, null);
+    assert.equal(result.body.confirmations, -1);
+    assert.equal(result.body.reward, null);
+});
+
+test("erg true orphan is tagged confirmations=-1 (a different canonical id holds the height)", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ergRpc = coinFuncs.getRpcSettings("ERG");
+    const result = await new Promise((resolve) => {
+        ergRpc.getAnyBlockHeaderByHash({
+            blockHash: "orphan-id",
+            callback(err, header) { resolve({ err, header }); },
+            noErrorReport: true,
+            port: 9053,
+            runtime: {
+                support: {
+                    rpcPortDaemon2(_port, rpcPath, _body, callback) {
+                        if (String(rpcPath).startsWith("blocks/at/")) return callback(["canonical-id"]);
+                        return callback({ header: { id: "orphan-id", height: 100 }, blockTransactions: { transactions: [] } });
+                    }
+                }
+            }
+        });
+    });
+    assert.equal(result.err, null);
+    assert.equal(result.header.confirmations, -1);
+    assert.equal(result.header.reward, null);
+});
+
 test("blob helpers preserve special nonce sizes, proof sizes, and wire names for pool families", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
 

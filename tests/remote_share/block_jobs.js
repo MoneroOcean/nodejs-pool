@@ -469,6 +469,71 @@ test("pending block jobs retry until a reward is available and then store the bl
     }
 });
 
+test("saveResolvedBlock replaces an orphaned same-height block instead of dropping the refind", () => {
+    const restore = installRemoteShareGlobals();
+    const { database, stores } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    // An orphan tombstone (valid=false, e.g. invalidated after a reorg) already occupies height 11.
+    stores.blockDB.set(11, PROTOS.Block.encode({
+        hash: "aa".repeat(32), difficulty: 100, shares: 0, timestamp: Date.now(),
+        poolType: PROTOS.POOLTYPE.PPLNS, unlocked: true, valid: false, value: 0
+    }));
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback) { callback(null, { reward: 25 }); },
+        getPoolProfile() { return { pool: {} }; },
+        PORT2COIN() { return "XMR"; },
+        PORT2COIN_FULL() { return "XMR"; }
+    };
+    const pendingJobs = createPendingJobs({ database, logger: { log() {} }, retryDelayMs: 1, storage });
+    try {
+        const canonical = {
+            hash: "bb".repeat(32), difficulty: 100, shares: 0, timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS, unlocked: false, valid: true
+        };
+        pendingJobs.enqueueBlock(11, PROTOS.Block.encode(canonical), canonical);
+        pendingJobs.processDueJobs();
+        assert.equal(stores.blockDB.size, 1);
+        const stored = PROTOS.Block.decode(Array.from(stores.blockDB.values())[0]);
+        assert.equal(stored.hash, "bb".repeat(32));
+        assert.equal(stored.valid, true);
+    } finally {
+        pendingJobs.close();
+        restore();
+    }
+});
+
+test("saveResolvedBlock keeps an existing still-valid block at the same height (duplicate)", () => {
+    const restore = installRemoteShareGlobals();
+    const { database, stores } = createPendingJobDatabase();
+    const storage = createMapStorage();
+    // A still-valid block already occupies height 11; a different-hash refind must not overwrite it.
+    stores.blockDB.set(11, PROTOS.Block.encode({
+        hash: "aa".repeat(32), difficulty: 100, shares: 0, timestamp: Date.now(),
+        poolType: PROTOS.POOLTYPE.PPLNS, unlocked: false, valid: true
+    }));
+    global.coinFuncs = {
+        getBlockHeaderByHash(_hash, callback) { callback(null, { reward: 25 }); },
+        getPoolProfile() { return { pool: {} }; },
+        PORT2COIN() { return "XMR"; },
+        PORT2COIN_FULL() { return "XMR"; }
+    };
+    const pendingJobs = createPendingJobs({ database, logger: { log() {} }, retryDelayMs: 1, storage });
+    try {
+        const other = {
+            hash: "bb".repeat(32), difficulty: 100, shares: 0, timestamp: Date.now(),
+            poolType: PROTOS.POOLTYPE.PPLNS, unlocked: false, valid: true
+        };
+        pendingJobs.enqueueBlock(11, PROTOS.Block.encode(other), other);
+        pendingJobs.processDueJobs();
+        assert.equal(stores.blockDB.size, 1);
+        const stored = PROTOS.Block.decode(Array.from(stores.blockDB.values())[0]);
+        assert.equal(stored.hash, "aa".repeat(32));
+    } finally {
+        pendingJobs.close();
+        restore();
+    }
+});
+
 test("pending block jobs do not orphan wallet reward lookup misses", () => {
     const restore = installRemoteShareGlobals();
     const { database, stores } = createPendingJobDatabase();
