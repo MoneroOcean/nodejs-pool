@@ -231,7 +231,7 @@ test("eth subscribe and authorize fail cleanly when no extranonces are available
         });
         assert.equal(subscribeReply.replies.length, 0);
         assert.deepEqual(subscribeReply.finals, [{
-            error: "Not enough extranoces. Switch to other pool node.",
+            error: "Not enough extranonces. Switch to other pool node.",
             timeout: undefined
         }]);
 
@@ -242,7 +242,7 @@ test("eth subscribe and authorize fail cleanly when no extranonces are available
         });
         assert.equal(authorizeReply.replies.length, 0);
         assert.deepEqual(authorizeReply.finals, [{
-            error: "Not enough extranoces. Switch to other pool node.",
+            error: "Not enough extranonces. Switch to other pool node.",
             timeout: undefined
         }]);
     } finally {
@@ -268,7 +268,7 @@ test("extranonce exhaustion notifications are rate-limited", async () => {
             portData: global.config.ports[1]
         });
         assert.deepEqual(firstAuthorize.finals, [{
-            error: "Not enough extranoces. Switch to other pool node.",
+            error: "Not enough extranonces. Switch to other pool node.",
             timeout: undefined
         }]);
         assert.equal(global.support.emails.length, 1);
@@ -282,7 +282,7 @@ test("extranonce exhaustion notifications are rate-limited", async () => {
             portData: global.config.ports[1]
         });
         assert.deepEqual(secondAuthorize.finals, [{
-            error: "Not enough extranoces. Switch to other pool node.",
+            error: "Not enough extranonces. Switch to other pool node.",
             timeout: undefined
         }]);
         assert.equal(global.support.emails.length, 1);
@@ -296,7 +296,7 @@ test("extranonce exhaustion notifications are rate-limited", async () => {
             portData: global.config.ports[1]
         });
         assert.deepEqual(thirdAuthorize.finals, [{
-            error: "Not enough extranoces. Switch to other pool node.",
+            error: "Not enough extranonces. Switch to other pool node.",
             timeout: undefined
         }]);
         assert.equal(global.support.emails.length, 2);

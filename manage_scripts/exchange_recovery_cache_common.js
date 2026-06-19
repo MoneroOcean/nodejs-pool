@@ -22,7 +22,7 @@ function buildBlockLookup(cli) {
     const lookup = new Map();
     cli.forEachBinaryEntry(global.database.altblockDB, function onEntry(_key, data) {
         const block = global.protos.AltBlock.decode(data);
-        lookup.set(Number(block.id), block);
+        lookup.set(Number(_key), block);
     });
     return lookup;
 }
