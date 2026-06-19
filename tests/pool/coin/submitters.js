@@ -356,6 +356,56 @@ test("eth submitted block hash lookup preserves coinFuncs receiver when delayed"
     }
 });
 
+test("eth block hash resolution retries a transiently-unreachable daemon before resolving", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ethPool = coinFuncs.getPoolSettings("ETH");
+    const originalSetTimeout = global.setTimeout;
+    let calls = 0;
+    let resolvedHash = null;
+    const flakyCoinFuncs = {
+        ethBlockFind(port, nonce, callback) {
+            calls += 1;
+            // daemon "down" for the first two attempts, then returns the on-chain hash
+            return callback(calls < 3 ? null : `0x${  "cd".repeat(32)}`);
+        }
+    };
+    try {
+        global.setTimeout = function runImmediately(fn) { fn(); return 0; };
+        ethPool.resolveSubmittedBlockHash({
+            blockData: ["0xnonce"],
+            blockTemplate: { port: 8645 },
+            coinFuncs: flakyCoinFuncs
+        }, function onHash(hash) { resolvedHash = hash; });
+        assert.equal(calls, 3);
+        assert.equal(resolvedHash, "cd".repeat(32));
+    } finally {
+        global.setTimeout = originalSetTimeout;
+    }
+});
+
+test("eth block hash resolution falls back to the zero-hash only after exhausting retries", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ethPool = coinFuncs.getPoolSettings("ETH");
+    const originalSetTimeout = global.setTimeout;
+    let calls = 0;
+    let resolvedHash = null;
+    const downCoinFuncs = {
+        ethBlockFind(port, nonce, callback) { calls += 1; return callback(null); }
+    };
+    try {
+        global.setTimeout = function runImmediately(fn) { fn(); return 0; };
+        ethPool.resolveSubmittedBlockHash({
+            blockData: ["0xnonce"],
+            blockTemplate: { port: 8645 },
+            coinFuncs: downCoinFuncs
+        }, function onHash(hash) { resolvedHash = hash; });
+        assert.equal(calls, 10); // ETH_BLOCK_RESOLVE_ATTEMPTS
+        assert.equal(resolvedHash, "0".repeat(64));
+    } finally {
+        global.setTimeout = originalSetTimeout;
+    }
+});
+
 test("erg mining.submit parser uses the nonce field even when SRBMiner includes a full nonce field", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const ergPool = coinFuncs.getPoolSettings("ERG");
