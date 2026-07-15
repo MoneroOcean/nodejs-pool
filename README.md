@@ -61,7 +61,7 @@ WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudfla
 ```
 
 `WWW_DNS`, `API_DNS`, and `CERTBOT_EMAIL` default to the MoneroOcean production values if omitted. Set them explicitly for any non-production install.
-Set `TARI_RELEASE_TAG` to override the Tari source tag and `TARI_REPO_URL` to build from a fork. Tari is built from source into `/usr/local/src/tari/target/release`.
+Set `MONERO_RELEASE_TAG` (default `v0.18.5.1`) or `TARI_RELEASE_TAG` (default `v5.4.1`) to override a source tag. `MONERO_REPO_URL` and `TARI_REPO_URL` can point at reviewed forks. Tari is built from source into `/usr/local/src/tari/target/release`.
 
 When the script finishes:
 
@@ -100,7 +100,10 @@ curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deploym
 ```
 
 `TARI_WALLET_PAYMENT_ADDRESS` is required so Tari merge-mining rewards are paid to a wallet you control.
-Set `TARI_RELEASE_TAG` before `bash -x` to use a different Tari source tag on leaf nodes.
+Set `MONERO_RELEASE_TAG` or `TARI_RELEASE_TAG` before `bash -x` to use a different reviewed release tag on leaf nodes.
+Leaf installs retain 10,000 Tari blocks by default; override this with `TARI_PRUNING_HORIZON` when more history is required.
+The installer disables root/password SSH access and enables an SSH Fail2ban jail. Set `SSH_FAIL2BAN_IGNORE_IPS` to a whitespace-separated list of trusted management addresses or CIDRs that must never be banned; SSH itself remains reachable from any address allowed by UFW.
+Fresh daemon synchronization can take hours. `MONERO_SYNC_TIMEOUT_SECONDS` and `TARI_SYNC_TIMEOUT_SECONDS` default to 172,800 seconds and accept `0` for no timeout.
 
 After install, update the leaf config so it points at the main pool infrastructure, then start the `pool` module on that node.
 

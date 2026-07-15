@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Patch a stock Tari 5.3 mainnet config.toml for MoneroOcean-style XTM use.
+# Patch a stock Tari 5.4 mainnet config.toml for MoneroOcean-style XTM use.
 #
 # This script modifies only these settings:
 # - [base_node]
@@ -50,6 +50,12 @@ Options:
   --wallet-payment-address <address>
       Tari wallet payment address for merge_mining_proxy.wallet_payment_address.
       Defaults to the MoneroOcean XTM address in this script.
+
+  --pruning-horizon <blocks>
+      Number of recent Tari blocks to retain in full. Default: 10000
+
+  --pruning-interval <blocks>
+      Number of blocks between pruning passes. Default: 50
 
   --monerod-url <url>
       Monerod URL for merge_mining_proxy.monerod_url.
@@ -111,6 +117,8 @@ config_path=""
 grpc_bind="127.0.0.1"
 external_ip=""
 wallet_payment_address="$DEFAULT_WALLET_PAYMENT_ADDRESS"
+pruning_horizon="10000"
+pruning_interval="50"
 monerod_url="http://localhost:18083"
 base_node_grpc_address="http://127.0.0.1:18142"
 dry_run=0
@@ -122,6 +130,8 @@ while [ "$#" -gt 0 ]; do
     --grpc-bind) [ "$#" -ge 2 ] || die "--grpc-bind requires a value"; grpc_bind="$2"; shift 2 ;;
     --external-ip) [ "$#" -ge 2 ] || die "--external-ip requires a value"; external_ip="$2"; shift 2 ;;
     --wallet-payment-address) [ "$#" -ge 2 ] || die "--wallet-payment-address requires a value"; wallet_payment_address="$2"; shift 2 ;;
+    --pruning-horizon) [ "$#" -ge 2 ] || die "--pruning-horizon requires a value"; pruning_horizon="$2"; shift 2 ;;
+    --pruning-interval) [ "$#" -ge 2 ] || die "--pruning-interval requires a value"; pruning_interval="$2"; shift 2 ;;
     --monerod-url) [ "$#" -ge 2 ] || die "--monerod-url requires a value"; monerod_url="$2"; shift 2 ;;
     --base-node-grpc-address) [ "$#" -ge 2 ] || die "--base-node-grpc-address requires a value"; base_node_grpc_address="$2"; shift 2 ;;
     --base-node-grpc-ip)
@@ -144,6 +154,8 @@ done
 [ -n "$config_path" ] || die "missing config.toml path"
 [ -f "$config_path" ] || die "config not found: $config_path"
 [ "$grpc_bind" = "127.0.0.1" ] || [ "$grpc_bind" = "0.0.0.0" ] || die "--grpc-bind must be 127.0.0.1 or 0.0.0.0"
+[[ "$pruning_horizon" =~ ^[0-9]+$ ]] || die "--pruning-horizon must be a non-negative integer"
+[[ "$pruning_interval" =~ ^[1-9][0-9]*$ ]] || die "--pruning-interval must be a positive integer"
 case "$base_node_grpc_address" in
   http://*:*|https://*:*) ;;
   *) die "--base-node-grpc-address must include scheme, host, and port, e.g. http://127.0.0.1:18142" ;;
@@ -158,12 +170,12 @@ echo "external_ipv4=$external_ip"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
-python3 - "$config_path" "$tmp" "$grpc_bind" "$external_ip" "$wallet_payment_address" "$monerod_url" "$base_node_grpc_address" <<'PY'
+python3 - "$config_path" "$tmp" "$grpc_bind" "$external_ip" "$wallet_payment_address" "$pruning_horizon" "$pruning_interval" "$monerod_url" "$base_node_grpc_address" <<'PY'
 import re
 import sys
 from pathlib import Path
 
-src, dst, grpc_bind, external_ip, wallet_payment_address, monerod_url, base_node_grpc_address = sys.argv[1:]
+src, dst, grpc_bind, external_ip, wallet_payment_address, pruning_horizon, pruning_interval, monerod_url, base_node_grpc_address = sys.argv[1:]
 lines = Path(src).read_text().splitlines(keepends=True)
 
 section_re = re.compile(r"^\s*\[([A-Za-z0-9_.-]+)\]\s*(?:#.*)?$")
@@ -243,8 +255,8 @@ set_value("base_node", "grpc_address", f'"/ip4/{grpc_bind}/tcp/18142"')
 uncomment_list_entries("base_node", "grpc_server_allow_methods")
 set_value("base_node", "use_libtor", "false")
 
-#set_value("base_node.storage", "pruning_horizon", "10000")
-#set_value("base_node.storage", "pruning_interval", "50")
+set_value("base_node.storage", "pruning_horizon", pruning_horizon)
+set_value("base_node.storage", "pruning_interval", pruning_interval)
 
 set_value("base_node.p2p", "public_addresses", f'["/ip4/{external_ip}/tcp/18189",]')
 set_value("base_node.p2p.transport", "type", '"tcp"')

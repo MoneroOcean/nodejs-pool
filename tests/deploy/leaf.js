@@ -16,6 +16,7 @@ const XMR_POOL_ADDRESS = "46yzCCD3Mza9tRj7aqPSaxVbbePtuAeKzf8Ky2eRtcXGcEgCg1iTBi
 const XMR_FEE_ADDRESS = "463tWEBn5XZJSxLU6uLQnQ2iY9xuNcDbjLSjkn3XAXHCbLrTTErJrBWYgHJQyrCwkNgYvyV3z8zctJLPCZy24jvb3NiTcTJ";
 const XMR_MINER_ADDRESS = "862wu9yae6qSUaUGz3KjjSeQ3xPKKxhzf8eYd9qXFx4eTpWm1qp6tvY9mzX4YiUQyYNdwZ9T8Muy1NfydEnExWkER25EfNj";
 const MYSQL_POOL_PASSWORD = "98erhfiuehw987fh23d";
+const TARI_WALLET_PAYMENT_ADDRESS = "12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5";
 const TARI_PROXY_PORT = 18081;
 const MONEROD_PORT = 18083;
 const MINOTARI_NODE_PORT = 18142;
@@ -340,6 +341,9 @@ async function verifyLeafInstall(context) {
         "/usr/local/src/tari/target/release/minotari_node", "/usr/local/src/tari/target/release/minotari_merge_mining_proxy",
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
+        "/etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
+        "/etc/fail2ban/jail.d/moneroocean-sshd.local",
+        "/usr/local/bin/node",
         "/home/user/nodejs-pool/fix_daemon.sh",
         "/swapfile"
     ]);
@@ -347,8 +351,28 @@ async function verifyLeafInstall(context) {
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");
     await appendCheckLog(context, "verified Monero hugepage sysctl config");
-    await execInContainer(context.containerName, "grep -Fq -- '--rpc-bind-ip=127.0.0.1' /lib/systemd/system/monero.service && grep -Fq -- \"--log-level '*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR'\" /lib/systemd/system/monero.service && ! grep -Fq -- '--restricted-rpc' /lib/systemd/system/monero.service");
-    await appendCheckLog(context, "verified local unrestricted Monero RPC service config");
+    await execInContainer(context.containerName, [
+        "grep -q '^PermitRootLogin no$' /etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
+        "grep -q '^AuthenticationMethods publickey$' /etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
+        "grep -q '^PasswordAuthentication no$' /etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
+        "grep -q '^KbdInteractiveAuthentication no$' /etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
+        "passwd -S root | awk '$2 == \"L\" { found=1 } END { exit !found }'",
+        "passwd -S user | awk '$2 == \"L\" { found=1 } END { exit !found }'"
+    ].join(" && "));
+    await appendCheckLog(context, "verified key-only SSH and locked local passwords");
+    await execInContainer(context.containerName, [
+        "grep -q '^enabled = true$' /etc/fail2ban/jail.d/moneroocean-sshd.local",
+        "grep -q '^backend = systemd$' /etc/fail2ban/jail.d/moneroocean-sshd.local",
+        "grep -q '^maxretry = 5$' /etc/fail2ban/jail.d/moneroocean-sshd.local",
+        "grep -q '^findtime = 10m$' /etc/fail2ban/jail.d/moneroocean-sshd.local",
+        "grep -q '^bantime = 1h$' /etc/fail2ban/jail.d/moneroocean-sshd.local"
+    ].join(" && "));
+    await appendCheckLog(context, "verified SSH Fail2ban policy");
+    await execInContainer(context.containerName, "test \"$(readlink -f /usr/bin/node)\" = /usr/local/bin/node");
+    await appendCheckLog(context, "verified service-safe system Node binary");
+    await execInContainer(context.containerName, "grep -Fq -- '--rpc-bind-ip=127.0.0.1' /lib/systemd/system/monero.service && grep -Fq -- \"--log-level '*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR'\" /lib/systemd/system/monero.service && grep -Fq -- \"--block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'\" /lib/systemd/system/monero.service && ! grep -Fq -- '--restricted-rpc' /lib/systemd/system/monero.service");
+    await execInContainer(context.containerName, "getfacl -cp /home/user | grep -q '^user:monerodaemon:--x$'");
+    await appendCheckLog(context, "verified local unrestricted Monero RPC and post-sync block notification config");
     await execInContainer(context.containerName, "! grep -R -Fq MONEROOCEAN_TARI_MERGE_MINING /usr/local/src/monero/src && test ! -e /usr/local/src/monero/build/release/.moneroocean-tari-mm-reserve.patch.sha256");
     await appendCheckLog(context, "verified unpatched Monero build");
     await execInContainer(context.containerName, "grep -q '^User=taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^SupplementaryGroups=hugepages$' /lib/systemd/system/monero.service && grep -q '^LimitMEMLOCK=infinity$' /lib/systemd/system/monero.service && id -nG monerodaemon | grep -qw hugepages");
@@ -369,7 +393,9 @@ async function verifyLeafInstall(context) {
         "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/taridaemon/.tari/mainnet/config/config.toml",
         "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/taridaemon/.tari/mainnet/config/config.toml",
         "grep -q 'submit_to_origin = false' /home/taridaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'monerod_connection_timeout = 10' /home/taridaemon/.tari/mainnet/config/config.toml"
+        "grep -q 'monerod_connection_timeout = 10' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q '^pruning_horizon = 10000$' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q '^pruning_interval = 50$' /home/taridaemon/.tari/mainnet/config/config.toml"
     ].join(" && "));
     await appendCheckLog(context, "verified patched Tari merge mining config");
     await execInContainer(context.containerName, "su user -l -c '. ~/.nvm/nvm.sh >/dev/null 2>&1; command -v pm2'");
@@ -393,6 +419,7 @@ async function createContainer(context) {
         POOL_DEPLOY_XTM_T_COMPAT_PORT: XTM_T_COMPAT_PORT,
         POOL_DEPLOY_XMR_POOL_ADDRESS: XMR_POOL_ADDRESS,
         POOL_DEPLOY_XMR_FEE_ADDRESS: XMR_FEE_ADDRESS,
+        TARI_WALLET_PAYMENT_ADDRESS,
         TARI_EXTERNAL_IP: "127.0.0.1"
     };
     const args = [

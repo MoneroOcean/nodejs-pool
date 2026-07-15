@@ -307,6 +307,7 @@ async function verifyDeployInstall(context) {
         "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
         "/usr/local/src/grpc-json-proxy/base_node.proto",
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
+        "/usr/local/bin/node",
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
         "/etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
@@ -342,6 +343,8 @@ async function verifyDeployInstall(context) {
     await appendCheckLog(context, "verified separate Tari user and Monero hugepage access");
     await execInContainer(context.containerName, "test $(grep -o -- '--max-body-bytes 16777216' /lib/systemd/system/xtm.service | wc -l) -eq 2");
     await appendCheckLog(context, "verified Tari grpc-json-proxy accepts large SubmitBlock payloads");
+    await execInContainer(context.containerName, "test \"$(readlink -f /usr/bin/node)\" = /usr/local/bin/node && test $(grep -o -- '/usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js' /lib/systemd/system/xtm.service | wc -l) -eq 2");
+    await appendCheckLog(context, "verified service-safe system Node binary");
     await execInContainer(context.containerName, "grep -q '^After=network.target monero.service xtm.service$' /lib/systemd/system/xtm_mm.service && grep -q '^PartOf=monero.service xtm.service$' /lib/systemd/system/xtm_mm.service && ! grep -q '^Requires=' /lib/systemd/system/xtm_mm.service && ! grep -q '^ExecStartPre=' /lib/systemd/system/xtm_mm.service");
     await execInContainer(context.containerName, "test ! -e /usr/local/sbin/monerod-rpc-wait && test ! -e /usr/local/sbin/xtm-mm-healthcheck && test ! -e /lib/systemd/system/xtm-mm-healthcheck.service && test ! -e /lib/systemd/system/xtm-mm-healthcheck.timer");
     await execInContainer(context.containerName, "test -x /home/user/nodejs-pool/fix_daemon.sh && grep -q 'xmr-lag' /home/user/nodejs-pool/fix_daemon.sh && grep -q 'xtm-lag' /home/user/nodejs-pool/fix_daemon.sh && grep -q 'template-stuck' /home/user/nodejs-pool/fix_daemon.sh");
@@ -358,7 +361,9 @@ async function verifyDeployInstall(context) {
         "grep -q 'monerod_url = \\[ \"http://localhost:18083\" \\]' /home/taridaemon/.tari/mainnet/config/config.toml",
         "grep -q 'base_node_grpc_address = \"http://127.0.0.1:18142\"' /home/taridaemon/.tari/mainnet/config/config.toml",
         "grep -q 'submit_to_origin = false' /home/taridaemon/.tari/mainnet/config/config.toml",
-        "grep -q 'monerod_connection_timeout = 10' /home/taridaemon/.tari/mainnet/config/config.toml"
+        "grep -q 'monerod_connection_timeout = 10' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q '^pruning_horizon = 10000$' /home/taridaemon/.tari/mainnet/config/config.toml",
+        "grep -q '^pruning_interval = 50$' /home/taridaemon/.tari/mainnet/config/config.toml"
     ].join(" && "));
     await appendCheckLog(context, "verified patched Tari config");
 

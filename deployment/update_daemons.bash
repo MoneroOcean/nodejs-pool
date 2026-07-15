@@ -2,9 +2,9 @@
 set -e
 
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
-MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.4.6}"
+MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.3.1}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.4.1}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
@@ -54,6 +54,6 @@ sudo USE_SINGLE_BUILDDIR=1 nice make release
 echo "Building Tari $TARI_RELEASE_TAG"
 ensure_rust_toolchain
 checkout_repo_ref "$TARI_REPO_URL" /usr/local/src/tari "$TARI_RELEASE_TAG"
-sudo TARI_TARGET_NETWORK="$TARI_NETWORK" bash -lc ". /root/.cargo/env && cd /usr/local/src/tari && cargo build --release -p minotari_node -p minotari_merge_mining_proxy"
+sudo TARI_TARGET_NETWORK="$TARI_NETWORK" bash -lc ". /root/.cargo/env && cd /usr/local/src/tari && cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy"
 
 echo "Done. Restart when ready: sudo systemctl restart monero xtm xtm_mm"

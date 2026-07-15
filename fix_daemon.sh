@@ -193,6 +193,35 @@ wait_tari_rpc() {
     30
 }
 
+# A live node with an unavailable RPC is commonly in its one-time LMDB
+# migration (or still starting). Restarting it here can interrupt that work
+# and make the migration repeat, so defer recovery until the node responds.
+tari_rpc_ready() {
+  [ "$dry_run" -eq 1 ] && return 0
+  local response
+  response="$(curl -m 2 -fsS \
+    "http://127.0.0.1:18146/json_rpc" \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","id":"0","method":"GetTipInfo","params":{}}' \
+    2>/dev/null || true)"
+  grep -q '"result"[[:space:]]*:' <<<"$response"
+}
+
+xtm_restart_safe() {
+  if ! service_exists xtm.service; then
+    return 0
+  fi
+  if ! service_enabled xtm.service; then
+    log "deferring XTM recovery: xtm.service is disabled"
+    return 1
+  fi
+  if systemctl_cmd is-active --quiet xtm.service && ! tari_rpc_ready; then
+    log "deferring xtm restart: active Tari node RPC is unavailable (startup/migration)"
+    return 1
+  fi
+  return 0
+}
+
 describe_context() {
   local parts=()
   [ -n "$port" ] && parts+=("port=$port")
@@ -216,6 +245,10 @@ case "$reason" in
     run_xtm_mm_service start
     ;;
   xtm-lag)
+    if ! xtm_restart_safe; then
+      log "deferred xtm-lag recovery"
+      exit 0
+    fi
     run_xtm_mm_service stop || true
     run_optional_service restart xtm.service
     restart_relay_pool
@@ -225,6 +258,10 @@ case "$reason" in
     run_xtm_mm_service start
     ;;
   template-stuck|unknown|*)
+    if ! xtm_restart_safe; then
+      log "deferred template recovery: active Tari node RPC is unavailable"
+      exit 0
+    fi
     run_xtm_mm_service stop || true
     run_service restart monero.service
     run_optional_service restart xtm.service

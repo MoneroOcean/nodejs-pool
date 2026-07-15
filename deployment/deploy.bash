@@ -1,11 +1,13 @@
 #!/bin/bash -ex
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
+MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
+MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
 WWW_DNS="${WWW_DNS:-moneroocean.stream}"
 API_DNS="${API_DNS:-api.moneroocean.stream}"
 CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN:-n/a}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-support@moneroocean.stream}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.4.0-pre.4}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.4.1}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
@@ -13,6 +15,8 @@ TARI_USER="${TARI_USER:-taridaemon}"
 TARI_HOME="${TARI_HOME:-/home/$TARI_USER}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
 TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
+TARI_PRUNING_HORIZON="${TARI_PRUNING_HORIZON:-10000}"
+TARI_PRUNING_INTERVAL="${TARI_PRUNING_INTERVAL:-50}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -227,7 +231,7 @@ checkout_repo_ref() {
 install_tari_suite() {
   ensure_rust_toolchain
   checkout_repo_ref "$TARI_REPO_URL" "$TARI_INSTALL_DIR" "$TARI_RELEASE_TAG"
-  TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release -p minotari_node -p minotari_merge_mining_proxy
+  TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy
   if [ ! -f "$TARI_HOME/.tari/mainnet/config/config.toml" ]; then
     sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/target/release/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
   fi
@@ -236,7 +240,7 @@ install_tari_suite() {
 patch_tari_config() {
   local patcher="/usr/local/src/patch-tari-config.sh"
   local config="$TARI_HOME/.tari/mainnet/config/config.toml"
-  local args=("$config" "--no-backup")
+  local args=("$config" "--no-backup" "--pruning-horizon" "$TARI_PRUNING_HORIZON" "--pruning-interval" "$TARI_PRUNING_INTERVAL")
   retry_command curl -fsSL -o "$patcher" "$TARI_CONFIG_PATCH_URL"
   chmod 755 "$patcher"
   args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
@@ -246,10 +250,17 @@ patch_tari_config() {
 
 build_monero_release() {
   USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
+  git rev-parse HEAD >build/release/.moneroocean-build-commit
 }
 
 monero_build_is_current() {
-  [ -x /usr/local/src/monero/build/release/bin/monerod ]
+  if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+    [ -x /usr/local/src/monero/build/release/bin/monerod ]
+    return
+  fi
+  [ -x /usr/local/src/monero/build/release/bin/monerod ] &&
+    [ -r build/release/.moneroocean-build-commit ] &&
+    [ "$(cat build/release/.moneroocean-build-commit)" = "$(git rev-parse HEAD)" ]
 }
 
 ensure_tari_user() {
@@ -426,9 +437,7 @@ EOF
 chown -R www-data:www-data /var/www
 chmod g+s /var/www
 systemctl restart nginx
-clone_repo_once https://github.com/monero-project/monero.git /usr/local/src/monero
-cd /usr/local/src/monero
-git checkout v0.18.4.6
+checkout_repo_ref "$MONERO_REPO_URL" /usr/local/src/monero "$MONERO_RELEASE_TAG"
 retry_command git submodule update --init
 if ! monero_build_is_current; then
   rm -rf build
@@ -488,7 +497,7 @@ After=network.target
 [Service]
 # Tari SubmitBlock JSON bodies can exceed grpc-json-proxy's 1 MiB default when
 # the block carries a large proof body.
-ExecStart=/bin/bash -c "(sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142 --max-body-bytes 16777216) & (sleep 2; node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142 --max-body-bytes 16777216) & /usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
+ExecStart=/bin/bash -c "(sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142 --max-body-bytes 16777216) & (sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142 --max-body-bytes 16777216) & /usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
 Restart=always
 User=$TARI_USER
 Environment=HOME=$TARI_HOME
@@ -580,7 +589,9 @@ source /home/user/.nvm/nvm.sh
 retry_command nvm install $NODEJS_VERSION
 NODEJS_VERSION="\$(nvm version "$NODEJS_VERSION")"
 nvm alias default "\$NODEJS_VERSION"
-test -x /usr/bin/node || sudo ln -s "\$(command -v node)" /usr/bin/node
+NODE_BINARY="\$(command -v node)"
+sudo install -m 755 "\$NODE_BINARY" /usr/local/bin/node
+sudo ln -sfn /usr/local/bin/node /usr/bin/node
 test -x /usr/bin/npm || sudo ln -s "\$(command -v npm)" /usr/bin/npm
 sudo chown -R user:user /usr/local/src/grpc-json-proxy
 cd /usr/local/src/grpc-json-proxy
