@@ -5,6 +5,7 @@ const test = require("node:test");
 const {
     MAIN_PORT,
     ETH_PORT,
+    ERG_PORT,
     MAIN_WALLET,
     ETH_WALLET,
     JsonLineClient,
@@ -139,6 +140,97 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
         global.coinFuncs.portBlobType = originalPortBlobType;
         await runtime.stop();
     }
+});
+
+test("erg authorization declares identity difficulty before its unchanged nine-field job", async () => {
+    const { runtime } = await startHarness({ includeErg: true });
+    const socket = {};
+
+    try {
+        runtime.getState().activeBlockTemplates.ERG.hash = "34".repeat(32);
+        invokePoolMethod({
+            socket,
+            id: 114,
+            method: "mining.subscribe",
+            params: ["HarnessErgMiner/1.0"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 115,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "erg-style-worker~autolykos2"],
+            portData: global.config.ports[1]
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const ergJob = miner.validJobs.toarray().find((job) => job.coin === "ERG");
+        const expectedTarget = (global.coinFuncs.baseDiff() / BigInt(ergJob.difficulty)).toString();
+
+        assert.deepEqual(authorizeReply.replies, [{ error: null, result: true }]);
+        assert.equal(authorizeReply.pushes.length, 2);
+        assert.deepEqual(authorizeReply.pushes[0], {
+            method: "mining.set_difficulty",
+            params: [1]
+        });
+        assert.equal(authorizeReply.pushes[1].method, "mining.notify");
+        assert.deepEqual(authorizeReply.pushes[1].params, [
+            authorizeReply.pushes[1].params[0],
+            301,
+            "34".repeat(32),
+            "",
+            "",
+            2,
+            expectedTarget,
+            "",
+            true
+        ]);
+        assert.equal(authorizeReply.pushes[1].params.length, 9);
+        assert.equal(miner.last_diff, 1);
+
+        runtime.setTemplate(createBaseTemplate({
+            coin: "ERG",
+            port: ERG_PORT,
+            idHash: "erg-template-push-2",
+            height: 302
+        }));
+
+        assert.equal(authorizeReply.pushes.length, 3);
+        assert.equal(authorizeReply.pushes[2].method, "mining.notify");
+        assert.equal(authorizeReply.pushes[2].params.length, 9);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("eth and erg job pushes share and restore the client's current stratum difficulty", () => {
+    const ethPool = global.coinFuncs.getPoolSettings(8545);
+    const ergPool = global.coinFuncs.getPoolSettings(9053);
+    const pushes = [];
+    const miner = {
+        last_diff: 2,
+        pushMessage(message) { pushes.push(message); }
+    };
+    const ergJob = ["erg-job", 301, "34".repeat(32), "", "", 2, "123", "", true];
+
+    ergPool.pushJob({ miner, job: ergJob, params: { algo_name: "autolykos2" } });
+    assert.deepEqual(pushes.map((message) => [message.method, message.params]), [
+        ["mining.set_difficulty", [1]],
+        ["mining.notify", ergJob]
+    ]);
+    assert.equal(miner.last_diff, 1);
+
+    pushes.length = 0;
+    ethPool.pushJob({
+        miner,
+        job: ["eth-job", "11".repeat(32), "22".repeat(32), true, 3 * 0x100000000],
+        params: { algo_name: "ethash" }
+    });
+    assert.deepEqual(pushes.map((message) => [message.method, message.params]), [
+        ["mining.set_difficulty", [3]],
+        ["mining.notify", ["eth-job", "11".repeat(32), "22".repeat(32), true]]
+    ]);
+    assert.equal(miner.last_diff, 3);
 });
 
 test("ethereum-stratum subscribe omits nonce suffix size for nicehash-style clients", async () => {

@@ -4,6 +4,7 @@ const net = require("node:net");
 const {
     MAIN_PORT,
     ETH_PORT,
+    ERG_PORT,
     MAIN_WALLET,
     REAL_PROTOS,
     createSupportHarness,
@@ -241,12 +242,19 @@ async function startHarness(extra = {}) {
         createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
         createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 })
     ];
+    const coinHashFactors = { ETH: 1 };
+    if (extra.includeErg) {
+        templates.push(createBaseTemplate({ coin: "ERG", port: ERG_PORT, idHash: "erg-template-1", height: 301 }));
+        coinHashFactors.ERG = 1;
+    }
+    const runtimeOptions = { ...extra };
+    delete runtimeOptions.includeErg;
 
     const runtime = await poolModule.startTestRuntime({
         ports: global.config.ports,
         templates,
-        coinHashFactors: { ETH: 1 },
-        ...extra
+        coinHashFactors,
+        ...runtimeOptions
     });
 
     return {

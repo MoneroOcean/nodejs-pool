@@ -24,11 +24,13 @@ function allocateTestPorts() {
         (async () => {
             const main = await open();
             const eth = await open();
-            const ports = [main.address().port, eth.address().port];
+            const erg = await open();
+            const ports = [main.address().port, eth.address().port, erg.address().port];
             process.stdout.write(JSON.stringify(ports));
             await Promise.all([
                 new Promise((resolve) => main.close(resolve)),
-                new Promise((resolve) => eth.close(resolve))
+                new Promise((resolve) => eth.close(resolve)),
+                new Promise((resolve) => erg.close(resolve))
             ]);
         })().catch((error) => {
             console.error(error.stack || error.message);
@@ -45,14 +47,14 @@ function allocateTestPorts() {
     }
 
     const ports = JSON.parse(result.stdout);
-    if (!Array.isArray(ports) || ports.length !== 2) {
+    if (!Array.isArray(ports) || ports.length !== 3) {
         throw new Error(`Unexpected free test port allocation result: ${result.stdout}`);
     }
 
     return ports;
 }
 
-const [MAIN_PORT, ETH_PORT] = allocateTestPorts();
+const [MAIN_PORT, ETH_PORT, ERG_PORT] = allocateTestPorts();
 const MAIN_SUBMIT_PORT = 18083;
 const DUAL_SUBMIT_PORT = 18081;
 const MAIN_WALLET = "4".repeat(95);
@@ -67,6 +69,7 @@ const ETH_MIXHASH_BUFFER = Buffer.from("cd".repeat(32), "hex");
 const REAL_MAIN_PROFILE_PORT = 18081;
 const REAL_RAVEN_PROFILE_PORT = 8766;
 const REAL_ETH_PROFILE_PORT = 8545;
+const REAL_ERG_PROFILE_PORT = 9053;
 const REAL_PROTOS = protobuf(fs.readFileSync(path.join(__dirname, "..", "..", "..", "lib", "common", "data.proto")));
 const TEST_RAVEN_ADDRESS = "16Jswqk47s9PUcyCc88MMVwzgvHPvtEpf";
 
@@ -208,19 +211,23 @@ function createCoinFuncsStub() {
     const realCoinFuncs = new Coin({});
     const portToCoin = {
         [MAIN_PORT]: "",
-        [ETH_PORT]: "ETH"
+        [ETH_PORT]: "ETH",
+        [ERG_PORT]: "ERG"
     };
     const coinToPort = {
         "": MAIN_PORT,
-        ETH: ETH_PORT
+        ETH: ETH_PORT,
+        ERG: ERG_PORT
     };
     const portToAlgo = {
         [MAIN_PORT]: "rx/0",
-        [ETH_PORT]: "kawpow"
+        [ETH_PORT]: "kawpow",
+        [ERG_PORT]: "autolykos2"
     };
     const portToBlob = {
         [MAIN_PORT]: 0,
-        [ETH_PORT]: 101
+        [ETH_PORT]: 101,
+        [ERG_PORT]: 103
     };
     const ravenHashesPerDifficulty = realCoinFuncs.getPoolHashesPerDifficulty(REAL_RAVEN_PROFILE_PORT);
 
@@ -235,6 +242,7 @@ function createCoinFuncsStub() {
         const blobType = resolvePortBlobType(context, port, version);
         if (blobType === 102) return REAL_ETH_PROFILE_PORT;
         if (blobType === 101) return REAL_RAVEN_PROFILE_PORT;
+        if (blobType === 103) return REAL_ERG_PROFILE_PORT;
         return port;
     }
 
@@ -289,7 +297,7 @@ function createCoinFuncsStub() {
             return 100;
         },
         getCOINS() {
-            return ["ETH"];
+            return ["ETH", "ERG"];
         },
         getMM_PORTS() {
             return {};
@@ -356,6 +364,7 @@ function createCoinFuncsStub() {
             else if ("kawpow" in algosPerf) coinPerf.ETH = algosPerf.kawpow * ravenHashesPerDifficulty;
             if ("ethash" in algosPerf) coinPerf.ETH = algosPerf.ethash;
             if ("etchash" in algosPerf) coinPerf.ETH = algosPerf.etchash;
+            if ("autolykos2" in algosPerf) coinPerf.ERG = algosPerf.autolykos2;
             return coinPerf;
         },
         getPoolHashesPerDifficulty(key) {
@@ -524,6 +533,7 @@ module.exports = {
     MAIN_SUBMIT_PORT,
     DUAL_SUBMIT_PORT,
     ETH_PORT,
+    ERG_PORT,
     MAIN_WALLET,
     ETH_WALLET,
     ALT_WALLET,
