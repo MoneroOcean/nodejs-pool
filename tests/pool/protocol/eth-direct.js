@@ -142,12 +142,14 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
     }
 });
 
-test("erg authorization declares identity difficulty before its unchanged nine-field job", async () => {
+test("erg authorization declares the network/share ratio before its nine-field job", async () => {
     const { runtime } = await startHarness({ includeErg: true });
     const socket = {};
+    const networkDifficulty = 100000000000;
 
     try {
         runtime.getState().activeBlockTemplates.ERG.hash = "34".repeat(32);
+        runtime.getState().activeBlockTemplates.ERG.difficulty = networkDifficulty;
         invokePoolMethod({
             socket,
             id: 114,
@@ -165,13 +167,15 @@ test("erg authorization declares identity difficulty before its unchanged nine-f
         });
         const miner = runtime.getState().activeMiners.get(socket.miner_id);
         const ergJob = miner.validJobs.toarray().find((job) => job.coin === "ERG");
-        const expectedTarget = (global.coinFuncs.baseDiff() / BigInt(ergJob.difficulty)).toString();
+        const expectedDifficulty = networkDifficulty / Math.floor(ergJob.difficulty);
+        const expectedNetworkTarget = (global.coinFuncs.baseDiff() / BigInt(networkDifficulty)).toString();
+        const expectedShareTarget = global.coinFuncs.baseDiff() / BigInt(Math.floor(ergJob.difficulty));
 
         assert.deepEqual(authorizeReply.replies, [{ error: null, result: true }]);
         assert.equal(authorizeReply.pushes.length, 2);
         assert.deepEqual(authorizeReply.pushes[0], {
             method: "mining.set_difficulty",
-            params: [1]
+            params: [expectedDifficulty]
         });
         assert.equal(authorizeReply.pushes[1].method, "mining.notify");
         assert.deepEqual(authorizeReply.pushes[1].params, [
@@ -181,23 +185,76 @@ test("erg authorization declares identity difficulty before its unchanged nine-f
             "",
             "",
             2,
-            expectedTarget,
+            expectedNetworkTarget,
             "",
             true
         ]);
         assert.equal(authorizeReply.pushes[1].params.length, 9);
-        assert.equal(miner.last_diff, 1);
+        const effectiveTarget = Number(authorizeReply.pushes[1].params[6]) * expectedDifficulty;
+        assert.ok(Math.abs(effectiveTarget / Number(expectedShareTarget) - 1) < 1e-12);
+        assert.equal(miner.last_diff, expectedDifficulty);
 
-        runtime.setTemplate(createBaseTemplate({
+        const nextTemplate = createBaseTemplate({
             coin: "ERG",
             port: ERG_PORT,
             idHash: "erg-template-push-2",
             height: 302
-        }));
+        });
+        nextTemplate.difficulty = networkDifficulty;
+        runtime.setTemplate(nextTemplate);
 
         assert.equal(authorizeReply.pushes.length, 3);
         assert.equal(authorizeReply.pushes[2].method, "mining.notify");
         assert.equal(authorizeReply.pushes[2].params.length, 9);
+
+        miner.newDiffToSet = 80000000;
+        miner.sendSameCoinJob();
+
+        assert.deepEqual(authorizeReply.pushes[3], {
+            method: "mining.set_difficulty",
+            params: [networkDifficulty / 80000000]
+        });
+        assert.equal(authorizeReply.pushes[4].method, "mining.notify");
+        assert.equal(authorizeReply.pushes[4].params[6], expectedNetworkTarget);
+        assert.equal(miner.last_diff, networkDifficulty / 80000000);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("erg keeps identity difficulty and the final target for NBMiner", async () => {
+    const { runtime } = await startHarness({ includeErg: true });
+    const socket = {};
+    const networkDifficulty = 100000000000;
+
+    try {
+        runtime.getState().activeBlockTemplates.ERG.hash = "34".repeat(32);
+        runtime.getState().activeBlockTemplates.ERG.difficulty = networkDifficulty;
+        invokePoolMethod({
+            socket,
+            id: 116,
+            method: "mining.subscribe",
+            params: ["NBMiner/42.3"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 117,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "nbminer-worker~autolykos2"],
+            portData: global.config.ports[1]
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const ergJob = miner.validJobs.toarray().find((job) => job.coin === "ERG");
+        const expectedShareTarget = (global.coinFuncs.baseDiff() / BigInt(Math.floor(ergJob.difficulty))).toString();
+
+        assert.deepEqual(authorizeReply.pushes[0], {
+            method: "mining.set_difficulty",
+            params: [1]
+        });
+        assert.equal(authorizeReply.pushes[1].params[6], expectedShareTarget);
+        assert.equal(authorizeReply.pushes[1].params.length, 9);
     } finally {
         await runtime.stop();
     }
@@ -211,14 +268,21 @@ test("eth and erg job pushes share and restore the client's current stratum diff
         last_diff: 2,
         pushMessage(message) { pushes.push(message); }
     };
-    const ergJob = ["erg-job", 301, "34".repeat(32), "", "", 2, "123", "", true];
+    const ergJob = ergPool.buildJobPayload({
+        blockTemplate: { difficulty: 400, hash: "34".repeat(32), height: 301 },
+        coinDiff: 100,
+        coinFuncs: global.coinFuncs,
+        miner,
+        newJob: { id: "erg-job" },
+        toBigInt: BigInt
+    });
 
     ergPool.pushJob({ miner, job: ergJob, params: { algo_name: "autolykos2" } });
     assert.deepEqual(pushes.map((message) => [message.method, message.params]), [
-        ["mining.set_difficulty", [1]],
+        ["mining.set_difficulty", [4]],
         ["mining.notify", ergJob]
     ]);
-    assert.equal(miner.last_diff, 1);
+    assert.equal(miner.last_diff, 4);
 
     pushes.length = 0;
     ethPool.pushJob({
