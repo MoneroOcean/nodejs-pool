@@ -13,7 +13,7 @@ require("./support.js");
 require("./local_comms.js");
 require("./common/callbacks.js");
 require("./live_helpers.js");
-require("./live.js");
+if (process.env.NODEJS_POOL_RUN_LIVE_TESTS === "1") require("./live.js");
 require("./payments.js");
 require("./payment_batch_unlock.js");
 require("./manage_scripts.js");

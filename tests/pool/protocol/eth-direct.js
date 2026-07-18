@@ -132,8 +132,10 @@ test("eth-style direct miners receive mining.set_difficulty and mining.notify pu
         assert.equal(authorizeReply.pushes.length, 2);
         assert.equal(authorizeReply.pushes[0].method, "mining.set_difficulty");
         assert.equal(typeof authorizeReply.pushes[0].params[0], "number");
+        assert.equal(authorizeReply.pushes[0].id, null);
         assert.equal(authorizeReply.pushes[1].method, "mining.notify");
         assert.equal(Array.isArray(authorizeReply.pushes[1].params), true);
+        assert.equal(authorizeReply.pushes[1].id, null);
         assert.equal(miner.algos.ethash, 1);
         assert.equal("kawpow" in miner.algos, false);
     } finally {
@@ -699,6 +701,7 @@ test("eth-style template refresh sends mining.notify without repeating mining.se
 
         assert.equal(authorizeReply.pushes.length, 3);
         assert.equal(authorizeReply.pushes[2].method, "mining.notify");
+        assert.equal(authorizeReply.pushes[2].id, null);
     } finally {
         global.coinFuncs.portBlobType = originalPortBlobType;
         await runtime.stop();
