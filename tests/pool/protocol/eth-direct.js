@@ -257,6 +257,63 @@ test("erg keeps identity difficulty and the final target for NBMiner", async () 
         });
         assert.equal(authorizeReply.pushes[1].params[6], expectedShareTarget);
         assert.equal(authorizeReply.pushes[1].params.length, 9);
+        assert.equal(miner.last_diff, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("erg keeps identity difficulty and the final target for NiceHash", async () => {
+    const { runtime } = await startHarness({ includeErg: true });
+    const socket = {};
+    const networkDifficulty = 100000000000;
+
+    try {
+        runtime.getState().activeBlockTemplates.ERG.hash = "34".repeat(32);
+        runtime.getState().activeBlockTemplates.ERG.difficulty = networkDifficulty;
+        invokePoolMethod({
+            socket,
+            id: 118,
+            method: "mining.subscribe",
+            params: ["NiceHash/1.0.0"],
+            portData: global.config.ports[1]
+        });
+
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 119,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "nicehash-worker~autolykos2"],
+            portData: global.config.ports[1]
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const ergJob = miner.validJobs.toarray().find((job) => job.coin === "ERG");
+        const expectedShareTarget = (global.coinFuncs.baseDiff() / BigInt(Math.floor(ergJob.difficulty))).toString();
+
+        assert.deepEqual(authorizeReply.pushes[0], {
+            method: "mining.set_difficulty",
+            params: [1],
+            id: null
+        });
+        assert.equal(authorizeReply.pushes[1].method, "mining.notify");
+        assert.equal(authorizeReply.pushes[1].id, null);
+        assert.equal(authorizeReply.pushes[1].params[6], expectedShareTarget);
+        assert.equal(authorizeReply.pushes[1].params.length, 9);
+        assert.equal(miner.last_diff, 1);
+
+        const nextTemplate = createBaseTemplate({
+            coin: "ERG",
+            port: ERG_PORT,
+            idHash: "nicehash-erg-template-push-2",
+            height: 302
+        });
+        nextTemplate.difficulty = networkDifficulty;
+        runtime.setTemplate(nextTemplate);
+
+        assert.equal(authorizeReply.pushes.length, 3);
+        assert.equal(authorizeReply.pushes[2].method, "mining.notify");
+        assert.equal(authorizeReply.pushes[2].id, null);
+        assert.equal(authorizeReply.pushes[2].params.length, 9);
     } finally {
         await runtime.stop();
     }
