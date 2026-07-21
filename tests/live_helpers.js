@@ -11,6 +11,7 @@ const {
     DEFAULT_SRBMINER_GPU_INTENSITY,
     DEFAULT_SRBMINER_CN_GPU_INTENSITY
 } = require("./live/shared.js");
+const { resolveXmrigAsset } = require("./live/downloads.js");
 const {
     buildSrbMiner,
     buildSrbMinerEthProxy,
@@ -33,6 +34,58 @@ const {
 } = require("./live/skips.js");
 
 test.describe("live miner helpers", { concurrency: false }, () => {
+    test("XMRig release resolver prefers unified compatible Linux assets", () => {
+        const release = {
+            assets: [
+                { name: "xmrig-v6.26.0-mo4-lin.tar.gz" },
+                { name: "xmrig-v6.26.0-mo4-lin-compat.tar.gz" }
+            ]
+        };
+
+        assert.equal(
+            resolveXmrigAsset(release, "linux", "x64").name,
+            "xmrig-v6.26.0-mo4-lin-compat.tar.gz"
+        );
+    });
+
+    test("XMRig release resolver keeps legacy artifact compatibility", () => {
+        const release = {
+            assets: [
+                { name: "xmrig-v6.26.0-mo3-lin64.tar.gz" },
+                { name: "xmrig-v6.26.0-mo3-lin64-compat.tar.gz" },
+                { name: "xmrig-v6.26.0-mo3-mac64.tar.gz" },
+                { name: "xmrig-v6.26.0-mo3-win64.zip" }
+            ]
+        };
+
+        assert.equal(
+            resolveXmrigAsset(release, "linux", "x64").name,
+            "xmrig-v6.26.0-mo3-lin64-compat.tar.gz"
+        );
+        assert.equal(
+            resolveXmrigAsset(release, "darwin", "arm64").name,
+            "xmrig-v6.26.0-mo3-mac64.tar.gz"
+        );
+        assert.equal(
+            resolveXmrigAsset(release, "win32", "x64").name,
+            "xmrig-v6.26.0-mo3-win64.zip"
+        );
+    });
+
+    test("XMRig release resolver recognizes unified macOS and Windows assets", () => {
+        const release = {
+            assets: [
+                { name: "xmrig-v6.26.0-mo4-mac.tar.gz" },
+                { name: "xmrig-v6.26.0-mo4-mac-intel.tar.gz" },
+                { name: "xmrig-v6.26.0-mo4-win.zip" }
+            ]
+        };
+
+        assert.equal(resolveXmrigAsset(release, "darwin", "arm64").name, "xmrig-v6.26.0-mo4-mac.tar.gz");
+        assert.equal(resolveXmrigAsset(release, "darwin", "x64").name, "xmrig-v6.26.0-mo4-mac-intel.tar.gz");
+        assert.equal(resolveXmrigAsset(release, "win32", "x64").name, "xmrig-v6.26.0-mo4-win.zip");
+    });
+
     test("SRBMiner cn/gpu args include conservative stability controls", () => {
         const miner = buildSrbMiner("/tmp/SRBMiner-MULTI");
         const args = miner.buildArgs({

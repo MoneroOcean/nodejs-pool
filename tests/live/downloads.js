@@ -166,25 +166,29 @@ function pickAsset(candidates, predicates) {
     return null;
 }
 
-function resolveXmrigAsset(release) {
+function resolveXmrigAsset(release, platform = process.platform, arch = process.arch) {
     const candidates = release.assets || [];
-    if (process.platform === "linux" && process.arch === "x64") {
+    if (platform === "linux" && arch === "x64") {
         return pickAsset(candidates, [
-            (asset) => asset.name.includes("lin64-compat"),
-            (asset) => asset.name.includes("lin64.tar.gz")
+            (asset) => /-lin(?:64)?-compat\.tar\.gz$/i.test(asset.name),
+            (asset) => /-lin(?:64)?\.tar\.gz$/i.test(asset.name)
         ]);
     }
-    if (process.platform === "darwin" && process.arch === "arm64") {
-        return pickAsset(candidates, [(asset) => asset.name.includes("mac64")]);
-    }
-    if (process.platform === "darwin" && process.arch === "x64") {
+    if (platform === "darwin" && arch === "arm64") {
         return pickAsset(candidates, [
-            (asset) => asset.name.includes("mac-intel"),
-            (asset) => asset.name.includes("mac64")
+            (asset) => /-mac(?:64)?\.tar\.gz$/i.test(asset.name)
         ]);
     }
-    if (process.platform === "win32" && process.arch === "x64") {
-        return pickAsset(candidates, [(asset) => asset.name.includes("win64.zip")]);
+    if (platform === "darwin" && arch === "x64") {
+        return pickAsset(candidates, [
+            (asset) => /-mac-intel\.tar\.gz$/i.test(asset.name),
+            (asset) => /-mac64\.tar\.gz$/i.test(asset.name)
+        ]);
+    }
+    if (platform === "win32" && arch === "x64") {
+        return pickAsset(candidates, [
+            (asset) => /-win(?:64)?\.zip$/i.test(asset.name)
+        ]);
     }
     return null;
 }
@@ -361,6 +365,7 @@ async function ensureMoMinerRoot(config, logger) {
 
 module.exports = {
     runCommand,
+    resolveXmrigAsset,
     ensureXmrigBinary,
     ensureSrbMinerBinary,
     ensureMoMinerRoot
