@@ -497,6 +497,93 @@ test("BlockTemplate uses hash-only fast path for extra-nonce templates without a
     assert.equal(blockTemplate.nextBlobHex(), hash);
 });
 
+test("registered profiles either issue unique per-job work or enable template-wide deduplication", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const registry = loadRegistry();
+    const originalConvertBlob = global.coinFuncs.convertBlob;
+
+    // This test is about the bytes handed to miners, not native parsing for
+    // each coin's block format. Returning a copy lets every registered profile
+    // exercise the common BlockTemplate nonce-allocation branch uniformly.
+    global.coinFuncs.convertBlob = function identityConvertBlob(buffer) {
+        return Buffer.from(buffer);
+    };
+
+    try {
+        for (const profile of registry.profiles) {
+            const coin = typeof profile.coin === "string" ? profile.coin : profile.displayCoin;
+            const poolSettings = profile.pool || {};
+            const templateSettings = profile.template || {};
+            const template = {
+                blockhashing_blob: "11".repeat(96),
+                blocktemplate_blob: "11".repeat(96),
+                coin,
+                difficulty: 100,
+                hash: "22".repeat(32),
+                height: 500,
+                port: profile.port,
+                reserved_offset: 16,
+                seed_hash: "33".repeat(32)
+            };
+
+            if (templateSettings.hashOnly) {
+                delete template.blockhashing_blob;
+                delete template.blocktemplate_blob;
+            }
+
+            // XTM-C's daemon adapter is the only compact-nonce template source.
+            if (profile.coin === "XTM-C") template.bt_nonce_size = 8;
+
+            const blockTemplate = new coinFuncs.BlockTemplate(template);
+            const firstWork = blockTemplate.nextBlobHex();
+            const secondWork = blockTemplate.nextBlobHex();
+            const sharesWorkAcrossJobs = firstWork === secondWork;
+            const hasTemplateGuard = poolSettings.sharedTemplateNonces === true ||
+                poolSettings.sharedTemplateSubmissions === true;
+
+            assert.equal(
+                sharesWorkAcrossJobs && !hasTemplateGuard,
+                false,
+                `${profile.displayCoin} reuses work across job IDs without template-wide deduplication`
+            );
+
+            if (templateSettings.hashOnly || profile.coin === "XTM-C") {
+                assert.equal(sharesWorkAcrossJobs, true, `${profile.displayCoin} should exercise the constant-work test path`);
+                assert.equal(hasTemplateGuard, true, `${profile.displayCoin} constant work must be template-deduplicated`);
+            } else {
+                assert.equal(sharesWorkAcrossJobs, false, `${profile.displayCoin} should issue unique work for each job`);
+            }
+        }
+    } finally {
+        global.coinFuncs.convertBlob = originalConvertBlob;
+    }
+});
+
+test("compact nonce templates stay covered by the work-identity profile matrix", () => {
+    const coinsDirectory = path.resolve(__dirname, "../../../lib/coins");
+    const sourceFiles = [
+        path.join(coinsDirectory, "core/factories.js"),
+        ...fs.readdirSync(coinsDirectory)
+            .filter(function keepCoinSource(filename) { return filename.endsWith(".js"); })
+            .map(function resolveCoinSource(filename) { return path.join(coinsDirectory, filename); })
+    ];
+    const declarations = [];
+
+    for (const sourceFile of sourceFiles) {
+        const source = fs.readFileSync(sourceFile, "utf8");
+        for (const match of source.matchAll(/bt_nonce_size:\s*(\d+)/g)) {
+            declarations.push({
+                file: path.relative(coinsDirectory, sourceFile),
+                nonceSize: Number(match[1])
+            });
+        }
+    }
+
+    assert.deepEqual(declarations, [
+        { file: "core/factories.js", nonceSize: 8 }
+    ]);
+});
+
 test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const hashesPerDifficulty = coinFuncs.getPoolHashesPerDifficulty(19001);
