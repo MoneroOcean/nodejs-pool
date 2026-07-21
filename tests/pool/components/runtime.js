@@ -7,6 +7,7 @@ const createPoolState = require("../../../lib/pool/state.js");
 const createProtocolHandler = require("../../../lib/pool/protocol.js");
 const createServerFactory = require("../../../lib/pool/servers.js");
 const createShareProcessor = require("../../../lib/pool/shares.js");
+const { pool } = require("../../../lib/coins/core/factories.js");
 
 function clearObject(target) {
     for (const key of Object.keys(target)) delete target[key];
@@ -254,7 +255,164 @@ test("eth-style nonces are deduped across miners on the same block template", ()
         assert.deepEqual(replaySubmit.replies, [{ error: "Duplicate share", result: undefined }]);
         assert.equal(shareCalls, 1);
         assert.equal(invalidShareCalls, 1);
-        assert.equal(state.activeBlockTemplates.ETH.sharedNonceSubmissions.has("0008000000000001"), true);
+        assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.has("0008000000000001"), true);
+    } finally {
+        global.config = originalConfig;
+        global.coinFuncs = originalCoinFuncs;
+    }
+});
+
+test("XTM-C proofs are deduped across jobs on the same block template", () => {
+    const originalConfig = global.config;
+    const originalCoinFuncs = global.coinFuncs;
+
+    try {
+        global.config = {
+            pool: {
+                minerThrottleShareWindow: 10,
+                minerThrottleSharePerSec: 1000,
+                trustedMiners: false,
+                targetTime: 30
+            }
+        };
+        const xtmCPool = pool.xtmC();
+        const xtmCProfile = { pool: xtmCPool };
+        global.coinFuncs = {
+            getJobProfile(job) {
+                return job && job.blob_type_num === 107 ? xtmCProfile : { pool: {} };
+            },
+            nonceSize() {
+                return 8;
+            },
+            c29ProofSize() {
+                return 42;
+            }
+        };
+
+        assert.equal(xtmCPool.sharedTemplateNonces, false);
+        assert.equal(xtmCPool.sharedTemplateSubmissions, true);
+
+        const stateTools = createPoolState();
+        const { state, retention, touchTimedEntry } = stateTools;
+        state.activeBlockTemplates["XTM-C"] = {
+            idHash: "xtm-c-template-1",
+            timeCreated: Date.now()
+        };
+        state.lastCoinHashFactorMM["XTM-C"] = 1;
+
+        let shareCalls = 0;
+        let invalidShareCalls = 0;
+        const protocolHandler = createProtocolHandler({
+            debug() {},
+            retention,
+            state,
+            touchTimedEntry,
+            utils: {
+                getNewId() {
+                    return "unused";
+                },
+                getNewEthExtranonceId() {
+                    return 1;
+                },
+                ethExtranonce() {
+                    return "abcd";
+                }
+            },
+            createMiner() {
+                throw new Error("createMiner should not be called during direct submit tests");
+            },
+            addProxyMiner() {
+                return true;
+            },
+            adjustMinerDiff() {
+                return false;
+            },
+            shareProcessor: {
+                processShare(_miner, _job, _blockTemplate, _params, callback) {
+                    shareCalls += 1;
+                    callback(true);
+                }
+            },
+            removeMiner() {},
+            processSend() {}
+        });
+
+        const jobs = ["xtm-job-a", "xtm-job-b"].map(function createJob(id) {
+            return {
+                id,
+                coin: "XTM-C",
+                blob_type_num: 107,
+                blockHash: "xtm-c-template-1",
+                difficulty: 1,
+                coinHashFactor: 1,
+                submissions: new Map()
+            };
+        });
+        const miner = {
+            id: "xtm-miner",
+            payout: "xtm-wallet",
+            logString: "xtm-wallet:worker",
+            eth_extranonce: "abcd",
+            proxy: false,
+            validJobs: {
+                toarray() {
+                    return jobs;
+                }
+            },
+            hasSubmittedValidShare: false,
+            invalidJobIdCount: 0,
+            touchProtocolActivity() {},
+            touchValidShare() {
+                miner.hasSubmittedValidShare = true;
+            },
+            checkBan() {
+                return false;
+            },
+            storeInvalidShare() {
+                invalidShareCalls += 1;
+            },
+            sendSameCoinJob() {}
+        };
+        state.activeMiners.set(miner.id, miner);
+
+        function submitShare(id, jobId, nonce, proof) {
+            const replies = [];
+            protocolHandler(
+                { miner_id: miner.id },
+                id,
+                "submit",
+                {
+                    id: miner.id,
+                    job_id: jobId,
+                    nonce,
+                    pow: proof
+                },
+                "127.0.0.2",
+                { port: 39002, portType: "pplns" },
+                function onReply(error, result) {
+                    replies.push({ error, result });
+                },
+                function onFinal() {},
+                function onPush() {}
+            );
+            return replies;
+        }
+
+        const firstProof = Array.from({ length: 42 }, function proofEdge(_, index) { return index + 1; });
+        const secondProof = firstProof.map(function nextProofEdge(edge) { return edge + 100; });
+        const firstSubmit = submitShare("submit-a", jobs[0].id, "abcd000000000001", firstProof);
+        const replaySubmit = submitShare("submit-b", jobs[1].id, "abcd000000000001", firstProof);
+        const freshSubmit = submitShare("submit-c", jobs[1].id, "abcd000000000002", secondProof);
+
+        assert.deepEqual(firstSubmit, [{ error: null, result: true }]);
+        assert.deepEqual(replaySubmit, [{ error: "Duplicate share", result: undefined }]);
+        assert.deepEqual(freshSubmit, [{ error: null, result: true }]);
+        assert.equal(shareCalls, 2);
+        assert.equal(invalidShareCalls, 1);
+        assert.equal(jobs[0].submissions.has(firstProof.join(":")), true);
+        assert.equal(jobs[1].submissions.has(firstProof.join(":")), false);
+        assert.equal(jobs[1].submissions.has(secondProof.join(":")), true);
+        assert.equal(state.activeBlockTemplates["XTM-C"].templateSubmissions.has(firstProof.join(":")), true);
     } finally {
         global.config = originalConfig;
         global.coinFuncs = originalCoinFuncs;
