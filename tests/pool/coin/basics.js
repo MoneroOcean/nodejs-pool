@@ -587,6 +587,7 @@ test("compact nonce templates stay covered by the work-identity profile matrix",
 test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const hashesPerDifficulty = coinFuncs.getPoolHashesPerDifficulty(19001);
+    const xtmCHashesPerDifficulty = coinFuncs.getPoolHashesPerDifficulty(18148);
     const legacyPerf = coinFuncs.convertAlgosToCoinPerf({
         "rx/0": 100,
         "argon2/chukwav2": 200,
@@ -600,11 +601,12 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
     const perHashFactor = legacyFactor / hashesPerDifficulty;
 
     assert.ok(hashesPerDifficulty > 0x100000000);
+    assert.equal(xtmCHashesPerDifficulty, 42);
     assert.equal(legacyPerf[""], 100);
     assert.equal(legacyPerf.TRTL, 200);
     assert.equal(legacyPerf.LTHN, 200);
     assert.equal(legacyPerf["SAL"], 100);
-    assert.equal(legacyPerf["XTM-C"], 300);
+    assert.equal(legacyPerf["XTM-C"], 300 * xtmCHashesPerDifficulty);
     assert.equal(legacyPerf.RVN, 400 * hashesPerDifficulty);
     assert.equal(legacyPerf.XNA, 400 * hashesPerDifficulty);
     assert.equal(legacyPerf["ETC"], 500);
@@ -612,6 +614,10 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
     assert.equal(rawPerf.XNA, 400);
     assert.equal(legacyPerf.RVN * perHashFactor, equivalentRawPerf.RVN * perHashFactor);
     assert.ok(Math.abs(2 * hashesPerDifficulty * perHashFactor - 2 * legacyFactor) < 1e-9);
+    // Scaling the advertised c29 speed and inversely scaling its profit factor
+    // leaves coin selection and normalized share rewards unchanged.
+    assert.equal(legacyPerf["XTM-C"] * (legacyFactor / xtmCHashesPerDifficulty), 300 * legacyFactor);
+    assert.equal(2 * xtmCHashesPerDifficulty * (legacyFactor / xtmCHashesPerDifficulty), 2 * legacyFactor);
     assert.equal(coinFuncs.normalizeMinerAlgos({ kawpow1: 1 }).kawpow, 1);
 });
 
