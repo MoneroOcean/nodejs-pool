@@ -62,11 +62,29 @@ test("xmr helpers keep bigint conversions stable and calculate rewards", () => {
     assert.equal(typeof ethReward, "number");
     assert.ok(Math.abs(ethReward - 2000000000000000000) <= 512);
 
+    const reemissionToken = "d9a2cc8a09abfaed87afacfbb7daee79a6b26f10c6613fc13d3f3953e5521d1a";
     const ergReward = helpers.calcErgReward(100, [
-        { outputs: [{}, { creationHeight: 100, value: 15000000001 }] },
+        { outputs: [{}, { creationHeight: 100, value: 15000000001, assets: [{ tokenId: reemissionToken, amount: 12000000000 }] }] },
         { outputs: [{ creationHeight: 100, value: 25 }] }
     ]);
     assert.equal(ergReward, 3000000026);
+
+    const postBoundaryErgReward = helpers.calcErgReward(101, [
+        { outputs: [{}, { creationHeight: 101, value: 12000000000, assets: [{ tokenId: reemissionToken, amount: 9000000000 }] }] },
+        { outputs: [{ creationHeight: 101, value: 34700000 }] }
+    ]);
+    assert.equal(postBoundaryErgReward, 3034700000);
+    assert.equal(helpers.calcErgReward(101, [
+        { outputs: [{}, { creationHeight: 101, value: 12000000000, assets: [{ tokenId: reemissionToken, amount: 3000000000 }] }] }
+    ]), null);
+    assert.equal(helpers.calcErgReward(101, [
+        { outputs: [{}, { creationHeight: 101, value: 12000000000, assets: [] }] }
+    ]), null);
+
+    assert.equal(helpers.calcEtcBaseReward(5000000), 5);
+    assert.equal(helpers.calcEtcBaseReward(5000001), 4);
+    assert.equal(helpers.calcEtcBaseReward(25000000), 2.048);
+    assert.equal(helpers.calcEtcBaseReward(25000001), 1.6384);
 });
 
 test("pool state thread names use short master and worker prefixes", () => {

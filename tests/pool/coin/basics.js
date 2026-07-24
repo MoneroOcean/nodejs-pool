@@ -921,6 +921,82 @@ test("eth-family true orphan is tagged confirmations=-1 (not canonical, no uncle
     assert.equal(result.body.reward, null);
 });
 
+test("etc rewards follow the current five-million-block emission era", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const etcRpc = coinFuncs.getRpcSettings("ETC");
+    const result = await new Promise((resolve) => {
+        etcRpc.getBlockHeaderById({
+            blockId: 25000001,
+            callback(err, header) { resolve({ err, header }); },
+            noErrorReport: true,
+            port: 8645,
+            runtime: {
+                support: {
+                    rpcPortDaemon2(_port, _method, body, callback) {
+                        assert.equal(body.method, "eth_getBlockByNumber");
+                        callback({
+                            result: {
+                                baseFeePerGas: null,
+                                gasUsed: "0x0",
+                                hash: "0xcanonical",
+                                number: "0x17d7841",
+                                transactions: [],
+                                uncles: []
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    });
+    assert.equal(result.err, null);
+    assert.equal(result.header.reward, 1638400000000000000);
+});
+
+test("etc uncle rewards use one thirty-second of the current era reward", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const etcRpc = coinFuncs.getRpcSettings("ETC");
+    let headerLookups = 0;
+    const result = await new Promise((resolve) => {
+        etcRpc.getAnyBlockHeaderByHash({
+            blockHash: "uncle",
+            callback(err, header) { resolve({ err, header }); },
+            isOurBlock: true,
+            noErrorReport: true,
+            port: 8645,
+            runtime: {
+                coinFuncs: {
+                    getPortBlockHeaderByID(_port, _height, callback) {
+                        headerLookups += 1;
+                        callback(null, {
+                            hash: "0xcanonical",
+                            number: "0x17d7842",
+                            uncles: headerLookups > 1 ? ["0xuncle"] : []
+                        });
+                    }
+                },
+                support: {
+                    rpcPortDaemon2(_port, _method, body, callback) {
+                        if (body.method === "eth_getUncleByBlockNumberAndIndex") {
+                            return callback({ result: { number: "0x17d7841" } });
+                        }
+                        return callback({
+                            result: {
+                                hash: "0xuncle",
+                                number: "0x17d7841",
+                                transactions: [],
+                                uncles: []
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    });
+    assert.equal(result.err, null);
+    assert.equal(result.header.reward, 51200000000000000);
+});
+
 test("erg true orphan is tagged confirmations=-1 (a different canonical id holds the height)", async () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const ergRpc = coinFuncs.getRpcSettings("ERG");
@@ -943,6 +1019,44 @@ test("erg true orphan is tagged confirmations=-1 (a different canonical id holds
     assert.equal(result.err, null);
     assert.equal(result.header.confirmations, -1);
     assert.equal(result.header.reward, null);
+});
+
+test("erg reward validation fails closed when daemon re-emission data disagrees", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const ergRpc = coinFuncs.getRpcSettings("ERG");
+    const result = await new Promise((resolve) => {
+        ergRpc.getAnyBlockHeaderByHash({
+            blockHash: "canonical-id",
+            callback(err, header) { resolve({ err, header }); },
+            noErrorReport: true,
+            port: 9053,
+            runtime: {
+                support: {
+                    rpcPortDaemon2(_port, rpcPath, _body, callback) {
+                        if (String(rpcPath).startsWith("blocks/at/")) return callback(["canonical-id"]);
+                        return callback({
+                            header: { id: "canonical-id", height: 100 },
+                            blockTransactions: {
+                                transactions: [{
+                                    outputs: [{}, {
+                                        assets: [{
+                                            amount: 3000000000,
+                                            tokenId: "d9a2cc8a09abfaed87afacfbb7daee79a6b26f10c6613fc13d3f3953e5521d1a"
+                                        }],
+                                        creationHeight: 100,
+                                        value: 12000000000
+                                    }]
+                                }]
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    });
+    assert.equal(result.err, true);
+    assert.equal(result.header.reward, null);
+    assert.equal(result.header.errorSource, "erg_reward_validation");
 });
 
 test("blob helpers preserve special nonce sizes, proof sizes, and wire names for pool families", () => {
