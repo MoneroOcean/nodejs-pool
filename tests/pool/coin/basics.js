@@ -602,6 +602,9 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
 
     assert.ok(hashesPerDifficulty > 0x100000000);
     assert.equal(xtmCHashesPerDifficulty, 42);
+    assert.equal(coinFuncs.getPoolWorkDifficulty(19001, 100), Math.round(100 * hashesPerDifficulty));
+    assert.equal(coinFuncs.getPoolWorkDifficulty(18148, 100), 4200);
+    assert.equal(coinFuncs.getPoolWorkDifficulty(18081, 100), 100);
     assert.equal(legacyPerf[""], 100);
     assert.equal(legacyPerf.TRTL, 200);
     assert.equal(legacyPerf.LTHN, 200);

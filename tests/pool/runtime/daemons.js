@@ -873,6 +873,10 @@ test("successful alt-chain block candidates are stored as alt blocks", async () 
         assert.equal(submitReply.result, true);
         assert.equal(database.altBlocks.length, 1);
         assert.equal(database.altBlocks[0].payload.port, ETH_PORT);
+        assert.equal(
+            Math.round(database.altBlocks[0].payload.difficulty),
+            global.coinFuncs.getPoolWorkDifficulty(ETH_PORT, 5)
+        );
         assert.equal(global.support.rpcPortDaemon2Calls.length >= 1, true);
         assert.equal(global.support.rpcPortDaemonCalls.length, 0);
         assert.equal(global.support.rpcPortDaemon2Calls[0].method, "");
