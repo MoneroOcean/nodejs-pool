@@ -173,13 +173,16 @@ function createTestEnvironment(options = {}) {
             return options.ports || [18000, 18081];
         },
         algoShortTypeStr(port) {
-            return Number(port) === 18000 ? "rx/0" : "kawpow";
+            return Number(port) === 18000 || Number(port) === 18144 ? "rx/0" : "kawpow";
         },
         PORT2COIN(port) {
-            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : "RVN";
+            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : Number(port) === 18144 ? "XTM" : "RVN";
         },
         PORT2COIN_FULL(port) {
-            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : "RVN";
+            return Number(port) === 18000 || Number(port) === 18081 ? "XMR" : Number(port) === 18144 ? "XTM" : "RVN";
+        },
+        getPoolProfile(port) {
+            return Number(port) === 18081 ? { pool: { dualSubmitDisplayCoin: "XTM", dualSubmitReportPort: 18144 } } : { pool: {} };
         },
         getPortLastBlockHeaderWithRewardDiff(_port, callback) {
             callback(null, {
@@ -359,6 +362,35 @@ test("refreshPoolStats writes lean global and pplns stats without pps or solo br
         }),
         false
     );
+});
+
+test("refreshPoolStats inherits merged-mining hashrate and miners from the parent port", async () => {
+    createTestEnvironment({
+        daemonPort: 18081,
+        ports: [18081, 18144],
+        caches: {
+            global_stats: { hash: 123, minerCount: 7 },
+            global_stats2: { totalHashes: 100, roundHashes: 50 },
+            pplns_stats: { hash: 123, minerCount: 7 },
+            pplns_stats2: { totalHashes: 100, roundHashes: 50 },
+            active_ports: [18081],
+            port_hash: { 18081: 123 },
+            portMinerCount: { 18081: 7 }
+        },
+        mysqlQuery(sql) {
+            if (sql === "SELECT count(*) as miner_count FROM (SELECT 1 FROM payments GROUP BY payment_address, payment_id) as miners") return [{ miner_count: 0 }];
+            if (sql === "SELECT count(id) as txn_count FROM transactions") return [{ txn_count: 0 }];
+            throw new Error(`Unexpected SQL: ${  sql}`);
+        }
+    });
+    const poolStats = loadPoolStats();
+
+    const result = await poolStats.refreshPoolStats();
+
+    assert.equal(result.global.coins[18081].hashrate, 123);
+    assert.equal(result.global.coins[18081].miners, 7);
+    assert.equal(result.global.coins[18144].hashrate, 123);
+    assert.equal(result.global.coins[18144].miners, 7);
 });
 
 test("refreshPoolInformation keeps pool port output focused on pplns", async () => {
