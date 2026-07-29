@@ -550,15 +550,45 @@ for i in $(seq 1 30); do
 done
 mysqladmin ping >/dev/null 2>&1
 ROOT_SQL_PASS=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+DEBIAN_MAINT_PASS=""
+DEBIAN_MAINT_SQL=""
+DEBIAN_MAINT_GRANT=""
+if [[ -r /etc/mysql/debian.cnf ]]; then
+  DEBIAN_MAINT_PASS="$(
+    awk -F= '
+      /^[[:space:]]*password[[:space:]]*=/ {
+        sub(/^[^=]*=[[:space:]]*/, "")
+        print
+        exit
+      }
+    ' /etc/mysql/debian.cnf
+  )"
+  case "$DEBIAN_MAINT_PASS" in
+    ""|*[!A-Za-z0-9]*)
+      echo "Invalid password format in /etc/mysql/debian.cnf" >&2
+      exit 1
+      ;;
+  esac
+fi
 if mysql -Nse "SHOW PLUGINS" | awk '$1=="mysql_native_password" && $2=="ACTIVE" { found=1 } END { exit !found }'; then
   ROOT_SQL_AUTH="ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$ROOT_SQL_PASS';"
   USER_SQL_CMD="sudo mysql -u root --password='$ROOT_SQL_PASS'"
+  if [[ -n "$DEBIAN_MAINT_PASS" ]]; then
+    DEBIAN_MAINT_SQL="ALTER USER 'debian-sys-maint'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DEBIAN_MAINT_PASS';"
+    DEBIAN_MAINT_GRANT="GRANT ALL PRIVILEGES ON *.* TO 'debian-sys-maint'@'localhost' WITH GRANT OPTION;"
+  fi
 else
   ROOT_SQL_AUTH="ALTER USER 'root'@'localhost' IDENTIFIED BY '$ROOT_SQL_PASS';"
   USER_SQL_CMD="sudo mysql --protocol=socket -u root"
+  if [[ -n "$DEBIAN_MAINT_PASS" ]]; then
+    DEBIAN_MAINT_SQL="ALTER USER 'debian-sys-maint'@'localhost' IDENTIFIED BY '$DEBIAN_MAINT_PASS';"
+    DEBIAN_MAINT_GRANT="GRANT ALL PRIVILEGES ON *.* TO 'debian-sys-maint'@'localhost' WITH GRANT OPTION;"
+  fi
 fi
 (cat <<EOF
 $ROOT_SQL_AUTH
+$DEBIAN_MAINT_SQL
+$DEBIAN_MAINT_GRANT
 FLUSH PRIVILEGES;
 EOF
 ) | {
@@ -577,6 +607,9 @@ grep max_connections /etc/mysql/my.cnf || cat >>/etc/mysql/my.cnf <<'EOF'
 max_connections = 10000
 EOF
 systemctl restart mysql
+if [[ -r /etc/mysql/debian.cnf ]]; then
+  mysqladmin --defaults-file=/etc/mysql/debian.cnf ping >/dev/null
+fi
 
 su -l user -s /bin/bash <<EOF
 set -ex
