@@ -64,6 +64,16 @@ SystemMaxFileSize=10M
 EOF
 }
 
+configure_needrestart_pm2_guard() {
+  install -d -m 755 /etc/needrestart/conf.d
+  rm -f /etc/needrestart/conf.d/moneroocean-critical.conf
+  cat >/etc/needrestart/conf.d/moneroocean-pm2.conf <<'EOF'
+# Keep unattended package maintenance from restarting the pool process manager.
+# Restart PM2 deliberately during a maintenance window to load updated libraries.
+$nrconf{override_rc}->{qr(^pm2-user\.service$)} = 0;
+EOF
+}
+
 configure_ssh_hardening() {
   # This node is administered with SSH keys only; keep the public SSH port
   # available so loss of a single management IP cannot lock out the server.
@@ -484,6 +494,7 @@ EOF
 configure_overcommit
 configure_swap
 configure_journald_retention
+configure_needrestart_pm2_guard
 
 retry_command apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update
 if is_test_mode; then

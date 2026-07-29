@@ -311,6 +311,7 @@ async function verifyDeployInstall(context) {
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
         "/etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
+        "/etc/needrestart/conf.d/moneroocean-pm2.conf",
         "/home/user/nodejs-pool/fix_daemon.sh",
         "/swapfile"
     ]);
@@ -320,9 +321,10 @@ async function verifyDeployInstall(context) {
         "grep -Fq '^mysql-server-core-[0-9].*$' /etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
         "grep -Fq '^mysql-client-core-[0-9].*$' /etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
         "grep -Fq '^mysql-common$' /etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
-        "test ! -e /etc/needrestart/conf.d/moneroocean-critical.conf"
+        "test ! -e /etc/needrestart/conf.d/moneroocean-critical.conf",
+        "grep -Fqx '$nrconf{override_rc}->{qr(^pm2-user\\.service$)} = 0;' /etc/needrestart/conf.d/moneroocean-pm2.conf"
     ].join(" && "));
-    await appendCheckLog(context, "verified unattended-upgrades MySQL blacklist");
+    await appendCheckLog(context, "verified unattended-upgrades MySQL blacklist and PM2 restart guard");
     await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 150$' /etc/sysctl.d/90-monero-overcommit.conf");
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");

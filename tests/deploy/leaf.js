@@ -341,12 +341,15 @@ async function verifyLeafInstall(context) {
         "/usr/local/src/tari/target/release/minotari_node", "/usr/local/src/tari/target/release/minotari_merge_mining_proxy",
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
+        "/etc/needrestart/conf.d/moneroocean-pm2.conf",
         "/etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
         "/etc/fail2ban/jail.d/moneroocean-sshd.local",
         "/usr/local/bin/node",
         "/home/user/nodejs-pool/fix_daemon.sh",
         "/swapfile"
     ]);
+    await execInContainer(context.containerName, "test ! -e /etc/needrestart/conf.d/moneroocean-critical.conf && grep -Fqx '$nrconf{override_rc}->{qr(^pm2-user\\.service$)} = 0;' /etc/needrestart/conf.d/moneroocean-pm2.conf");
+    await appendCheckLog(context, "verified PM2 restart guard");
     await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 150$' /etc/sysctl.d/90-monero-overcommit.conf");
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");

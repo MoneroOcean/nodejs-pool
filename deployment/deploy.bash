@@ -52,6 +52,16 @@ SystemMaxFileSize=10M
 EOF
 }
 
+configure_needrestart_pm2_guard() {
+  install -d -m 755 /etc/needrestart/conf.d
+  rm -f /etc/needrestart/conf.d/moneroocean-critical.conf
+  cat >/etc/needrestart/conf.d/moneroocean-pm2.conf <<'EOF'
+# Keep unattended package maintenance from restarting the pool process manager.
+# Restart PM2 deliberately during a maintenance window to load updated libraries.
+$nrconf{override_rc}->{qr(^pm2-user\.service$)} = 0;
+EOF
+}
+
 configure_unattended_upgrade_blacklist() {
   install -d -m 755 /etc/apt/apt.conf.d
   cat >/etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist <<'EOF'
@@ -66,7 +76,6 @@ Unattended-Upgrade::Package-Blacklist {
   "^mysql-common$";
 };
 EOF
-  rm -f /etc/needrestart/conf.d/moneroocean-critical.conf
 }
 
 clone_repo_once() {
@@ -293,6 +302,7 @@ EOF
 }
 
 configure_unattended_upgrade_blacklist
+configure_needrestart_pm2_guard
 configure_overcommit
 configure_swap
 configure_journald_retention
