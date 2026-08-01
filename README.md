@@ -61,7 +61,7 @@ WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudfla
 ```
 
 `WWW_DNS`, `API_DNS`, and `CERTBOT_EMAIL` default to the MoneroOcean production values if omitted. Set them explicitly for any non-production install.
-Set `MONERO_RELEASE_TAG` (default `v0.18.5.1`) or `TARI_RELEASE_TAG` (default `v5.4.1`) to override a source tag. `MONERO_REPO_URL` and `TARI_REPO_URL` can point at reviewed forks. Tari is built from source into `/usr/local/src/tari/target/release`.
+Set `MONERO_RELEASE_TAG` (default `v0.18.5.1`) or `TARI_RELEASE_TAG` (default `v5.5.0`) to override a source tag. `MONERO_REPO_URL` and `TARI_REPO_URL` can point at reviewed forks. Tari is built from source into `/usr/local/src/tari/target/release`.
 
 When the script finishes:
 

@@ -5,7 +5,7 @@ trap 'echo "Leaf deployment failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
 MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.4.1}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.5.0}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
@@ -386,6 +386,9 @@ install_tari_suite() {
   checkout_repo_ref "$TARI_REPO_URL" "$TARI_INSTALL_DIR" "$TARI_RELEASE_TAG"
   # Cargo.lock belongs to the selected release and prevents an accidental
   # dependency upgrade from changing a production build.
+  # Build-script paths are embedded in Cargo's target artifacts; remove stale
+  # artifacts when the source tree has been moved or switched between releases.
+  rm -rf "$TARI_INSTALL_DIR/target"
   TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy
   if [ ! -f "$TARI_HOME/.tari/mainnet/config/config.toml" ]; then
     sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/target/release/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen

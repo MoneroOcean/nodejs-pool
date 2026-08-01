@@ -7,7 +7,7 @@ WWW_DNS="${WWW_DNS:-moneroocean.stream}"
 API_DNS="${API_DNS:-api.moneroocean.stream}"
 CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN:-n/a}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-support@moneroocean.stream}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.4.1}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.5.0}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
@@ -240,6 +240,9 @@ checkout_repo_ref() {
 install_tari_suite() {
   ensure_rust_toolchain
   checkout_repo_ref "$TARI_REPO_URL" "$TARI_INSTALL_DIR" "$TARI_RELEASE_TAG"
+  # Build-script paths are embedded in Cargo's target artifacts; remove stale
+  # artifacts when the source tree has been moved or switched between releases.
+  rm -rf "$TARI_INSTALL_DIR/target"
   TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy
   if [ ! -f "$TARI_HOME/.tari/mainnet/config/config.toml" ]; then
     sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/target/release/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
