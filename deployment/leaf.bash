@@ -185,6 +185,30 @@ EOF
   fi
 }
 
+configure_pool_conntrack() {
+  install -d -m 755 /etc/sysctl.d
+  cat >/etc/sysctl.d/92-moneroocean-conntrack.conf <<'EOF'
+# Leave headroom for daemon RPC and management traffic during miner reconnect bursts.
+net.netfilter.nf_conntrack_max = 524288
+EOF
+  if ! sysctl -p /etc/sysctl.d/92-moneroocean-conntrack.conf; then
+    if is_test_mode; then
+      echo "Skipping active conntrack sysctl apply in test mode"
+      return 0
+    fi
+    return 1
+  fi
+}
+
+configure_pool_health_guard() {
+  chmod 755 /home/user/nodejs-pool/pool_health_guard.sh
+  install -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.service /lib/systemd/system/pool-health-guard.service
+  install -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.timer /lib/systemd/system/pool-health-guard.timer
+  systemctl daemon-reload
+  systemctl enable pool-health-guard.timer
+  if ! is_test_mode; then systemctl restart pool-health-guard.timer; fi
+}
+
 configure_swap() {
   if awk 'NR > 1 {found = 1} END {exit found ? 0 : 1}' /proc/swaps; then
     return 0
@@ -495,6 +519,7 @@ EOF
 }
 
 configure_overcommit
+configure_pool_conntrack
 configure_swap
 configure_journald_retention
 configure_needrestart_pm2_guard
@@ -662,6 +687,8 @@ fi
 # certificates, firewall rules, and relay services have been verified.
 # pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 EOF
+
+configure_pool_health_guard
 
 if [ -z "$TARI_EXTERNAL_IP" ]; then
   systemctl start xtm xtm_mm

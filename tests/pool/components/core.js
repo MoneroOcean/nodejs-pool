@@ -885,4 +885,44 @@ test("server startup skips configured listen ports while keeping other pplns por
     assert.equal(netServers.length, 1);
     assert.deepEqual(listenCalls, [{ port: 39002, host: "127.0.0.1" }]);
 });
+
+test("TLS stratum handshakes use the unauthenticated socket timeout", async () => {
+    let tlsOptions;
+    const state = {
+        threadName: "(Test) ",
+        activeConnectionsByIP: {},
+        activeConnectionsBySubnet: {},
+        activeMiners: new Map(),
+        activeMinerSockets: new Map(),
+        freeEthExtranonces: []
+    };
+    global.config = {
+        bind_ip: "127.0.0.1",
+        pplns: { enable: true },
+        pool: { socketAuthTimeout: 7 }
+    };
+    const tls = {
+        createServer(options) {
+            tlsOptions = options;
+            return {
+                once() {},
+                removeListener() {},
+                on() {},
+                listen(_port, _host, callback) { callback(); }
+            };
+        }
+    };
+    const serverFactory = createServerFactory({
+        debug() {},
+        fs: { readFileSync() { return Buffer.from("test"); } },
+        net: require("node:net"),
+        tls,
+        state,
+        handleMinerData() {},
+        removeMiner() {}
+    });
+
+    await serverFactory.startPortServers([{ port: 443, portType: "pplns", ssl: true }]);
+    assert.equal(tlsOptions.handshakeTimeout, 7000);
+});
 });

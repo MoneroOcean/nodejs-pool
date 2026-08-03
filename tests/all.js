@@ -17,6 +17,7 @@ if (process.env.NODEJS_POOL_RUN_LIVE_TESTS === "1") require("./live.js");
 require("./payments.js");
 require("./payment_batch_unlock.js");
 require("./manage_scripts.js");
+require("./pool_health_guard.js");
 
 const privateLib2Tests = path.join(__dirname, "..", "lib2", "tests", "all.js");
 if (fs.existsSync(privateLib2Tests)) require(privateLib2Tests);
