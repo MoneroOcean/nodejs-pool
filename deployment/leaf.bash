@@ -209,6 +209,58 @@ configure_pool_health_guard() {
   if ! is_test_mode; then systemctl restart pool-health-guard.timer; fi
 }
 
+configure_pool_connlimits() {
+  local family file chain mask rules_dir="${POOL_UFW_RULES_DIR:-/etc/ufw}"
+  for family in 4 6; do
+    if [ "$family" = 4 ]; then
+      file="$rules_dir/before.rules"
+      chain=ufw-before-input
+      mask=32
+    else
+      file="$rules_dir/before6.rules"
+      chain=ufw6-before-input
+      mask=128
+    fi
+    python3 - "$file" "$chain" "$mask" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+chain = sys.argv[2]
+mask = sys.argv[3]
+begin = "# BEGIN MONEROOCEAN POOL CONNLIMIT"
+end = "# END MONEROOCEAN POOL CONNLIMIT"
+plain_ports = "80,10001,10002,10004,10008,10016,10032,10064,10128,10256,10512,11024,12048,14096,18192"
+tls_ports = "443,20001,20002,20004,20008,20016,20032,20064,20128,20256,20512,21024,22048,24096,28192"
+rules = [
+    begin,
+    f"-A {chain} -p tcp -m multiport --dports {plain_ports} -m connlimit --connlimit-above 1000 --connlimit-mask {mask} -j REJECT --reject-with tcp-reset",
+    f"-A {chain} -p tcp -m multiport --dports {tls_ports} -m connlimit --connlimit-above 1000 --connlimit-mask {mask} -j REJECT --reject-with tcp-reset",
+    end,
+]
+lines = path.read_text(encoding="utf-8").splitlines()
+if begin in lines:
+    start = lines.index(begin)
+    try:
+        stop = lines.index(end, start) + 1
+    except ValueError as exc:
+        raise SystemExit(f"missing connlimit end marker in {path}") from exc
+    del lines[start:stop]
+anchor = next((index for index, line in enumerate(lines)
+               if line.startswith(f"-A {chain} ") and "RELATED,ESTABLISHED" in line and line.endswith("-j ACCEPT")), None)
+if anchor is None:
+    raise SystemExit(f"cannot find established-traffic anchor in {path}")
+lines[anchor:anchor] = rules
+path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+  done
+
+  if ! is_test_mode; then
+    iptables-restore --test <"$rules_dir/before.rules"
+    ip6tables-restore --test <"$rules_dir/before6.rules"
+  fi
+}
+
 configure_swap() {
   if awk 'NR > 1 {found = 1} END {exit found ? 0 : 1}' /proc/swaps; then
     return 0
@@ -554,6 +606,7 @@ configure_ssh_hardening
 
 ufw default deny incoming
 ufw default allow outgoing
+configure_pool_connlimits
 for rule in ssh 3333 5555 7777 18141 18189; do
   ufw allow "$rule"
 done
