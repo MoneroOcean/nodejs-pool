@@ -2,10 +2,9 @@
 Description=MoneroOcean pool fail-closed health guard
 After=network-online.target pm2-user.service
 Wants=network-online.target
-ConditionPathIsExecutable=/home/user/nodejs-pool/pool_health_guard.sh
+ConditionFileIsExecutable=/home/user/nodejs-pool/pool_health_guard.sh
 
 [Service]
 Type=oneshot
 ExecStart=/home/user/nodejs-pool/pool_health_guard.sh
 TimeoutStartSec=2min
-
