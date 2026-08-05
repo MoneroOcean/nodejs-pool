@@ -740,7 +740,8 @@ retry_command npx playwright install --with-deps chromium
 retry_command npm run build
 EOF
 
-configure_pool_health_guard
+# Temporarily disabled: pool-health-guard's daemon recovery is not deployed.
+# configure_pool_health_guard
 
 systemctl start xtm xtm_mm
 wait_for_tari_sync

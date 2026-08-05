@@ -346,8 +346,7 @@ async function verifyLeafInstall(context) {
         "/etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
         "/etc/fail2ban/jail.d/moneroocean-sshd.local",
         "/usr/local/bin/node",
-        "/home/user/nodejs-pool/fix_daemon.sh", "/home/user/nodejs-pool/pool_health_guard.sh",
-        "/lib/systemd/system/pool-health-guard.service", "/lib/systemd/system/pool-health-guard.timer",
+        "/home/user/nodejs-pool/fix_daemon.sh",
         "/swapfile"
     ]);
     await execInContainer(context.containerName, "test ! -e /etc/needrestart/conf.d/moneroocean-critical.conf && grep -Fqx '$nrconf{override_rc}->{qr(^pm2-user\\.service$)} = 0;' /etc/needrestart/conf.d/moneroocean-pm2.conf");
@@ -359,8 +358,7 @@ async function verifyLeafInstall(context) {
     await execInContainer(context.containerName, "grep -q '^net.netfilter.nf_conntrack_max = 524288$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
     await execInContainer(context.containerName, "test \"$(grep -Fc -- '--connlimit-above 1000 --connlimit-mask 32' /etc/ufw/before.rules)\" -eq 2 && test \"$(grep -Fc -- '--connlimit-above 1000 --connlimit-mask 128' /etc/ufw/before6.rules)\" -eq 2");
     await execInContainer(context.containerName, "python3 -c 'from pathlib import Path; p=Path(\"/etc/ufw/before.rules\").read_text(); assert p.index(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") < p.index(\"RELATED,ESTABLISHED\")' && python3 -c 'from pathlib import Path; p=Path(\"/etc/ufw/before6.rules\").read_text(); assert p.index(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") < p.index(\"RELATED,ESTABLISHED\")'");
-    await execInContainer(context.containerName, "systemctl is-enabled --quiet pool-health-guard.timer && grep -q '^OnUnitActiveSec=15s$' /lib/systemd/system/pool-health-guard.timer && grep -q '^ExecStart=/home/user/nodejs-pool/pool_health_guard.sh$' /lib/systemd/system/pool-health-guard.service");
-    await appendCheckLog(context, "verified pool conntrack capacity, per-IP limits, and fail-closed guard");
+    await appendCheckLog(context, "verified pool conntrack capacity and per-IP limits");
     await execInContainer(context.containerName, [
         "grep -q '^PermitRootLogin no$' /etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
         "grep -q '^AuthenticationMethods publickey$' /etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",

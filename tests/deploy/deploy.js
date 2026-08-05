@@ -313,8 +313,7 @@ async function verifyDeployInstall(context) {
         "/etc/sysctl.d/92-moneroocean-conntrack.conf",
         "/etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
         "/etc/needrestart/conf.d/moneroocean-pm2.conf",
-        "/home/user/nodejs-pool/fix_daemon.sh", "/home/user/nodejs-pool/pool_health_guard.sh",
-        "/lib/systemd/system/pool-health-guard.service", "/lib/systemd/system/pool-health-guard.timer",
+        "/home/user/nodejs-pool/fix_daemon.sh",
         "/swapfile"
     ]);
     await execInContainer(context.containerName, [
@@ -332,8 +331,7 @@ async function verifyDeployInstall(context) {
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");
     await appendCheckLog(context, "verified Monero hugepage sysctl config");
     await execInContainer(context.containerName, "grep -q '^net.netfilter.nf_conntrack_max = 524288$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
-    await execInContainer(context.containerName, "systemctl is-enabled --quiet pool-health-guard.timer && grep -q '^OnUnitActiveSec=15s$' /lib/systemd/system/pool-health-guard.timer && grep -q '^ExecStart=/home/user/nodejs-pool/pool_health_guard.sh$' /lib/systemd/system/pool-health-guard.service");
-    await appendCheckLog(context, "verified pool conntrack capacity and fail-closed guard");
+    await appendCheckLog(context, "verified pool conntrack capacity");
     await execInContainer(context.containerName, [
         "grep -Fq 'gzip_vary on;' /etc/nginx/conf.d/moneroocean-gzip.conf",
         "grep -Fq 'gzip_types text/plain text/css application/json application/javascript application/xml application/xml+rss image/svg+xml text/javascript text/xml;' /etc/nginx/conf.d/moneroocean-gzip.conf",
