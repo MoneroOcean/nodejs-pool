@@ -104,11 +104,12 @@ except (KeyError, TypeError, ValueError, json.JSONDecodeError):
 
 daemon_healthy() {
   local block_epoch now age
-  block_epoch="$(last_good_block_epoch)" || return 1
-  [[ "$block_epoch" =~ ^[0-9]+$ ]] || return 1
+  block_epoch="$(last_good_block_epoch)" || return 2
+  [[ "$block_epoch" =~ ^[0-9]+$ ]] || return 2
   now="$(now_epoch)"
   age=$((now - block_epoch))
-  [ "$age" -le "$max_block_age_sec" ]
+  [ "$age" -le "$max_block_age_sec" ] && return 0
+  return 1
 }
 
 counter_increment() {
@@ -200,9 +201,19 @@ if [ "$percent" -ge "$trip_percent" ]; then
   exit 0
 fi
 
-if daemon_healthy; then
+daemon_health=0
+daemon_healthy || daemon_health=$?
+if [ "$daemon_health" -eq 0 ]; then
   unlink "$state_dir/daemon-unhealthy-since" 2>/dev/null || true
   exit 0
 fi
 
-handle_daemon_failure
+if [ "$daemon_health" -eq 1 ]; then
+  handle_daemon_failure
+else
+  # A transient proxy/RPC failure does not prove that any chain is stale.
+  # Only a successfully read header older than max_block_age_sec starts the
+  # shutdown timer.
+  unlink "$state_dir/daemon-unhealthy-since" 2>/dev/null || true
+  log "merged RPC unavailable; not treating it as a stale daemon block"
+fi

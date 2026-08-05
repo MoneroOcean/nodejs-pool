@@ -60,6 +60,7 @@ test("pool health guard does not restart daemons or stop the pool during a short
         });
         assert.doesNotMatch(output, /fix_daemon\.sh|systemctl restart/);
         assert.doesNotMatch(output, /TEST: pm2 stop pool/);
+        assert.equal(fs.existsSync(path.join(root, "state", "daemon-unhealthy-since")), false);
         assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), false);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
@@ -70,13 +71,15 @@ test("pool health guard stops after a continuous one-hour stale daemon outage an
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
     try {
         runGuard(root, {
-            rpcHealthy: false,
-            now: 100,
+            now: 14_400,
+            lastBlockTimestamp: 0,
+            auxBlockTimestamp: 0,
             daemonFailureShutdownSec: 3600
         });
         const output = runGuard(root, {
-            rpcHealthy: false,
-            now: 3700,
+            now: 18_000,
+            lastBlockTimestamp: 0,
+            auxBlockTimestamp: 0,
             daemonFailureShutdownSec: 3600
         });
         assert.match(output, /shutting down pool: no fresh daemon block for 3600s/);
