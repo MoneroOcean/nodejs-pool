@@ -11,6 +11,7 @@ trip_percent="${POOL_GUARD_TRIP_PERCENT:-80}"
 recover_percent="${POOL_GUARD_RECOVER_PERCENT:-50}"
 recovery_success_limit="${POOL_GUARD_RECOVERY_SUCCESS_LIMIT:-2}"
 rpc_url="${POOL_GUARD_RPC_URL:-http://127.0.0.1:18081/json_rpc}"
+rpc_timeout_sec="${POOL_GUARD_RPC_TIMEOUT_SEC:-20}"
 daemon_failure_shutdown_sec="${POOL_GUARD_DAEMON_FAILURE_SHUTDOWN_SEC:-3600}"
 max_block_age_sec="${POOL_GUARD_MAX_BLOCK_AGE_SEC:-10800}"
 test_mode="${POOL_GUARD_TEST_MODE:-0}"
@@ -81,7 +82,7 @@ last_good_block_epoch() {
     return
   fi
   local response
-  response="$(curl -m 3 -fsS "$rpc_url" -H 'Content-Type: application/json' \
+  response="$(curl -m "$rpc_timeout_sec" -fsS "$rpc_url" -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","id":"0","method":"get_last_block_header"}' 2>/dev/null || true)"
   grep -Eq '"status"[[:space:]]*:[[:space:]]*"OK"' <<<"$response" || return 1
   printf '%s' "$response" | python3 -c '
