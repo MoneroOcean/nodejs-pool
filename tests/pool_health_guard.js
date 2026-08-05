@@ -21,11 +21,11 @@ function runGuard(root, values = {}) {
             POOL_GUARD_TEST_POOL_ONLINE: values.poolOnline === false ? "0" : "1",
             POOL_GUARD_TEST_RPC_HEALTHY: values.rpcHealthy === false ? "0" : "1",
             POOL_GUARD_TEST_NOW: String(values.now ?? 0),
+            POOL_GUARD_TEST_LAST_BLOCK_TIMESTAMP: String(values.lastBlockTimestamp ?? values.now ?? 0),
+            POOL_GUARD_TEST_AUX_BLOCK_TIMESTAMP: String(values.auxBlockTimestamp ?? values.lastBlockTimestamp ?? values.now ?? 0),
             POOL_GUARD_DAEMON_FAILURE_SHUTDOWN_SEC: String(values.daemonFailureShutdownSec ?? 3600),
-            POOL_GUARD_DAEMON_RECOVERY_COOLDOWN_SEC: String(values.daemonRecoveryCooldownSec ?? 300),
-            POOL_GUARD_POOL_DIR: root,
+            POOL_GUARD_MAX_BLOCK_AGE_SEC: String(values.maxBlockAgeSec ?? 10800),
             POOL_GUARD_STATE_DIR: path.join(root, "state"),
-            POOL_GUARD_MARKER: path.join(root, "pool_health_guard_unhealthy"),
             POOL_GUARD_CONNTRACK_COUNT_FILE: countFile,
             POOL_GUARD_CONNTRACK_MAX_FILE: maxFile
         }
@@ -38,28 +38,27 @@ test("pool health guard quarantines conntrack pressure and recovers after two he
         const tripOutput = runGuard(root, { count: 80 });
         assert.match(tripOutput, /quarantining pool: reason=conntrack-pressure/);
         assert.match(tripOutput, /TEST: pm2 stop pool/);
-        assert.ok(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")));
+        assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
+        assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), false);
 
         runGuard(root, { count: 40 });
-        assert.ok(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")));
+        assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
         const recoverOutput = runGuard(root, { count: 40 });
         assert.match(recoverOutput, /TEST: pm2 restart pool/);
-        assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), false);
+        assert.equal(fs.existsSync(path.join(root, "state", "quarantine")), false);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
 });
 
-test("pool health guard attempts daemon recovery without stopping the pool during a short merged RPC outage", function rpcFailures() {
+test("pool health guard does not restart daemons or stop the pool during a short outage", function rpcFailures() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
     try {
         const output = runGuard(root, {
             rpcHealthy: false,
-            now: 100,
-            daemonRecoveryCooldownSec: 0
+            now: 100
         });
-        assert.match(output, /attempting monero, xtm, and xtm_mm recovery/);
-        assert.match(output, /TEST: .*fix_daemon\.sh template-stuck/);
+        assert.doesNotMatch(output, /fix_daemon\.sh|systemctl restart/);
         assert.doesNotMatch(output, /TEST: pm2 stop pool/);
         assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), false);
     } finally {
@@ -67,29 +66,49 @@ test("pool health guard attempts daemon recovery without stopping the pool durin
     }
 });
 
-test("pool health guard permanently stops the pool after a continuous one-hour daemon outage", function daemonOutageShutdown() {
+test("pool health guard stops after a continuous one-hour stale daemon outage and auto-recovers", function daemonOutageShutdown() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
     try {
         runGuard(root, {
             rpcHealthy: false,
             now: 100,
-            daemonRecoveryCooldownSec: 0,
             daemonFailureShutdownSec: 3600
         });
         const output = runGuard(root, {
             rpcHealthy: false,
             now: 3700,
-            daemonRecoveryCooldownSec: 0,
             daemonFailureShutdownSec: 3600
         });
-        assert.match(output, /shutting down pool: daemon RPC unhealthy for 3600s/);
+        assert.match(output, /shutting down pool: no fresh daemon block for 3600s/);
         assert.match(output, /TEST: pm2 stop pool/);
-        const marker = fs.readFileSync(path.join(root, "pool_health_guard_unhealthy"), "utf8");
-        assert.match(marker, /daemon-outage/);
+        const quarantine = fs.readFileSync(path.join(root, "state", "quarantine"), "utf8");
+        assert.match(quarantine, /daemon-outage/);
+        assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), false);
 
-        const laterOutput = runGuard(root, { rpcHealthy: true, now: 4000 });
-        assert.match(laterOutput, /node remains shut down: daemon outage marker is present/);
-        assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), true);
+        runGuard(root, { rpcHealthy: true, now: 4000, lastBlockTimestamp: 4000 });
+        const laterOutput = runGuard(root, { rpcHealthy: true, now: 4015, lastBlockTimestamp: 4015 });
+        assert.match(laterOutput, /TEST: pm2 restart pool/);
+        assert.equal(fs.existsSync(path.join(root, "state", "quarantine")), false);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("pool health guard considers any chain block older than three hours unhealthy", function staleBlock() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
+    try {
+        runGuard(root, {
+            now: 14_400,
+            auxBlockTimestamp: 0,
+            daemonFailureShutdownSec: 3600
+        });
+        const output = runGuard(root, {
+            now: 18_000,
+            auxBlockTimestamp: 0,
+            daemonFailureShutdownSec: 3600
+        });
+        assert.match(output, /shutting down pool: no fresh daemon block for 3600s/);
+        assert.match(output, /TEST: pm2 stop pool/);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
