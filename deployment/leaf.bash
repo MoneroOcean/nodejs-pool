@@ -741,8 +741,7 @@ fi
 # pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 EOF
 
-# Temporarily disabled: pool-health-guard's daemon recovery is not deployed.
-# configure_pool_health_guard
+configure_pool_health_guard
 
 if [ -z "$TARI_EXTERNAL_IP" ]; then
   systemctl start xtm xtm_mm
