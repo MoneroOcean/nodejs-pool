@@ -20,6 +20,9 @@ function runGuard(root, values = {}) {
             POOL_GUARD_TEST_MODE: "1",
             POOL_GUARD_TEST_POOL_ONLINE: values.poolOnline === false ? "0" : "1",
             POOL_GUARD_TEST_RPC_HEALTHY: values.rpcHealthy === false ? "0" : "1",
+            POOL_GUARD_TEST_NOW: String(values.now ?? 0),
+            POOL_GUARD_DAEMON_FAILURE_SHUTDOWN_SEC: String(values.daemonFailureShutdownSec ?? 3600),
+            POOL_GUARD_DAEMON_RECOVERY_COOLDOWN_SEC: String(values.daemonRecoveryCooldownSec ?? 300),
             POOL_GUARD_POOL_DIR: root,
             POOL_GUARD_STATE_DIR: path.join(root, "state"),
             POOL_GUARD_MARKER: path.join(root, "pool_health_guard_unhealthy"),
@@ -47,15 +50,46 @@ test("pool health guard quarantines conntrack pressure and recovers after two he
     }
 });
 
-test("pool health guard quarantines three consecutive merged RPC failures", function rpcFailures() {
+test("pool health guard attempts daemon recovery without stopping the pool during a short merged RPC outage", function rpcFailures() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
     try {
-        runGuard(root, { rpcHealthy: false });
-        runGuard(root, { rpcHealthy: false });
+        const output = runGuard(root, {
+            rpcHealthy: false,
+            now: 100,
+            daemonRecoveryCooldownSec: 0
+        });
+        assert.match(output, /attempting monero, xtm, and xtm_mm recovery/);
+        assert.match(output, /TEST: .*fix_daemon\.sh template-stuck/);
+        assert.doesNotMatch(output, /TEST: pm2 stop pool/);
         assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), false);
-        const output = runGuard(root, { rpcHealthy: false });
-        assert.match(output, /quarantining pool: reason=merged-rpc-unhealthy/);
-        assert.ok(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")));
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("pool health guard permanently stops the pool after a continuous one-hour daemon outage", function daemonOutageShutdown() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
+    try {
+        runGuard(root, {
+            rpcHealthy: false,
+            now: 100,
+            daemonRecoveryCooldownSec: 0,
+            daemonFailureShutdownSec: 3600
+        });
+        const output = runGuard(root, {
+            rpcHealthy: false,
+            now: 3700,
+            daemonRecoveryCooldownSec: 0,
+            daemonFailureShutdownSec: 3600
+        });
+        assert.match(output, /shutting down pool: daemon RPC unhealthy for 3600s/);
+        assert.match(output, /TEST: pm2 stop pool/);
+        const marker = fs.readFileSync(path.join(root, "pool_health_guard_unhealthy"), "utf8");
+        assert.match(marker, /daemon-outage/);
+
+        const laterOutput = runGuard(root, { rpcHealthy: true, now: 4000 });
+        assert.match(laterOutput, /node remains shut down: daemon outage marker is present/);
+        assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), true);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

@@ -10,9 +10,10 @@ conntrack_count_file="${POOL_GUARD_CONNTRACK_COUNT_FILE:-/proc/sys/net/netfilter
 conntrack_max_file="${POOL_GUARD_CONNTRACK_MAX_FILE:-/proc/sys/net/netfilter/nf_conntrack_max}"
 trip_percent="${POOL_GUARD_TRIP_PERCENT:-80}"
 recover_percent="${POOL_GUARD_RECOVER_PERCENT:-50}"
-rpc_failure_limit="${POOL_GUARD_RPC_FAILURE_LIMIT:-3}"
 recovery_success_limit="${POOL_GUARD_RECOVERY_SUCCESS_LIMIT:-2}"
 rpc_url="${POOL_GUARD_RPC_URL:-http://127.0.0.1:18081/json_rpc}"
+daemon_failure_shutdown_sec="${POOL_GUARD_DAEMON_FAILURE_SHUTDOWN_SEC:-3600}"
+daemon_recovery_cooldown_sec="${POOL_GUARD_DAEMON_RECOVERY_COOLDOWN_SEC:-300}"
 test_mode="${POOL_GUARD_TEST_MODE:-0}"
 
 mkdir -p "$state_dir"
@@ -22,6 +23,14 @@ flock -n 9 || exit 0
 log() {
   logger -t pool-health-guard "$*" 2>/dev/null || true
   echo "pool-health-guard: $*"
+}
+
+now_epoch() {
+  if [ "$test_mode" = "1" ] && [[ "${POOL_GUARD_TEST_NOW:-}" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$POOL_GUARD_TEST_NOW"
+    return
+  fi
+  date +%s
 }
 
 read_uint() {
@@ -89,12 +98,13 @@ counter_increment() {
 clear_runtime_state() {
   unlink "$state_dir/rpc-failures" 2>/dev/null || true
   unlink "$state_dir/recovery-successes" 2>/dev/null || true
-  unlink "$state_dir/full-repair-attempted" 2>/dev/null || true
+  unlink "$state_dir/daemon-unhealthy-since" 2>/dev/null || true
+  unlink "$state_dir/last-daemon-recovery" 2>/dev/null || true
 }
 
 quarantine() {
   local reason="$1" percent="$2" now temporary_marker
-  now="$(date +%s)"
+  now="$(now_epoch)"
   temporary_marker="$marker.tmp.$$"
   printf '%s %s conntrack=%s%%\n' "$now" "$reason" "$percent" >"$temporary_marker"
   mv "$temporary_marker" "$marker"
@@ -103,6 +113,16 @@ quarantine() {
   log "quarantining pool: reason=$reason conntrack=${percent}%"
   pm2_cmd stop pool || true
   restart_service xtm_mm.service || true
+}
+
+shutdown_for_daemon_outage() {
+  local percent="$1" now temporary_marker
+  now="$(now_epoch)"
+  temporary_marker="$marker.tmp.$$"
+  printf '%s daemon-outage conntrack=%s%%\n' "$now" "$percent" >"$temporary_marker"
+  mv "$temporary_marker" "$marker"
+  log "shutting down pool: daemon RPC unhealthy for ${daemon_failure_shutdown_sec}s"
+  pm2_cmd stop pool || true
 }
 
 recover_pool() {
@@ -119,25 +139,45 @@ recover_pool() {
   return 1
 }
 
-repair_proxy_once() {
-  local quarantined_at now
-  [ ! -e "$state_dir/full-repair-attempted" ] || return 0
-  quarantined_at="$(awk 'NR == 1 {print $1}' "$marker" 2>/dev/null || true)"
-  [[ "$quarantined_at" =~ ^[0-9]+$ ]] || return 0
-  now="$(date +%s)"
-  [ $((now - quarantined_at)) -ge 60 ] || return 0
-  : >"$state_dir/full-repair-attempted"
-  log "merged RPC remains unhealthy; running one full proxy recovery"
+attempt_daemon_recovery() {
+  local now last_recovery=0
+  now="$(now_epoch)"
+  if [ -f "$state_dir/last-daemon-recovery" ]; then
+    last_recovery="$(read_uint "$state_dir/last-daemon-recovery" || echo 0)"
+  fi
+  [ $((now - last_recovery)) -ge "$daemon_recovery_cooldown_sec" ] || return 0
+  printf '%s\n' "$now" >"$state_dir/last-daemon-recovery"
+  log "merged RPC unhealthy; attempting monero, xtm, and xtm_mm recovery"
   if [ "$test_mode" = "1" ]; then
-    log "TEST: $pool_dir/fix_daemon.sh proxy-unhealthy"
+    log "TEST: $pool_dir/fix_daemon.sh template-stuck"
   elif [ -x "$pool_dir/fix_daemon.sh" ]; then
-    "$pool_dir/fix_daemon.sh" proxy-unhealthy || true
+    "$pool_dir/fix_daemon.sh" template-stuck || true
+  fi
+}
+
+handle_daemon_failure() {
+  local now unhealthy_since=0
+  now="$(now_epoch)"
+  if [ -f "$state_dir/daemon-unhealthy-since" ]; then
+    unhealthy_since="$(read_uint "$state_dir/daemon-unhealthy-since" || echo 0)"
+  fi
+  if [ "$unhealthy_since" -eq 0 ]; then
+    unhealthy_since="$now"
+    printf '%s\n' "$unhealthy_since" >"$state_dir/daemon-unhealthy-since"
+  fi
+  attempt_daemon_recovery
+  if [ $((now - unhealthy_since)) -ge "$daemon_failure_shutdown_sec" ]; then
+    shutdown_for_daemon_outage "$percent"
   fi
 }
 
 percent="$(conntrack_percent)"
 
 if [ -f "$marker" ]; then
+  if grep -q ' daemon-outage ' "$marker"; then
+    log "node remains shut down: daemon outage marker is present"
+    exit 0
+  fi
   if [ "$percent" -gt "$recover_percent" ]; then
     unlink "$state_dir/recovery-successes" 2>/dev/null || true
     log "node remains quarantined: conntrack=${percent}%"
@@ -145,7 +185,7 @@ if [ -f "$marker" ]; then
   fi
   if ! rpc_healthy; then
     unlink "$state_dir/recovery-successes" 2>/dev/null || true
-    repair_proxy_once
+    attempt_daemon_recovery
     log "node remains quarantined: merged RPC unhealthy"
     exit 0
   fi
@@ -163,10 +203,9 @@ fi
 
 if rpc_healthy; then
   unlink "$state_dir/rpc-failures" 2>/dev/null || true
+  unlink "$state_dir/daemon-unhealthy-since" 2>/dev/null || true
+  unlink "$state_dir/last-daemon-recovery" 2>/dev/null || true
   exit 0
 fi
 
-failures="$(counter_increment rpc-failures)"
-if [ "$failures" -ge "$rpc_failure_limit" ]; then
-  quarantine merged-rpc-unhealthy "$percent"
-fi
+handle_daemon_failure
