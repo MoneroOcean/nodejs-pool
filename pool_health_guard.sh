@@ -42,9 +42,9 @@ read_uint() {
 
 conntrack_percent() {
   local count max
-  count="$(read_uint "$conntrack_count_file")" || { echo 0; return; }
-  max="$(read_uint "$conntrack_max_file")" || { echo 0; return; }
-  [ "$max" -gt 0 ] || { echo 0; return; }
+  count="$(read_uint "$conntrack_count_file")" || return 1
+  max="$(read_uint "$conntrack_max_file")" || return 1
+  [ "$max" -gt 0 ] || return 1
   echo $((count * 100 / max))
 }
 
@@ -53,7 +53,8 @@ pm2_cmd() {
     log "TEST: pm2 $*"
     return 0
   fi
-  runuser -u "$pool_user" -- env HOME="$pool_home" /bin/bash -c \
+  setpriv --reuid="$pool_user" --regid="$pool_user" --init-groups \
+    env HOME="$pool_home" PM2_HOME="$pool_home/.pm2" /bin/bash -c \
     '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; pm2 "$@"' bash "$@"
 }
 
@@ -177,7 +178,14 @@ handle_daemon_failure() {
   fi
 }
 
-percent="$(conntrack_percent)"
+if ! percent="$(conntrack_percent)"; then
+  if [ ! -f "$state_dir/conntrack-unavailable" ]; then
+    : >"$state_dir/conntrack-unavailable"
+    log "conntrack counters unavailable; skipping pressure decision"
+  fi
+  exit 0
+fi
+unlink "$state_dir/conntrack-unavailable" 2>/dev/null || true
 
 if [ -f "$quarantine_file" ]; then
   if [ "$percent" -gt "$recover_percent" ]; then

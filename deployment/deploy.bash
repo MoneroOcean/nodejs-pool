@@ -17,6 +17,7 @@ TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.co
 TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
 TARI_PRUNING_HORIZON="${TARI_PRUNING_HORIZON:-10000}"
 TARI_PRUNING_INTERVAL="${TARI_PRUNING_INTERVAL:-50}"
+POOL_CONNTRACK_MAX="${POOL_CONNTRACK_MAX:-1048576}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -28,6 +29,10 @@ if [ "$#" -gt 0 ]; then
 fi
 if [ -n "${TARI_EXTERNAL_IP+x}" ]; then
   echo "deploy.bash does not support TARI_EXTERNAL_IP; it is only for leaf.bash external base node gRPC"
+  exit 1
+fi
+if [[ ! "$POOL_CONNTRACK_MAX" =~ ^[1-9][0-9]*$ ]]; then
+  echo "POOL_CONNTRACK_MAX must be a positive integer" >&2
   exit 1
 fi
 
@@ -103,24 +108,30 @@ EOF
 }
 
 configure_pool_conntrack() {
-  install -d -m 755 /etc/sysctl.d
-  cat >/etc/sysctl.d/92-moneroocean-conntrack.conf <<'EOF'
+  install -d -m 755 /etc/modules-load.d /etc/sysctl.d
+  printf 'nf_conntrack\n' >/etc/modules-load.d/moneroocean-conntrack.conf
+  cat >/etc/sysctl.d/92-moneroocean-conntrack.conf <<EOF
 # Leave headroom for daemon RPC and management traffic during miner reconnect bursts.
-net.netfilter.nf_conntrack_max = 524288
+net.netfilter.nf_conntrack_max = $POOL_CONNTRACK_MAX
 EOF
-  if ! sysctl -p /etc/sysctl.d/92-moneroocean-conntrack.conf; then
-    if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
-      echo "Skipping active conntrack sysctl apply in test mode"
-      return 0
-    fi
+  if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+    echo "Skipping active conntrack module load and sysctl apply in test mode"
+    return 0
+  fi
+  modprobe nf_conntrack
+  sysctl -p /etc/sysctl.d/92-moneroocean-conntrack.conf
+  if [ "$(sysctl -n net.netfilter.nf_conntrack_max)" != "$POOL_CONNTRACK_MAX" ]; then
+    echo "nf_conntrack_max did not apply: expected $POOL_CONNTRACK_MAX, got $(sysctl -n net.netfilter.nf_conntrack_max)" >&2
     return 1
   fi
 }
 
 configure_pool_health_guard() {
-  chmod 755 /home/user/nodejs-pool/pool_health_guard.sh
-  install -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.service /lib/systemd/system/pool-health-guard.service
-  install -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.timer /lib/systemd/system/pool-health-guard.timer
+  local guard_dir=/usr/local/libexec/moneroocean
+  install -d -o root -g root -m 755 "$guard_dir"
+  install -o root -g root -m 755 /home/user/nodejs-pool/pool_health_guard.sh "$guard_dir/pool-health-guard"
+  install -o root -g root -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.service /lib/systemd/system/pool-health-guard.service
+  install -o root -g root -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.timer /lib/systemd/system/pool-health-guard.timer
   systemctl daemon-reload
   systemctl enable pool-health-guard.timer
   if [ "${POOL_DEPLOY_TEST_MODE:-0}" != "1" ]; then systemctl restart pool-health-guard.timer; fi
@@ -331,7 +342,6 @@ EOF
 configure_unattended_upgrade_blacklist
 configure_needrestart_pm2_guard
 configure_overcommit
-configure_pool_conntrack
 configure_swap
 configure_journald_retention
 
@@ -341,7 +351,8 @@ if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
 else
   retry_command apt-get -o Acquire::Retries=3 full-upgrade -y
 fi
-retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl wget openssl sudo ufw nginx git vim unzip python3 g++ make libc6-dev cmake pkg-config autoconf automake libtool libssl-dev libsqlite3-dev sqlite3 clang libc++-dev libc++abi-dev libprotobuf-dev protobuf-compiler libncurses-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev mysql-server
+retry_command apt-get -o Acquire::Retries=3 install -y ca-certificates curl wget openssl sudo ufw nginx git vim unzip python3 g++ make libc6-dev cmake pkg-config autoconf automake libtool libssl-dev libsqlite3-dev sqlite3 clang libc++-dev libc++abi-dev libprotobuf-dev protobuf-compiler libncurses-dev libunbound-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libzmq3-dev mysql-server kmod
+configure_pool_conntrack
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user

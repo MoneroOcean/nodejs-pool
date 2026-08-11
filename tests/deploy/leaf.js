@@ -342,11 +342,13 @@ async function verifyLeafInstall(context) {
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
         "/etc/sysctl.d/92-moneroocean-conntrack.conf",
+        "/etc/modules-load.d/moneroocean-conntrack.conf",
         "/etc/needrestart/conf.d/moneroocean-pm2.conf",
         "/etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
         "/etc/fail2ban/jail.d/moneroocean-sshd.local",
         "/usr/local/bin/node",
         "/home/user/nodejs-pool/fix_daemon.sh", "/home/user/nodejs-pool/pool_health_guard.sh",
+        "/usr/local/libexec/moneroocean/pool-health-guard",
         "/lib/systemd/system/pool-health-guard.service", "/lib/systemd/system/pool-health-guard.timer",
         "/swapfile"
     ]);
@@ -356,10 +358,10 @@ async function verifyLeafInstall(context) {
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");
     await appendCheckLog(context, "verified Monero hugepage sysctl config");
-    await execInContainer(context.containerName, "grep -q '^net.netfilter.nf_conntrack_max = 524288$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
-    await execInContainer(context.containerName, "test \"$(grep -Fc -- '--connlimit-above 1000 --connlimit-mask 32' /etc/ufw/before.rules)\" -eq 2 && test \"$(grep -Fc -- '--connlimit-above 1000 --connlimit-mask 128' /etc/ufw/before6.rules)\" -eq 2");
+    await execInContainer(context.containerName, "grep -q '^nf_conntrack$' /etc/modules-load.d/moneroocean-conntrack.conf && grep -q '^net.netfilter.nf_conntrack_max = 1048576$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
+    await execInContainer(context.containerName, "test \"$(grep -Fc -- '--syn -m conntrack --ctstate NEW' /etc/ufw/before.rules)\" -eq 2 && test \"$(grep -Fc -- '--connlimit-above 16000 --connlimit-mask 32 --connlimit-saddr' /etc/ufw/before.rules)\" -eq 2 && test \"$(grep -Fc -- '--syn -m conntrack --ctstate NEW' /etc/ufw/before6.rules)\" -eq 2 && test \"$(grep -Fc -- '--connlimit-above 16000 --connlimit-mask 128 --connlimit-saddr' /etc/ufw/before6.rules)\" -eq 2 && ! grep -q -- '--connlimit-above 1000' /etc/ufw/before.rules && ! grep -q -- '--connlimit-above 1000' /etc/ufw/before6.rules");
     await execInContainer(context.containerName, "python3 -c 'from pathlib import Path; p=Path(\"/etc/ufw/before.rules\").read_text(); assert p.index(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") < p.index(\"RELATED,ESTABLISHED\")' && python3 -c 'from pathlib import Path; p=Path(\"/etc/ufw/before6.rules\").read_text(); assert p.index(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") < p.index(\"RELATED,ESTABLISHED\")'");
-    await execInContainer(context.containerName, "systemctl is-enabled --quiet pool-health-guard.timer && grep -q '^OnUnitActiveSec=15s$' /lib/systemd/system/pool-health-guard.timer && grep -q '^ExecStart=/home/user/nodejs-pool/pool_health_guard.sh$' /lib/systemd/system/pool-health-guard.service");
+    await execInContainer(context.containerName, "systemctl is-enabled --quiet pool-health-guard.timer && grep -q '^OnUnitInactiveSec=15s$' /lib/systemd/system/pool-health-guard.timer && grep -q '^ExecStart=/usr/local/libexec/moneroocean/pool-health-guard$' /lib/systemd/system/pool-health-guard.service && grep -q '^ConditionFileIsExecutable=/usr/local/libexec/moneroocean/pool-health-guard$' /lib/systemd/system/pool-health-guard.service && test \"$(stat -c '%U:%G:%a' /usr/local/libexec/moneroocean/pool-health-guard)\" = root:root:755");
     await appendCheckLog(context, "verified pool conntrack capacity and per-IP limits");
     await execInContainer(context.containerName, [
         "grep -q '^PermitRootLogin no$' /etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",

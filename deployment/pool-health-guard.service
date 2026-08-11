@@ -2,9 +2,26 @@
 Description=MoneroOcean pool fail-closed health guard
 After=network-online.target pm2-user.service
 Wants=network-online.target
-ConditionFileIsExecutable=/home/user/nodejs-pool/pool_health_guard.sh
+ConditionFileIsExecutable=/usr/local/libexec/moneroocean/pool-health-guard
 
 [Service]
 Type=oneshot
-ExecStart=/home/user/nodejs-pool/pool_health_guard.sh
+User=root
+Group=root
+ExecStart=/usr/local/libexec/moneroocean/pool-health-guard
 TimeoutStartSec=2min
+RuntimeDirectory=pool-health-guard
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/pool-health-guard /home/user/.pm2
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077

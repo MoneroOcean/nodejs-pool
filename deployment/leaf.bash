@@ -20,6 +20,8 @@ SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-}"
 MONERO_SYNC_TIMEOUT_SECONDS="${MONERO_SYNC_TIMEOUT_SECONDS:-172800}"
 TARI_SYNC_TIMEOUT_SECONDS="${TARI_SYNC_TIMEOUT_SECONDS:-172800}"
 SYNC_POLL_INTERVAL_SECONDS="${SYNC_POLL_INTERVAL_SECONDS:-10}"
+POOL_CONNTRACK_MAX="${POOL_CONNTRACK_MAX:-1048576}"
+POOL_CONN_LIMIT_PER_IP="${POOL_CONN_LIMIT_PER_IP:-16000}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -186,56 +188,70 @@ EOF
 }
 
 configure_pool_conntrack() {
-  install -d -m 755 /etc/sysctl.d
-  cat >/etc/sysctl.d/92-moneroocean-conntrack.conf <<'EOF'
+  install -d -m 755 /etc/modules-load.d /etc/sysctl.d
+  printf 'nf_conntrack\n' >/etc/modules-load.d/moneroocean-conntrack.conf
+  cat >/etc/sysctl.d/92-moneroocean-conntrack.conf <<EOF
 # Leave headroom for daemon RPC and management traffic during miner reconnect bursts.
-net.netfilter.nf_conntrack_max = 524288
+net.netfilter.nf_conntrack_max = $POOL_CONNTRACK_MAX
 EOF
-  if ! sysctl -p /etc/sysctl.d/92-moneroocean-conntrack.conf; then
-    if is_test_mode; then
-      echo "Skipping active conntrack sysctl apply in test mode"
-      return 0
-    fi
+  if is_test_mode; then
+    echo "Skipping active conntrack module load and sysctl apply in test mode"
+    return 0
+  fi
+  modprobe nf_conntrack
+  sysctl -p /etc/sysctl.d/92-moneroocean-conntrack.conf
+  if [ "$(sysctl -n net.netfilter.nf_conntrack_max)" != "$POOL_CONNTRACK_MAX" ]; then
+    echo "nf_conntrack_max did not apply: expected $POOL_CONNTRACK_MAX, got $(sysctl -n net.netfilter.nf_conntrack_max)" >&2
     return 1
   fi
 }
 
 configure_pool_health_guard() {
-  chmod 755 /home/user/nodejs-pool/pool_health_guard.sh
-  install -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.service /lib/systemd/system/pool-health-guard.service
-  install -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.timer /lib/systemd/system/pool-health-guard.timer
+  local guard_dir=/usr/local/libexec/moneroocean
+  install -d -o root -g root -m 755 "$guard_dir"
+  install -o root -g root -m 755 /home/user/nodejs-pool/pool_health_guard.sh "$guard_dir/pool-health-guard"
+  install -o root -g root -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.service /lib/systemd/system/pool-health-guard.service
+  install -o root -g root -m 644 /home/user/nodejs-pool/deployment/pool-health-guard.timer /lib/systemd/system/pool-health-guard.timer
   systemctl daemon-reload
   systemctl enable pool-health-guard.timer
   if ! is_test_mode; then systemctl restart pool-health-guard.timer; fi
 }
 
 configure_pool_connlimits() {
-  local family file chain mask rules_dir="${POOL_UFW_RULES_DIR:-/etc/ufw}"
+  local family file candidate chain mask rules_dir="${POOL_UFW_RULES_DIR:-/etc/ufw}"
+  local candidate_dir candidate4 candidate6
+  candidate_dir="$(mktemp -d "$rules_dir/.moneroocean-connlimits.XXXXXX")"
   for family in 4 6; do
     if [ "$family" = 4 ]; then
       file="$rules_dir/before.rules"
+      candidate="$candidate_dir/before.rules"
+      candidate4="$candidate"
       chain=ufw-before-input
       mask=32
     else
       file="$rules_dir/before6.rules"
+      candidate="$candidate_dir/before6.rules"
+      candidate6="$candidate"
       chain=ufw6-before-input
       mask=128
     fi
-    python3 - "$file" "$chain" "$mask" <<'PY'
+    cp --preserve=mode,ownership,timestamps "$file" "$candidate"
+    python3 - "$candidate" "$chain" "$mask" "$POOL_CONN_LIMIT_PER_IP" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 chain = sys.argv[2]
 mask = sys.argv[3]
+limit = sys.argv[4]
 begin = "# BEGIN MONEROOCEAN POOL CONNLIMIT"
 end = "# END MONEROOCEAN POOL CONNLIMIT"
 plain_ports = "80,10001,10002,10004,10008,10016,10032,10064,10128,10256,10512,11024,12048,14096,18192"
 tls_ports = "443,20001,20002,20004,20008,20016,20032,20064,20128,20256,20512,21024,22048,24096,28192"
 rules = [
     begin,
-    f"-A {chain} -p tcp -m multiport --dports {plain_ports} -m connlimit --connlimit-above 1000 --connlimit-mask {mask} -j REJECT --reject-with tcp-reset",
-    f"-A {chain} -p tcp -m multiport --dports {tls_ports} -m connlimit --connlimit-above 1000 --connlimit-mask {mask} -j REJECT --reject-with tcp-reset",
+    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {plain_ports} -m connlimit --connlimit-above {limit} --connlimit-mask {mask} --connlimit-saddr -j REJECT --reject-with tcp-reset",
+    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {tls_ports} -m connlimit --connlimit-above {limit} --connlimit-mask {mask} --connlimit-saddr -j REJECT --reject-with tcp-reset",
     end,
 ]
 lines = path.read_text(encoding="utf-8").splitlines()
@@ -246,6 +262,18 @@ if begin in lines:
     except ValueError as exc:
         raise SystemExit(f"missing connlimit end marker in {path}") from exc
     del lines[start:stop]
+# Remove the original unmarked rules from early deployments before inserting
+# the canonical managed block. This keeps reruns idempotent on existing leaves.
+lines = [
+    line for line in lines
+    if not (
+        line.startswith(f"-A {chain} ")
+        and "-m connlimit" in line
+        and "--connlimit-above 1000" in line
+        and "--reject-with tcp-reset" in line
+        and (plain_ports in line or tls_ports in line)
+    )
+]
 anchor = next((index for index, line in enumerate(lines)
                if line.startswith(f"-A {chain} ") and "RELATED,ESTABLISHED" in line and line.endswith("-j ACCEPT")), None)
 if anchor is None:
@@ -256,9 +284,12 @@ PY
   done
 
   if ! is_test_mode; then
-    iptables-restore --test <"$rules_dir/before.rules"
-    ip6tables-restore --test <"$rules_dir/before6.rules"
+    iptables-restore --test <"$candidate4"
+    ip6tables-restore --test <"$candidate6"
   fi
+  mv "$candidate4" "$rules_dir/before.rules"
+  mv "$candidate6" "$rules_dir/before6.rules"
+  rmdir "$candidate_dir"
 }
 
 configure_swap() {
@@ -340,6 +371,8 @@ validate_positive_integer "$TARI_PRUNING_INTERVAL" TARI_PRUNING_INTERVAL
 validate_non_negative_integer "$MONERO_SYNC_TIMEOUT_SECONDS" MONERO_SYNC_TIMEOUT_SECONDS
 validate_non_negative_integer "$TARI_SYNC_TIMEOUT_SECONDS" TARI_SYNC_TIMEOUT_SECONDS
 validate_positive_integer "$SYNC_POLL_INTERVAL_SECONDS" SYNC_POLL_INTERVAL_SECONDS
+validate_positive_integer "$POOL_CONNTRACK_MAX" POOL_CONNTRACK_MAX
+validate_positive_integer "$POOL_CONN_LIMIT_PER_IP" POOL_CONN_LIMIT_PER_IP
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,global:INFO,sync-info:INFO,cn:ERROR,blockchain:ERROR,verify:ERROR}"
@@ -571,7 +604,6 @@ EOF
 }
 
 configure_overcommit
-configure_pool_conntrack
 configure_swap
 configure_journald_retention
 configure_needrestart_pm2_guard
@@ -588,9 +620,10 @@ packages=(
   libssl-dev libsqlite3-dev sqlite3 libc++-dev libc++abi-dev
   libprotobuf-dev protobuf-compiler libncurses-dev libunbound-dev
   libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev
-  libzmq3-dev libcap2-bin
+  libzmq3-dev libcap2-bin kmod
 )
 retry_command apt-get -o Acquire::Retries=3 install -y "${packages[@]}"
+configure_pool_conntrack
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user

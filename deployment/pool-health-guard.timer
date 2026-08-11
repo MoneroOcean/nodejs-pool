@@ -3,10 +3,9 @@ Description=Check MoneroOcean pool health every 15 seconds
 
 [Timer]
 OnBootSec=30s
-OnUnitActiveSec=15s
+OnUnitInactiveSec=15s
 AccuracySec=1s
 RandomizedDelaySec=0
 
 [Install]
 WantedBy=timers.target
-

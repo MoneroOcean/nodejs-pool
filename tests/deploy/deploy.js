@@ -311,6 +311,7 @@ async function verifyDeployInstall(context) {
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
         "/etc/sysctl.d/92-moneroocean-conntrack.conf",
+        "/etc/modules-load.d/moneroocean-conntrack.conf",
         "/etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
         "/etc/needrestart/conf.d/moneroocean-pm2.conf",
         "/home/user/nodejs-pool/fix_daemon.sh",
@@ -330,7 +331,7 @@ async function verifyDeployInstall(context) {
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");
     await appendCheckLog(context, "verified Monero hugepage sysctl config");
-    await execInContainer(context.containerName, "grep -q '^net.netfilter.nf_conntrack_max = 524288$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
+    await execInContainer(context.containerName, "grep -q '^nf_conntrack$' /etc/modules-load.d/moneroocean-conntrack.conf && grep -q '^net.netfilter.nf_conntrack_max = 1048576$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
     await appendCheckLog(context, "verified pool conntrack capacity");
     await execInContainer(context.containerName, [
         "grep -Fq 'gzip_vary on;' /etc/nginx/conf.d/moneroocean-gzip.conf",
