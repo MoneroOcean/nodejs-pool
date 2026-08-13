@@ -55,6 +55,6 @@ echo "Building Tari $TARI_RELEASE_TAG"
 ensure_rust_toolchain
 checkout_repo_ref "$TARI_REPO_URL" /usr/local/src/tari "$TARI_RELEASE_TAG"
 sudo rm -rf /usr/local/src/tari/target
-sudo TARI_TARGET_NETWORK="$TARI_NETWORK" bash -lc ". /root/.cargo/env && cd /usr/local/src/tari && cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy"
+sudo TARI_TARGET_NETWORK="$TARI_NETWORK" bash -lc ". /root/.cargo/env && cd /usr/local/src/tari && cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy -p minotari_console_wallet"
 
-echo "Done. Restart when ready: sudo systemctl restart monero xtm xtm_mm"
+echo "Done. Deploy the Tari node/proxy/wallet binaries to their service paths, then restart the applicable services one at a time."
