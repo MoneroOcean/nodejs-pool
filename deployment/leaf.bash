@@ -5,7 +5,7 @@ trap 'echo "Leaf deployment failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
 MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.5.0}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.6.0}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"

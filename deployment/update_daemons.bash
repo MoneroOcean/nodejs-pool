@@ -4,7 +4,7 @@ set -e
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
 MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.5.0}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.6.0}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }

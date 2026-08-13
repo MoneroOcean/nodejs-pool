@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Patch a stock Tari 5.5 mainnet config.toml for MoneroOcean-style XTM use.
+# Patch a stock Tari 5.6 mainnet config.toml for MoneroOcean-style XTM use.
 #
 # This script modifies only these settings:
 # - [base_node]
