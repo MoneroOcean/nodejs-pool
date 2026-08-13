@@ -22,6 +22,8 @@ TARI_SYNC_TIMEOUT_SECONDS="${TARI_SYNC_TIMEOUT_SECONDS:-172800}"
 SYNC_POLL_INTERVAL_SECONDS="${SYNC_POLL_INTERVAL_SECONDS:-10}"
 POOL_CONNTRACK_MAX="${POOL_CONNTRACK_MAX:-1048576}"
 POOL_CONN_LIMIT_PER_IP="${POOL_CONN_LIMIT_PER_IP:-16000}"
+POOL_PLAIN_PORTS=(80 10001 10002 10004 10008 10016 10032 10064 10128 10256 10512 11024 12048 14096 18192)
+POOL_TLS_PORTS=(443 20001 20002 20004 20008 20016 20032 20064 20128 20256 20512 21024 22048 24096 28192)
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -225,6 +227,8 @@ configure_pool_health_guard() {
 configure_pool_connlimits() {
   local family file candidate chain mask rules_dir="${POOL_UFW_RULES_DIR:-/etc/ufw}"
   local candidate_dir candidate4 candidate6
+  local IFS=,
+  local plain_ports="${POOL_PLAIN_PORTS[*]}" tls_ports="${POOL_TLS_PORTS[*]}"
   candidate_dir="$(mktemp -d "$rules_dir/.moneroocean-connlimits.XXXXXX")"
   for family in 4 6; do
     if [ "$family" = 4 ]; then
@@ -241,7 +245,7 @@ configure_pool_connlimits() {
       mask=128
     fi
     cp --preserve=mode,ownership,timestamps "$file" "$candidate"
-    python3 - "$candidate" "$chain" "$mask" "$POOL_CONN_LIMIT_PER_IP" <<'PY'
+    python3 - "$candidate" "$chain" "$mask" "$POOL_CONN_LIMIT_PER_IP" "$plain_ports" "$tls_ports" <<'PY'
 from pathlib import Path
 import sys
 
@@ -249,10 +253,10 @@ path = Path(sys.argv[1])
 chain = sys.argv[2]
 mask = sys.argv[3]
 limit = sys.argv[4]
+plain_ports = sys.argv[5]
+tls_ports = sys.argv[6]
 begin = "# BEGIN MONEROOCEAN POOL CONNLIMIT"
 end = "# END MONEROOCEAN POOL CONNLIMIT"
-plain_ports = "80,10001,10002,10004,10008,10016,10032,10064,10128,10256,10512,11024,12048,14096,18192"
-tls_ports = "443,20001,20002,20004,20008,20016,20032,20064,20128,20256,20512,21024,22048,24096,28192"
 rules = [
     begin,
     f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {plain_ports} -m connlimit --connlimit-above {limit} --connlimit-mask {mask} --connlimit-saddr -j REJECT --reject-with tcp-reset",
@@ -645,7 +649,7 @@ configure_ssh_hardening
 ufw default deny incoming
 ufw default allow outgoing
 configure_pool_connlimits
-for rule in ssh 3333 5555 7777 18141 18189; do
+for rule in ssh "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18141 18189; do
   ufw allow "$rule"
 done
 ufw --force enable
