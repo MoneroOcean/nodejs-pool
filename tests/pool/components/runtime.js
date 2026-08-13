@@ -92,6 +92,65 @@ test("missing rpc id warnings are summarized instead of logged on every malforme
     }
 });
 
+test("disabled miner debug skips formatting RPC bodies", () => {
+    const originalConfig = global.config;
+    let formatCalls = 0;
+    const debug = function captureDebug() {};
+    debug.enabled = false;
+
+    try {
+        global.config = { pool: {} };
+        const state = {
+            threadName: "(Test) ",
+            activeConnectionsByIP: {},
+            activeConnectionsBySubnet: {},
+            activeMiners: new Map(),
+            activeMinerSockets: new Map(),
+            freeEthExtranonces: []
+        };
+        const serverFactory = createServerFactory({
+            debug,
+            fs: require("node:fs"),
+            net: require("node:net"),
+            tls: require("node:tls"),
+            state,
+            formatPoolEvent(label, fields) {
+                ++formatCalls;
+                return `${label}: ${JSON.stringify(fields)}`;
+            },
+            handleMinerData(_socket, _id, _method, _params, _ip, _port, sendReply) {
+                sendReply(null, { ok: true });
+            },
+            removeMiner() {}
+        });
+
+        const socket = new EventEmitter();
+        socket.remoteAddress = "127.0.0.2";
+        socket.writable = true;
+        socket.destroyed = false;
+        socket.finalizing = false;
+        socket.setKeepAlive = function setKeepAlive() {};
+        socket.setEncoding = function setEncoding() {};
+        socket.write = function write() {};
+        socket.end = function end() {
+            socket.writable = false;
+        };
+        socket.destroy = function destroy() {
+            socket.writable = false;
+            socket.destroyed = true;
+        };
+
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+        handleSocket(socket);
+        socket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
+        socket.emit("close");
+
+        assert.equal(formatCalls, 0);
+    } finally {
+        global.config = originalConfig;
+    }
+});
+
 test("eth-style nonces are deduped across miners on the same block template", () => {
     const originalConfig = global.config;
     const originalCoinFuncs = global.coinFuncs;
@@ -421,6 +480,8 @@ test("XTM-C proofs are deduped across jobs on the same block template", () => {
 
 test("share processor records accepted shares through the common verification path", async () => {
     const messages = [];
+    const debug = function captureDebug() {};
+    debug.enabled = false;
     const databaseShares = [];
     const walletTrust = { wallet: 0 };
     const walletLastSeeTime = {};
@@ -506,7 +567,7 @@ test("share processor records accepted shares through the common verification pa
 
     const shareProcessor = createShareProcessor({
         crypto: require("node:crypto"),
-        debug() {},
+        debug,
         divideBaseDiff() {
             return 10n;
         },
@@ -544,6 +605,9 @@ test("share processor records accepted shares through the common verification pa
         },
         formatCoinPort(coin) {
             return coin === "" ? "XMR/39001" : `${coin}/39002`;
+        },
+        formatPoolEvent() {
+            assert.fail("disabled debug must not format share events");
         },
         getLastMinerLogTime() {
             return lastMinerLogTime;
