@@ -30,6 +30,11 @@ POOL_CONNTRACK_MAX="${POOL_CONNTRACK_MAX:-524288}"
 # above the five-worker aggregate application cap (5 * 256 = 1280). Loopback
 # Tor ingress is accepted earlier by UFW and is intentionally unaffected.
 POOL_CONN_LIMIT_PER_IP="${POOL_CONN_LIMIT_PER_IP:-1500}"
+# Bound public new connections before socket/TLS state can grow. The same
+# hashlimit name is used for plain and TLS rules within each address family so
+# one source cannot bypass the rate by moving between port groups.
+POOL_NEW_CONN_RATE_PER_IP="${POOL_NEW_CONN_RATE_PER_IP:-5/second}"
+POOL_NEW_CONN_BURST="${POOL_NEW_CONN_BURST:-100}"
 POOL_PLAIN_PORTS=(80 10001 10002 10004 10008 10016 10032 10064 10128 10256 10512 11024 12048 14096 18192)
 POOL_TLS_PORTS=(443 20001 20002 20004 20008 20016 20032 20064 20128 20256 20512 21024 22048 24096 28192)
 
@@ -233,7 +238,7 @@ configure_pool_health_guard() {
 }
 
 configure_pool_connlimits() {
-  local family file candidate chain mask rules_dir="${POOL_UFW_RULES_DIR:-/etc/ufw}"
+  local family file candidate chain mask hash_name rules_dir="${POOL_UFW_RULES_DIR:-/etc/ufw}"
   local candidate_dir candidate4 candidate6
   local IFS=,
   local plain_ports="${POOL_PLAIN_PORTS[*]}" tls_ports="${POOL_TLS_PORTS[*]}"
@@ -245,40 +250,60 @@ configure_pool_connlimits() {
       candidate4="$candidate"
       chain=ufw-before-input
       mask=32
+      hash_name=moneroocean_pool_new_v4
     else
       file="$rules_dir/before6.rules"
       candidate="$candidate_dir/before6.rules"
       candidate6="$candidate"
       chain=ufw6-before-input
       mask=128
+      hash_name=moneroocean_pool_new_v6
     fi
     cp --preserve=mode,ownership,timestamps "$file" "$candidate"
-    python3 - "$candidate" "$chain" "$mask" "$POOL_CONN_LIMIT_PER_IP" "$plain_ports" "$tls_ports" <<'PY'
+    python3 - "$candidate" "$chain" "$mask" "$POOL_CONN_LIMIT_PER_IP" "$POOL_NEW_CONN_RATE_PER_IP" "$POOL_NEW_CONN_BURST" "$plain_ports" "$tls_ports" "$hash_name" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 chain = sys.argv[2]
 mask = sys.argv[3]
-limit = sys.argv[4]
-plain_ports = sys.argv[5]
-tls_ports = sys.argv[6]
+connlimit = sys.argv[4]
+rate = sys.argv[5]
+burst = sys.argv[6]
+plain_ports = sys.argv[7]
+tls_ports = sys.argv[8]
+hash_name = sys.argv[9]
+rate_begin = "# BEGIN MONEROOCEAN POOL CONNRATE"
+rate_end = "# END MONEROOCEAN POOL CONNRATE"
 begin = "# BEGIN MONEROOCEAN POOL CONNLIMIT"
 end = "# END MONEROOCEAN POOL CONNLIMIT"
-rules = [
+rate_rules = [
+    rate_begin,
+    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {plain_ports} -m hashlimit --hashlimit-above {rate} --hashlimit-burst {burst} --hashlimit-mode srcip --hashlimit-name {hash_name} -j DROP",
+    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {tls_ports} -m hashlimit --hashlimit-above {rate} --hashlimit-burst {burst} --hashlimit-mode srcip --hashlimit-name {hash_name} -j DROP",
+    rate_end,
+]
+connlimit_rules = [
     begin,
-    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {plain_ports} -m connlimit --connlimit-above {limit} --connlimit-mask {mask} --connlimit-saddr -j REJECT --reject-with tcp-reset",
-    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {tls_ports} -m connlimit --connlimit-above {limit} --connlimit-mask {mask} --connlimit-saddr -j REJECT --reject-with tcp-reset",
+    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {plain_ports} -m connlimit --connlimit-above {connlimit} --connlimit-mask {mask} --connlimit-saddr -j REJECT --reject-with tcp-reset",
+    f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {tls_ports} -m connlimit --connlimit-above {connlimit} --connlimit-mask {mask} --connlimit-saddr -j REJECT --reject-with tcp-reset",
     end,
 ]
 lines = path.read_text(encoding="utf-8").splitlines()
-if begin in lines:
-    start = lines.index(begin)
-    try:
-        stop = lines.index(end, start) + 1
-    except ValueError as exc:
-        raise SystemExit(f"missing connlimit end marker in {path}") from exc
-    del lines[start:stop]
+
+def remove_managed_block(lines, block_begin, block_end):
+    while block_begin in lines:
+        start = lines.index(block_begin)
+        try:
+            stop = lines.index(block_end, start) + 1
+        except ValueError as exc:
+            raise SystemExit(f"missing managed block end marker in {path}") from exc
+        del lines[start:stop]
+
+# Remove both current and legacy managed blocks before inserting canonical
+# rules. Removing all copies also repairs partially duplicated prior runs.
+remove_managed_block(lines, rate_begin, rate_end)
+remove_managed_block(lines, begin, end)
 # Remove the original unmarked rules from early deployments before inserting
 # the canonical managed block. This keeps reruns idempotent on existing leaves.
 lines = [
@@ -295,7 +320,7 @@ anchor = next((index for index, line in enumerate(lines)
                if line.startswith(f"-A {chain} ") and "RELATED,ESTABLISHED" in line and line.endswith("-j ACCEPT")), None)
 if anchor is None:
     raise SystemExit(f"cannot find established-traffic anchor in {path}")
-lines[anchor:anchor] = rules
+lines[anchor:anchor] = rate_rules + connlimit_rules
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
   done
@@ -390,6 +415,11 @@ validate_non_negative_integer "$TARI_SYNC_TIMEOUT_SECONDS" TARI_SYNC_TIMEOUT_SEC
 validate_positive_integer "$SYNC_POLL_INTERVAL_SECONDS" SYNC_POLL_INTERVAL_SECONDS
 validate_positive_integer "$POOL_CONNTRACK_MAX" POOL_CONNTRACK_MAX
 validate_positive_integer "$POOL_CONN_LIMIT_PER_IP" POOL_CONN_LIMIT_PER_IP
+validate_positive_integer "$POOL_NEW_CONN_BURST" POOL_NEW_CONN_BURST
+if [[ ! "$POOL_NEW_CONN_RATE_PER_IP" =~ ^[1-9][0-9]*/(second|minute|hour|day|s|m|h|d)$ ]]; then
+  echo "Invalid POOL_NEW_CONN_RATE_PER_IP value: $POOL_NEW_CONN_RATE_PER_IP" >&2
+  exit 1
+fi
 HUGEPAGES_GROUP="${HUGEPAGES_GROUP:-hugepages}"
 MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,global:INFO,sync-info:INFO,cn:ERROR,blockchain:ERROR,verify:ERROR}"
