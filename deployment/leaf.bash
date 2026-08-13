@@ -31,7 +31,12 @@ fi
 # Transient systemd units do not necessarily inherit a login HOME.
 export HOME="${HOME:-/root}"
 export DEBIAN_FRONTEND=noninteractive
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Scripts read from stdin have no source path; do not treat the caller's CWD
+# as a trusted deployment bundle.
+SCRIPT_DIR=""
+if [ -f "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 
 is_test_mode() {
   [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]
@@ -510,7 +515,7 @@ patch_tari_config() {
   local args=("$config" "--no-backup" "--pruning-horizon" "$TARI_PRUNING_HORIZON" "--pruning-interval" "$TARI_PRUNING_INTERVAL")
   # Deployments copy both scripts together. Prefer that reviewed copy and use
   # the URL only for the documented curl-pipe installation path.
-  if [ -f "$bundled_patcher" ]; then
+  if [ -n "$SCRIPT_DIR" ] && [ -f "$bundled_patcher" ]; then
     install -m 755 "$bundled_patcher" "$patcher"
   else
     retry_command curl -fsSL -o "$patcher" "$TARI_CONFIG_PATCH_URL"
