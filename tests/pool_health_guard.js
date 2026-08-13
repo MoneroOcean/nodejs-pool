@@ -37,18 +37,18 @@ function runGuard(root, values = {}) {
 test("pool health guard quarantines conntrack pressure and recovers after two healthy probes", function guardRecovery() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
     try {
-        const healthyOutput = runGuard(root, { count: 64 });
+        const healthyOutput = runGuard(root, { count: 69 });
         assert.doesNotMatch(healthyOutput, /quarantining pool/);
 
-        const tripOutput = runGuard(root, { count: 65 });
+        const tripOutput = runGuard(root, { count: 70 });
         assert.match(tripOutput, /quarantining pool: reason=conntrack-pressure/);
         assert.match(tripOutput, /TEST: pm2 stop pool/);
         assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
         assert.equal(fs.existsSync(path.join(root, "pool_health_guard_unhealthy")), false);
 
-        runGuard(root, { count: 50 });
+        runGuard(root, { count: 55 });
         assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
-        const recoverOutput = runGuard(root, { count: 50 });
+        const recoverOutput = runGuard(root, { count: 55 });
         assert.match(recoverOutput, /TEST: pm2 restart pool/);
         assert.equal(fs.existsSync(path.join(root, "state", "quarantine")), false);
     } finally {
@@ -132,14 +132,14 @@ test("pool health guard does not stop or recover the pool when conntrack counter
         const repeatedOutput = runGuard(root, { missingCount: true });
         assert.doesNotMatch(repeatedOutput, /conntrack counters unavailable/);
 
-        runGuard(root, { count: 65 });
+        runGuard(root, { count: 70 });
         assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
         const quarantinedOutput = runGuard(root, { missingMax: true });
         assert.doesNotMatch(quarantinedOutput, /TEST: pm2 restart pool/);
         assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
 
-        runGuard(root, { count: 50 });
-        const recoveredOutput = runGuard(root, { count: 50 });
+        runGuard(root, { count: 55 });
+        const recoveredOutput = runGuard(root, { count: 55 });
         assert.match(recoveredOutput, /TEST: pm2 restart pool/);
         assert.equal(fs.existsSync(path.join(root, "state", "quarantine")), false);
     } finally {
