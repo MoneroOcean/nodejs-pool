@@ -225,6 +225,8 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'maxConnectionsPerSubnet', '1024', 'int', 'Maximum simultaneous pool connections accepted from one IPv4 /24 subnet.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'loginRateLimitPerSecond', '5', 'int', 'Refill rate for the per-IP login token bucket.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'loginRateLimitBurst', '100', 'int', 'Burst size for the per-IP login token bucket.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'loginRateLimitLoopbackPerSecond', '100', 'int', 'Refill rate for the loopback login token bucket.');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'loginRateLimitLoopbackBurst', '2000', 'int', 'Burst size for the loopback login token bucket.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'submitRateLimitPerSecond', '250', 'int', 'Refill rate for the per-IP submit token bucket.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'submitRateLimitBurst', '5000', 'int', 'Burst size for the per-IP submit token bucket.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('pool', 'keepaliveRateLimitPerSecond', '2', 'int', 'Refill rate for the per-IP keepalive token bucket.');

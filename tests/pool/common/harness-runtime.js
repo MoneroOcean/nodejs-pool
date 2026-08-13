@@ -52,6 +52,8 @@ function installTestGlobals() {
             maxConnectionsPerSubnet: 1024,
             loginRateLimitPerSecond: 5,
             loginRateLimitBurst: 100,
+            loginRateLimitLoopbackPerSecond: 100,
+            loginRateLimitLoopbackBurst: 2000,
             submitRateLimitPerSecond: 250,
             submitRateLimitBurst: 5000,
             keepaliveRateLimitPerSecond: 2,

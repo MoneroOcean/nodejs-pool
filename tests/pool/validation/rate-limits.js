@@ -84,6 +84,75 @@ test("login requests are rejected when the per-IP login rate limit is exceeded",
     }
 });
 
+test("loopback login requests use the higher cap while non-loopback keeps the base cap", async () => {
+    const { runtime } = await startHarness();
+    const originalLoginRateLimitPerSecond = global.config.pool.loginRateLimitPerSecond;
+    const originalLoginRateLimitBurst = global.config.pool.loginRateLimitBurst;
+    const originalLoopbackRateLimitPerSecond = global.config.pool.loginRateLimitLoopbackPerSecond;
+    const originalLoopbackRateLimitBurst = global.config.pool.loginRateLimitLoopbackBurst;
+
+    try {
+        global.config.pool.loginRateLimitPerSecond = 1;
+        global.config.pool.loginRateLimitBurst = 1;
+        global.config.pool.loginRateLimitLoopbackPerSecond = 2;
+        global.config.pool.loginRateLimitLoopbackBurst = 2;
+
+        const loopbackIpv4 = invokePoolMethod({
+            socket: {},
+            id: 1945,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "loopback-ipv4" },
+            ip: "127.0.0.1"
+        });
+        const loopbackMappedIpv4 = invokePoolMethod({
+            socket: {},
+            id: 1946,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "loopback-mapped-ipv4" },
+            ip: "::ffff:127.0.0.1"
+        });
+        const loopbackIpv6 = invokePoolMethod({
+            socket: {},
+            id: 1947,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "loopback-ipv6" },
+            ip: "::1"
+        });
+        const publicFirst = invokePoolMethod({
+            socket: {},
+            id: 1948,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "public-first" },
+            ip: "10.0.0.99"
+        });
+        const publicSecond = invokePoolMethod({
+            socket: {},
+            id: 1949,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "public-second" },
+            ip: "10.0.0.99"
+        });
+
+        assert.equal(loopbackIpv4.replies[0].error, null);
+        assert.equal(loopbackMappedIpv4.replies[0].error, null);
+        assert.deepEqual(loopbackIpv6.finals, [{
+            error: "Rate limit exceeded for login requests",
+            timeout: undefined
+        }]);
+        assert.equal(publicFirst.replies[0].error, null);
+        assert.deepEqual(publicSecond.finals, [{
+            error: "Rate limit exceeded for login requests",
+            timeout: undefined
+        }]);
+    } finally {
+        global.config.pool.loginRateLimitPerSecond = originalLoginRateLimitPerSecond;
+        global.config.pool.loginRateLimitBurst = originalLoginRateLimitBurst;
+        global.config.pool.loginRateLimitLoopbackPerSecond = originalLoopbackRateLimitPerSecond;
+        global.config.pool.loginRateLimitLoopbackBurst = originalLoopbackRateLimitBurst;
+        await runtime.stop();
+    }
+});
+
 test("subscribe-phase requests share the login rate limit bucket", async () => {
     const { runtime } = await startHarness();
     const originalLoginRateLimitPerSecond = global.config.pool.loginRateLimitPerSecond;
