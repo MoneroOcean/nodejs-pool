@@ -7,12 +7,13 @@ state_dir="${POOL_GUARD_STATE_DIR:-/run/pool-health-guard}"
 quarantine_file="$state_dir/quarantine"
 conntrack_count_file="${POOL_GUARD_CONNTRACK_COUNT_FILE:-/proc/sys/net/netfilter/nf_conntrack_count}"
 conntrack_max_file="${POOL_GUARD_CONNTRACK_MAX_FILE:-/proc/sys/net/netfilter/nf_conntrack_max}"
-# With the leaf default of 524288 entries, intervene at about 288k and wait
-# until pressure falls to about 210k before restarting the pool. Healthy leaves
-# normally sit around 130k-160k entries, so this retains useful headroom while
-# avoiding the load already observed well below the old 80% of a 1M table.
-trip_percent="${POOL_GUARD_TRIP_PERCENT:-55}"
-recover_percent="${POOL_GUARD_RECOVER_PERCENT:-40}"
+# With the leaf default of 524288 entries, intervene at about 315k and wait
+# until pressure falls to about 236k before restarting the pool. Healthy leaves
+# normally sit around 130k-160k entries; NL's post-restart reconnect wave peaked
+# just below 300k, so these defaults retain burst headroom while avoiding the
+# load already observed well below the old 80% of a 1M table.
+trip_percent="${POOL_GUARD_TRIP_PERCENT:-60}"
+recover_percent="${POOL_GUARD_RECOVER_PERCENT:-45}"
 recovery_success_limit="${POOL_GUARD_RECOVERY_SUCCESS_LIMIT:-2}"
 rpc_url="${POOL_GUARD_RPC_URL:-http://127.0.0.1:18081/json_rpc}"
 rpc_timeout_sec="${POOL_GUARD_RPC_TIMEOUT_SEC:-20}"
