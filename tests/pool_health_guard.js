@@ -37,7 +37,10 @@ function runGuard(root, values = {}) {
 test("pool health guard quarantines conntrack pressure and recovers after two healthy probes", function guardRecovery() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-health-guard-"));
     try {
-        const tripOutput = runGuard(root, { count: 80 });
+        const healthyOutput = runGuard(root, { count: 54 });
+        assert.doesNotMatch(healthyOutput, /quarantining pool/);
+
+        const tripOutput = runGuard(root, { count: 55 });
         assert.match(tripOutput, /quarantining pool: reason=conntrack-pressure/);
         assert.match(tripOutput, /TEST: pm2 stop pool/);
         assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
@@ -129,7 +132,7 @@ test("pool health guard does not stop or recover the pool when conntrack counter
         const repeatedOutput = runGuard(root, { missingCount: true });
         assert.doesNotMatch(repeatedOutput, /conntrack counters unavailable/);
 
-        runGuard(root, { count: 80 });
+        runGuard(root, { count: 55 });
         assert.ok(fs.existsSync(path.join(root, "state", "quarantine")));
         const quarantinedOutput = runGuard(root, { missingMax: true });
         assert.doesNotMatch(quarantinedOutput, /TEST: pm2 restart pool/);

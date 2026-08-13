@@ -20,8 +20,16 @@ SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-}"
 MONERO_SYNC_TIMEOUT_SECONDS="${MONERO_SYNC_TIMEOUT_SECONDS:-172800}"
 TARI_SYNC_TIMEOUT_SECONDS="${TARI_SYNC_TIMEOUT_SECONDS:-172800}"
 SYNC_POLL_INTERVAL_SECONDS="${SYNC_POLL_INTERVAL_SECONDS:-10}"
-POOL_CONNTRACK_MAX="${POOL_CONNTRACK_MAX:-1048576}"
-POOL_CONN_LIMIT_PER_IP="${POOL_CONN_LIMIT_PER_IP:-16000}"
+# Normal leaves use roughly 130k-160k entries. Keep several times that
+# headroom while allowing the health guard to intervene before a reconnect
+# flood consumes hundreds of additional MiB of kernel slab memory.
+POOL_CONNTRACK_MAX="${POOL_CONNTRACK_MAX:-524288}"
+# Public clients are also capped in the pool workers, but TLS connections can
+# consume kernel and OpenSSL state before application authentication completes.
+# Keep a host-wide ceiling below abusive reconnect/fan-out levels while staying
+# above the five-worker aggregate application cap (5 * 256 = 1280). Loopback
+# Tor ingress is accepted earlier by UFW and is intentionally unaffected.
+POOL_CONN_LIMIT_PER_IP="${POOL_CONN_LIMIT_PER_IP:-1500}"
 POOL_PLAIN_PORTS=(80 10001 10002 10004 10008 10016 10032 10064 10128 10256 10512 11024 12048 14096 18192)
 POOL_TLS_PORTS=(443 20001 20002 20004 20008 20016 20032 20064 20128 20256 20512 21024 22048 24096 28192)
 
