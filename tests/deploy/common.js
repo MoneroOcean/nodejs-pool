@@ -60,6 +60,7 @@ test("leaf staged sync modes and P2P source rules stay narrowly scoped", () => {
     assert.match(script, /ufw allow from "\$source" to any port 18080 proto tcp/);
     assert.match(script, /ufw --force delete allow from "\$\{BASH_REMATCH\[1\]\}" to any proto tcp/);
     assert.match(script, /ufw --force delete allow from "\$\{BASH_REMATCH\[1\]\}" to any port 18080 proto tcp/);
+    assert.match(script, /Wants=network-online\.target[\s\S]*?After=network-online\.target[\s\S]*?ExecStartPre=\/bin\/sleep 10/);
     assert.match(script, /if \[ "\$LEAF_SKIP_SYNC_WAIT" = 1 \]; then\s+systemctl disable xtm_mm/);
     assert.match(script, /finalize_leaf_after_sync\(\) \{[\s\S]*?systemctl enable xtm_mm[\s\S]*?systemctl start xtm_mm/);
 

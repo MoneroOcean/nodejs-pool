@@ -142,6 +142,19 @@ EOF
   fi
 }
 
+configure_pm2_boot_gate() {
+  install -d -m 755 /etc/systemd/system/pm2-user.service.d
+  cat >/etc/systemd/system/pm2-user.service.d/10-network-online.conf <<'EOF'
+[Unit]
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStartPre=/bin/sleep 10
+EOF
+  systemctl daemon-reload
+}
+
 fail2ban_ignore_ips() {
   local raw="$SSH_FAIL2BAN_IGNORE_IPS"
   local ssh_source=""
@@ -607,6 +620,7 @@ configure_overcommit
 configure_swap
 configure_journald_retention
 configure_needrestart_pm2_guard
+configure_pm2_boot_gate
 
 # Create the key-only administrator account and apply SSH hardening before the
 # package/update stages expose a fresh host for an extended period.
