@@ -103,6 +103,7 @@ curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deploym
 Set `MONERO_RELEASE_TAG` or `TARI_RELEASE_TAG` before `bash -x` to use a different reviewed release tag on leaf nodes.
 Leaf installs retain 10,000 Tari blocks by default; override this with `TARI_PRUNING_HORIZON` when more history is required.
 The installer disables root/password SSH access and enables an SSH Fail2ban jail. Set `SSH_FAIL2BAN_IGNORE_IPS` to a whitespace-separated list of trusted management addresses or CIDRs that must never be banned; SSH itself remains reachable from any address allowed by UFW.
+Site-specific trust settings can be stored in `/etc/moneroocean/leaf.conf`, which must be a root-owned regular file without group/other write permissions. Keep it outside the repository and use shell assignments such as `SSH_FAIL2BAN_IGNORE_IPS="..."` and `POOL_TRUSTED_SOURCE_IPV4S="..."`; the latter is a comma-separated IPv4 list. Override the path with `LEAF_CONFIG_FILE` when needed.
 Fresh daemon synchronization can take hours. `MONERO_SYNC_TIMEOUT_SECONDS` and `TARI_SYNC_TIMEOUT_SECONDS` default to 172,800 seconds and accept `0` for no timeout.
 
 After install, update the leaf config so it points at the main pool infrastructure, then start the `pool` module on that node.

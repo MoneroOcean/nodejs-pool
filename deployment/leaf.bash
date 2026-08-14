@@ -2,6 +2,30 @@
 set -Eeuo pipefail
 trap 'echo "Leaf deployment failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run this script as root"
+  exit 1
+fi
+
+# Site-specific trust relationships must stay outside the public repository.
+# This file contains shell assignments and is sourced as root, so reject links,
+# non-root ownership, and any group/other write permission.
+LEAF_CONFIG_FILE="${LEAF_CONFIG_FILE:-/etc/moneroocean/leaf.conf}"
+if [ -e "$LEAF_CONFIG_FILE" ]; then
+  if [ ! -f "$LEAF_CONFIG_FILE" ] || [ -L "$LEAF_CONFIG_FILE" ]; then
+    echo "Leaf config must be a regular file: $LEAF_CONFIG_FILE" >&2
+    exit 1
+  fi
+  leaf_config_uid="$(stat -c '%u' -- "$LEAF_CONFIG_FILE")"
+  leaf_config_mode="$(stat -c '%a' -- "$LEAF_CONFIG_FILE")"
+  if [ "$leaf_config_uid" -ne 0 ] || (( (8#$leaf_config_mode & 8#022) != 0 )); then
+    echo "Leaf config must be root-owned and not group/other writable: $LEAF_CONFIG_FILE" >&2
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "$LEAF_CONFIG_FILE"
+fi
+
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
 MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
@@ -16,7 +40,7 @@ TARI_EXTERNAL_IP="${TARI_EXTERNAL_IP:-}"
 TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-}"
 TARI_PRUNING_HORIZON="${TARI_PRUNING_HORIZON:-10000}"
 TARI_PRUNING_INTERVAL="${TARI_PRUNING_INTERVAL:-50}"
-SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-198.51.100.10}"
+SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-}"
 MONERO_SYNC_TIMEOUT_SECONDS="${MONERO_SYNC_TIMEOUT_SECONDS:-172800}"
 TARI_SYNC_TIMEOUT_SECONDS="${TARI_SYNC_TIMEOUT_SECONDS:-172800}"
 SYNC_POLL_INTERVAL_SECONDS="${SYNC_POLL_INTERVAL_SECONDS:-10}"
@@ -35,17 +59,13 @@ POOL_CONN_LIMIT_PER_IP="${POOL_CONN_LIMIT_PER_IP:-1500}"
 # one source cannot bypass the rate by moving between port groups.
 POOL_NEW_CONN_RATE_PER_IP="${POOL_NEW_CONN_RATE_PER_IP:-5/second}"
 POOL_NEW_CONN_BURST="${POOL_NEW_CONN_BURST:-100}"
-# These two control-plane hosts already have broad TCP access in UFW. Accept
+# Explicitly configured control-plane hosts have broad TCP access in UFW. Accept
 # their pool-port SYNs before the public rate and connection limits so relay,
-# verification, and management traffic cannot consume the public quota.
-POOL_TRUSTED_SOURCE_IPV4S="${POOL_TRUSTED_SOURCE_IPV4S:-192.0.2.10,198.51.100.10}"
+# verification, and management traffic cannot consume the public quota. Keep
+# production addresses in LEAF_CONFIG_FILE, never in this repository.
+POOL_TRUSTED_SOURCE_IPV4S="${POOL_TRUSTED_SOURCE_IPV4S:-}"
 POOL_PLAIN_PORTS=(80 10001 10002 10004 10008 10016 10032 10064 10128 10256 10512 11024 12048 14096 18192)
 POOL_TLS_PORTS=(443 20001 20002 20004 20008 20016 20032 20064 20128 20256 20512 21024 22048 24096 28192)
-
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Please run this script as root"
-  exit 1
-fi
 
 # Transient systemd units do not necessarily inherit a login HOME.
 export HOME="${HOME:-/root}"

@@ -21,6 +21,8 @@ const TARI_PROXY_PORT = 18081;
 const MONEROD_PORT = 18083;
 const MINOTARI_NODE_PORT = 18142;
 const XTM_T_COMPAT_PORT = 18146;
+const TRUSTED_POOL_SOURCE_A = "192.0.2.10";
+const TRUSTED_POOL_SOURCE_B = "198.51.100.10";
 
 function sanitizeName(value) {
     return String(value || "")
@@ -255,6 +257,12 @@ async function prepareContainer(context) {
     await appendCheckLog(context, "runner image includes baked-in harness shims");
 
     if (context.script === "leaf") {
+        await execInContainer(context.containerName, [
+            "install -d -m 755 /etc/moneroocean",
+            `printf '%s\\n' ${shellQuote(`SSH_FAIL2BAN_IGNORE_IPS="${TRUSTED_POOL_SOURCE_B}"`)} ${shellQuote(`POOL_TRUSTED_SOURCE_IPV4S="${TRUSTED_POOL_SOURCE_A},${TRUSTED_POOL_SOURCE_B}"`)} > /etc/moneroocean/leaf.conf`,
+            "chmod 600 /etc/moneroocean/leaf.conf"
+        ].join(" && "));
+        await appendCheckLog(context, "installed root-only leaf configuration");
         await startLeafMysqlSidecar(context);
         await execInContainer(
             context.containerName,
@@ -361,7 +369,7 @@ async function verifyLeafInstall(context) {
     await execInContainer(context.containerName, "grep -q '^nf_conntrack$' /etc/modules-load.d/moneroocean-conntrack.conf && grep -q '^net.netfilter.nf_conntrack_max = 524288$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
     await execInContainer(context.containerName, "test \"$(grep -Fc -- '--syn -m conntrack --ctstate NEW' /etc/ufw/before.rules)\" -eq 8 && test \"$(grep -Fc -- '--hashlimit-above 5/second --hashlimit-burst 100 --hashlimit-mode srcip --hashlimit-name moneroocean_pool_new_v4 -j DROP' /etc/ufw/before.rules)\" -eq 2 && test \"$(grep -Fc -- '--connlimit-above 1500 --connlimit-mask 32 --connlimit-saddr' /etc/ufw/before.rules)\" -eq 2 && test \"$(grep -Fc -- '--syn -m conntrack --ctstate NEW' /etc/ufw/before6.rules)\" -eq 4 && test \"$(grep -Fc -- '--hashlimit-above 5/second --hashlimit-burst 100 --hashlimit-mode srcip --hashlimit-name moneroocean_pool_new_v6 -j DROP' /etc/ufw/before6.rules)\" -eq 2 && test \"$(grep -Fc -- '--connlimit-above 1500 --connlimit-mask 128 --connlimit-saddr' /etc/ufw/before6.rules)\" -eq 2 && ! grep -q -- '--connlimit-above 16000' /etc/ufw/before.rules && ! grep -q -- '--connlimit-above 16000' /etc/ufw/before6.rules");
     await execInContainer(context.containerName, "for file in /etc/ufw/before.rules /etc/ufw/before6.rules; do grep -Fq -- '--dports 80,10001,10002,10004,10008,10016,10032,10064,10128,10256,10512,11024,12048,14096,18192 ' \"$file\" && grep -Fq -- '--dports 443,20001,20002,20004,20008,20016,20032,20064,20128,20256,20512,21024,22048,24096,28192 ' \"$file\" || exit 1; done");
-    await execInContainer(context.containerName, "python3 -c 'from pathlib import Path; p=Path(\"/etc/ufw/before.rules\").read_text(); assert p.count(\"BEGIN MONEROOCEAN POOL TRUSTED SOURCES\") == 1; assert p.count(\"BEGIN MONEROOCEAN POOL CONNRATE\") == 1; assert p.count(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") == 1; assert p.count(\"-s 192.0.2.10/32\") == 2; assert p.count(\"-s 198.51.100.10/32\") == 2; assert p.index(\"-i lo -j ACCEPT\") < p.index(\"BEGIN MONEROOCEAN POOL TRUSTED SOURCES\") < p.index(\"BEGIN MONEROOCEAN POOL CONNRATE\") < p.index(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") < p.index(\"RELATED,ESTABLISHED\")' && python3 -c 'from pathlib import Path; p=Path(\"/etc/ufw/before6.rules\").read_text(); assert \"MONEROOCEAN POOL TRUSTED SOURCES\" not in p; assert \"192.0.2.10\" not in p; assert \"198.51.100.10\" not in p; assert p.count(\"BEGIN MONEROOCEAN POOL CONNRATE\") == 1; assert p.count(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") == 1; assert p.index(\"-i lo -j ACCEPT\") < p.index(\"BEGIN MONEROOCEAN POOL CONNRATE\") < p.index(\"BEGIN MONEROOCEAN POOL CONNLIMIT\") < p.index(\"RELATED,ESTABLISHED\")'");
+    await execInContainer(context.containerName, `python3 -c 'from pathlib import Path; p=Path("/etc/ufw/before.rules").read_text(); assert p.count("BEGIN MONEROOCEAN POOL TRUSTED SOURCES") == 1; assert p.count("BEGIN MONEROOCEAN POOL CONNRATE") == 1; assert p.count("BEGIN MONEROOCEAN POOL CONNLIMIT") == 1; assert p.count("-s ${TRUSTED_POOL_SOURCE_A}/32") == 2; assert p.count("-s ${TRUSTED_POOL_SOURCE_B}/32") == 2; assert p.index("-i lo -j ACCEPT") < p.index("BEGIN MONEROOCEAN POOL TRUSTED SOURCES") < p.index("BEGIN MONEROOCEAN POOL CONNRATE") < p.index("BEGIN MONEROOCEAN POOL CONNLIMIT") < p.index("RELATED,ESTABLISHED")' && python3 -c 'from pathlib import Path; p=Path("/etc/ufw/before6.rules").read_text(); assert "MONEROOCEAN POOL TRUSTED SOURCES" not in p; assert "${TRUSTED_POOL_SOURCE_A}" not in p; assert "${TRUSTED_POOL_SOURCE_B}" not in p; assert p.count("BEGIN MONEROOCEAN POOL CONNRATE") == 1; assert p.count("BEGIN MONEROOCEAN POOL CONNLIMIT") == 1; assert p.index("-i lo -j ACCEPT") < p.index("BEGIN MONEROOCEAN POOL CONNRATE") < p.index("BEGIN MONEROOCEAN POOL CONNLIMIT") < p.index("RELATED,ESTABLISHED")'`);
     await execInContainer(context.containerName, "systemctl is-enabled --quiet pool-health-guard.timer && grep -q '^OnUnitInactiveSec=15s$' /lib/systemd/system/pool-health-guard.timer && grep -q '^ExecStart=/usr/local/libexec/moneroocean/pool-health-guard$' /lib/systemd/system/pool-health-guard.service && grep -q '^ConditionFileIsExecutable=/usr/local/libexec/moneroocean/pool-health-guard$' /lib/systemd/system/pool-health-guard.service && test \"$(stat -c '%U:%G:%a' /usr/local/libexec/moneroocean/pool-health-guard)\" = root:root:755");
     await appendCheckLog(context, "verified pool conntrack capacity and per-IP limits");
     await execInContainer(context.containerName, [
@@ -379,7 +387,7 @@ async function verifyLeafInstall(context) {
         "grep -q '^maxretry = 5$' /etc/fail2ban/jail.d/moneroocean-sshd.local",
         "grep -q '^findtime = 10m$' /etc/fail2ban/jail.d/moneroocean-sshd.local",
         "grep -q '^bantime = 1h$' /etc/fail2ban/jail.d/moneroocean-sshd.local",
-        "grep -Eq '^ignoreip = .*159\\.54\\.164\\.201( |$)' /etc/fail2ban/jail.d/moneroocean-sshd.local"
+        `grep -Eq '^ignoreip = .*${TRUSTED_POOL_SOURCE_B.replaceAll(".", "\\.")}( |$)' /etc/fail2ban/jail.d/moneroocean-sshd.local`
     ].join(" && "));
     await appendCheckLog(context, "verified SSH Fail2ban policy");
     await execInContainer(context.containerName, "test \"$(readlink -f /usr/bin/node)\" = /usr/local/bin/node");
