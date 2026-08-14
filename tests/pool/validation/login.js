@@ -309,14 +309,20 @@ test("payment split logins reject invalid destination addresses", async () => {
 
 test("primary payout logins reject permanently banned addresses", async () => {
     const { runtime } = await startHarness();
+    const originalValidateAddress = global.coinFuncs.validateAddress;
+    let validationCalls = 0;
 
     try {
         runtime.getState().bannedAddresses[MAIN_WALLET] = "manual blocklist";
+        global.coinFuncs.validateAddress = function countValidation(address) {
+            ++validationCalls;
+            return originalValidateAddress.call(this, address);
+        };
 
         const reply = invokePoolMethod({
             method: "login",
             params: {
-                login: MAIN_WALLET,
+                login: `${MAIN_WALLET}.${"a".repeat(64)}`,
                 pass: "worker-primary-banned"
             }
         });
@@ -325,7 +331,9 @@ test("primary payout logins reject permanently banned addresses", async () => {
             error: `Permanently banned payment address ${MAIN_WALLET} provided: manual blocklist`,
             timeout: undefined
         }]);
+        assert.equal(validationCalls, 0);
     } finally {
+        global.coinFuncs.validateAddress = originalValidateAddress;
         await runtime.stop();
     }
 });

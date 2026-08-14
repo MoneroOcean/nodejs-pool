@@ -1,6 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { consumeRateLimitToken } = require("../../../lib/pool/security.js");
 
 const {
     MAIN_WALLET,
@@ -10,6 +11,21 @@ const {
 } = require("../common/harness.js");
 
 test.describe("pool validation: rate limits", { concurrency: false }, () => {
+test("rate-limit buckets evict the least recently used source at the cap", () => {
+    const now = Date.now();
+    const config = { rpcRateLimitBucketIdleMs: 60 * 1000, rpcRateLimitBucketMaxEntries: 3 };
+    const buckets = new Map([
+        ["login:first", { tokens: 1, lastRefillAt: now }],
+        ["login:second", { tokens: 1, lastRefillAt: now }],
+        ["login:third", { tokens: 1, lastRefillAt: now }]
+    ]);
+
+    consumeRateLimitToken(buckets, "login:first", 1, 2, now + 1, config);
+    consumeRateLimitToken(buckets, "login:fourth", 1, 2, now + 2, config);
+
+    assert.deepEqual([...buckets.keys()], ["login:third", "login:first", "login:fourth"]);
+});
+
 test("keepalived alias returns the same response as keepalive", async () => {
     const { runtime } = await startHarness();
     const socket = {};
