@@ -77,6 +77,9 @@ TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-}"
 TARI_PRUNING_HORIZON="${TARI_PRUNING_HORIZON:-10000}"
 TARI_PRUNING_INTERVAL="${TARI_PRUNING_INTERVAL:-50}"
 SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-}"
+MONERO_P2P_SOURCE_IPV4S="${MONERO_P2P_SOURCE_IPV4S:-}"
+LEAF_SKIP_SYNC_WAIT="${LEAF_SKIP_SYNC_WAIT:-0}"
+LEAF_FINALIZE_SYNC_ONLY="${LEAF_FINALIZE_SYNC_ONLY:-0}"
 MONERO_SYNC_TIMEOUT_SECONDS="${MONERO_SYNC_TIMEOUT_SECONDS:-172800}"
 TARI_SYNC_TIMEOUT_SECONDS="${TARI_SYNC_TIMEOUT_SECONDS:-172800}"
 SYNC_POLL_INTERVAL_SECONDS="${SYNC_POLL_INTERVAL_SECONDS:-10}"
@@ -200,6 +203,29 @@ EOF
   return 1
 }
 
+validate_ipv4_source_list() {
+  local name="$1"
+  local raw="$2"
+  local source octet
+  local -a sources octets
+  IFS=, read -r -a sources <<<"$raw"
+  for source in "${sources[@]}"; do
+    source="${source//[[:space:]]/}"
+    [ -z "$source" ] && continue
+    if [[ ! "$source" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+      echo "Invalid $name IPv4 source: $source" >&2
+      return 1
+    fi
+    IFS=. read -r -a octets <<<"$source"
+    for octet in "${octets[@]}"; do
+      if (( 10#$octet > 255 )); then
+        echo "Invalid $name IPv4 source: $source" >&2
+        return 1
+      fi
+    done
+  done
+}
+
 configure_pool_connlimits() {
   local family file candidate chain mask hash_name rules_dir="${POOL_UFW_RULES_DIR:-/etc/ufw}"
   local candidate_dir candidate4 candidate6
@@ -321,7 +347,7 @@ PY
 
 configure_pool_firewall() {
   local obsolete_rule source rule
-  local -a trusted_sources
+  local -a trusted_sources p2p_sources
 
   ufw default deny incoming
   ufw default allow outgoing
@@ -331,6 +357,11 @@ configure_pool_firewall() {
   for source in "${trusted_sources[@]}"; do
     source="${source//[[:space:]]/}"
     [ -z "$source" ] || ufw allow from "$source" to any proto tcp
+  done
+  IFS=, read -r -a p2p_sources <<<"$MONERO_P2P_SOURCE_IPV4S"
+  for source in "${p2p_sources[@]}"; do
+    source="${source//[[:space:]]/}"
+    [ -z "$source" ] || ufw allow from "$source" to any port 18080 proto tcp
   done
   ufw allow ssh
   for rule in "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18189; do
@@ -373,6 +404,14 @@ validate_positive_integer() {
     exit 1
   fi
 }
+validate_binary_flag() {
+  local value="$1"
+  local name="$2"
+  if [[ "$value" != 0 && "$value" != 1 ]]; then
+    echo "Invalid $name value: $value (expected 0 or 1)" >&2
+    exit 1
+  fi
+}
 validate_non_negative_integer "$TARI_PRUNING_HORIZON" TARI_PRUNING_HORIZON
 validate_positive_integer "$TARI_PRUNING_INTERVAL" TARI_PRUNING_INTERVAL
 validate_non_negative_integer "$MONERO_SYNC_TIMEOUT_SECONDS" MONERO_SYNC_TIMEOUT_SECONDS
@@ -381,6 +420,14 @@ validate_positive_integer "$SYNC_POLL_INTERVAL_SECONDS" SYNC_POLL_INTERVAL_SECON
 validate_positive_integer "$POOL_CONNTRACK_MAX" POOL_CONNTRACK_MAX
 validate_positive_integer "$POOL_CONN_LIMIT_PER_IP" POOL_CONN_LIMIT_PER_IP
 validate_positive_integer "$POOL_NEW_CONN_BURST" POOL_NEW_CONN_BURST
+validate_binary_flag "$LEAF_SKIP_SYNC_WAIT" LEAF_SKIP_SYNC_WAIT
+validate_binary_flag "$LEAF_FINALIZE_SYNC_ONLY" LEAF_FINALIZE_SYNC_ONLY
+if [ "$LEAF_SKIP_SYNC_WAIT" = 1 ] && [ "$LEAF_FINALIZE_SYNC_ONLY" = 1 ]; then
+  echo "LEAF_SKIP_SYNC_WAIT and LEAF_FINALIZE_SYNC_ONLY are mutually exclusive" >&2
+  exit 1
+fi
+validate_ipv4_source_list POOL_TRUSTED_SOURCE_IPV4S "$POOL_TRUSTED_SOURCE_IPV4S"
+validate_ipv4_source_list MONERO_P2P_SOURCE_IPV4S "$MONERO_P2P_SOURCE_IPV4S"
 if [[ ! "$POOL_NEW_CONN_RATE_PER_IP" =~ ^[1-9][0-9]*/(second|minute|hour|day|s|m|h|d)$ ]]; then
   echo "Invalid POOL_NEW_CONN_RATE_PER_IP value: $POOL_NEW_CONN_RATE_PER_IP" >&2
   exit 1
@@ -455,6 +502,29 @@ wait_for_tari_sync() {
   wait_for_rpc_sync Tari http://127.0.0.1:18146/json_rpc GetTipInfo "$TARI_SYNC_TIMEOUT_SECONDS"
 }
 
+require_local_daemons_synced() {
+  if ! rpc_synced http://127.0.0.1:18083/json_rpc get_info; then
+    echo "Monero daemon is not synced; refusing LEAF_FINALIZE_SYNC_ONLY" >&2
+    return 1
+  fi
+  if [ -z "$TARI_EXTERNAL_IP" ] && ! rpc_synced http://127.0.0.1:18146/json_rpc GetTipInfo; then
+    echo "Tari daemon is not synced; refusing LEAF_FINALIZE_SYNC_ONLY" >&2
+    return 1
+  fi
+}
+
+finalize_leaf_after_sync() {
+  # Keep the administrator home private while granting monerod traversal only
+  # to its reviewed notification script. Notifications begin after initial sync.
+  test -x /home/user/nodejs-pool/block_notify.sh
+  setfacl --modify user:monerodaemon:--x /home/user
+  write_monero_service enable-block-notify
+  systemctl daemon-reload
+  systemctl restart monero
+  systemctl enable xtm_mm
+  systemctl start xtm_mm
+}
+
 install_tari_suite() {
   ensure_rust_toolchain
   checkout_repo_ref "$TARI_REPO_URL" "$TARI_INSTALL_DIR" "$TARI_RELEASE_TAG"
@@ -518,11 +588,29 @@ if [ "${LEAF_FIREWALL_ONLY:-0}" = "1" ]; then
   configure_pool_firewall
   exit 0
 fi
+if [ "$LEAF_FINALIZE_SYNC_ONLY" = 1 ]; then
+  require_local_daemons_synced
+  finalize_leaf_after_sync
+  exit 0
+fi
 
 configure_overcommit
 configure_swap
 configure_journald_retention
 configure_needrestart_pm2_guard
+
+# Create the key-only administrator account and apply SSH hardening before the
+# package/update stages expose a fresh host for an extended period.
+id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
+grep -q "user ALL=(ALL) NOPASSWD:ALL" /etc/sudoers || echo "user ALL=(ALL) NOPASSWD:ALL" >>/etc/sudoers
+install -d -m 700 -o user -g user /home/user/.ssh
+if [ -f "/root/.ssh/authorized_keys" ]; then
+  mv /root/.ssh/authorized_keys /home/user/.ssh/authorized_keys
+  chown user:user /home/user/.ssh/authorized_keys
+  chmod 600 /home/user/.ssh/authorized_keys
+fi
+# Validate and reload SSH only after the key has safely moved to the new user.
+configure_ssh_hardening
 
 retry_command apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update
 if is_test_mode; then
@@ -541,17 +629,6 @@ packages=(
 retry_command apt-get -o Acquire::Retries=3 install -y "${packages[@]}"
 configure_pool_conntrack
 timedatectl set-timezone Etc/UTC
-
-id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
-grep -q "user ALL=(ALL) NOPASSWD:ALL" /etc/sudoers || echo "user ALL=(ALL) NOPASSWD:ALL" >>/etc/sudoers
-install -d -m 700 -o user -g user /home/user/.ssh
-if [ -f "/root/.ssh/authorized_keys" ]; then
-  mv /root/.ssh/authorized_keys /home/user/.ssh/authorized_keys
-  chown user:user /home/user/.ssh/authorized_keys
-  chmod 600 /home/user/.ssh/authorized_keys
-fi
-# Validate and reload SSH only after the key has safely moved to the new user.
-configure_ssh_hardening
 
 configure_pool_firewall
 configure_ssh_fail2ban
@@ -592,9 +669,14 @@ write_tari_merge_mining_service "$xtm_mm_dependency_units"
 
 systemctl daemon-reload
 if [ -z "$TARI_EXTERNAL_IP" ]; then
-  systemctl enable monero xtm xtm_mm
+  systemctl enable monero xtm
 else
-  systemctl enable monero xtm_mm
+  systemctl enable monero
+fi
+if [ "$LEAF_SKIP_SYNC_WAIT" = 1 ]; then
+  systemctl disable xtm_mm
+else
+  systemctl enable xtm_mm
 fi
 systemctl start monero
 
@@ -647,6 +729,15 @@ EOF
 
 configure_pool_health_guard
 
+if [ "$LEAF_SKIP_SYNC_WAIT" = 1 ]; then
+  if [ -z "$TARI_EXTERNAL_IP" ]; then
+    systemctl start xtm
+  fi
+  echo "Leaf installation complete; synchronization is still in progress."
+  echo "Re-run with LEAF_FINALIZE_SYNC_ONLY=1 after the local daemons report synced."
+  exit 0
+fi
+
 if [ -z "$TARI_EXTERNAL_IP" ]; then
   systemctl start xtm xtm_mm
 else
@@ -658,11 +749,4 @@ if [ -z "$TARI_EXTERNAL_IP" ]; then
   wait_for_tari_sync
 fi
 
-# Keep the administrator home private while granting monerod traversal only
-# to its reviewed notification script. Notifications begin after initial sync.
-test -x /home/user/nodejs-pool/block_notify.sh
-setfacl --modify user:monerodaemon:--x /home/user
-write_monero_service enable-block-notify
-systemctl daemon-reload
-systemctl restart monero
-systemctl start xtm_mm
+finalize_leaf_after_sync

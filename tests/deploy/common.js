@@ -48,3 +48,24 @@ test("entrypoints can load the sibling helper without executing deployment", () 
         assert.equal(result.status, 0, `${entrypoint}: ${result.stderr || result.stdout}`);
     }
 });
+
+test("leaf staged sync modes and P2P source rules stay narrowly scoped", () => {
+    const script = fs.readFileSync(path.join(DEPLOYMENT_DIR, "leaf.bash"), "utf8");
+    assert.match(script, /LEAF_SKIP_SYNC_WAIT="\$\{LEAF_SKIP_SYNC_WAIT:-0\}"/);
+    assert.match(script, /LEAF_FINALIZE_SYNC_ONLY="\$\{LEAF_FINALIZE_SYNC_ONLY:-0\}"/);
+    assert.match(script, /validate_binary_flag "\$LEAF_SKIP_SYNC_WAIT" LEAF_SKIP_SYNC_WAIT/);
+    assert.match(script, /validate_binary_flag "\$LEAF_FINALIZE_SYNC_ONLY" LEAF_FINALIZE_SYNC_ONLY/);
+    assert.match(script, /LEAF_SKIP_SYNC_WAIT and LEAF_FINALIZE_SYNC_ONLY are mutually exclusive/);
+    assert.match(script, /validate_ipv4_source_list MONERO_P2P_SOURCE_IPV4S "\$MONERO_P2P_SOURCE_IPV4S"/);
+    assert.match(script, /ufw allow from "\$source" to any port 18080 proto tcp/);
+    assert.match(script, /if \[ "\$LEAF_SKIP_SYNC_WAIT" = 1 \]; then\s+systemctl disable xtm_mm/);
+    assert.match(script, /finalize_leaf_after_sync\(\) \{[\s\S]*?systemctl enable xtm_mm[\s\S]*?systemctl start xtm_mm/);
+
+    const skipBranch = script.indexOf('if [ "$LEAF_SKIP_SYNC_WAIT" = 1 ]; then');
+    const preSyncMergeMining = script.indexOf('systemctl start xtm xtm_mm');
+    const waitForMonero = script.indexOf("wait_for_monero_sync\n");
+    assert.ok(skipBranch >= 0 && skipBranch < preSyncMergeMining, "skip mode must precede pre-sync merge-mining start");
+    assert.ok(skipBranch < waitForMonero, "skip mode must precede sync waits");
+    assert.match(script, /if \[ "\$LEAF_FINALIZE_SYNC_ONLY" = 1 \]; then[\s\S]*?require_local_daemons_synced[\s\S]*?finalize_leaf_after_sync/);
+    assert.match(script, /require_local_daemons_synced\(\) \{[\s\S]*?rpc_synced http:\/\/127\.0\.0\.1:18083\/json_rpc get_info[\s\S]*?rpc_synced http:\/\/127\.0\.0\.1:18146\/json_rpc GetTipInfo/);
+});
