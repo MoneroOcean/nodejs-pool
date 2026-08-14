@@ -412,9 +412,13 @@ test("template manager rotates templates and notifies miners through the right u
     assert.deepEqual(sendToWorkersCalls, []);
 });
 
-test("template manager ignores unchanged template refreshes", () => {
+test("template manager preserves identical templates and clears recovered unchanged headers", () => {
     const activeBlockTemplates = {};
     const pastBlockTemplates = {};
+    const lastBlockHash = {};
+    const lastBlockTime = {};
+    const daemonFailureSince = {};
+    let headerFetches = 0;
     const anchorState = { current: 0, previous: 0 };
 
     global.config = {
@@ -465,6 +469,10 @@ test("template manager ignores unchanged template refreshes", () => {
         getAuxChainXTM() {
             return null;
         },
+        getPortLastBlockHeaderMM(_port, callback) {
+            if (++headerFetches === 1) return callback(new Error("temporary daemon failure"));
+            callback(null, { hash: "same-header", height: 102, timestamp: Math.floor(Date.now() / 1000) });
+        },
         algoShortTypeStr() {
             return "rx/0";
         },
@@ -481,16 +489,17 @@ test("template manager ignores unchanged template refreshes", () => {
         activeMiners: new Map(),
         activeBlockTemplates,
         pastBlockTemplates,
-        lastBlockHash: {},
+        lastBlockHash,
         lastBlockHeight: {},
         lastBlockHashMM: {},
         lastBlockHeightMM: {},
-        lastBlockTime: {},
+        lastBlockTime,
         lastBlockKeepTime: {},
         lastBlockReward: {},
         newCoinHashFactor: { "": 1 },
         lastCoinHashFactor: { "": 1 },
         lastCoinHashFactorMM: { "": 1 },
+        daemonFailureSince,
         anchorState,
         sendToWorkers() {},
         getThreadName() {
@@ -543,6 +552,14 @@ test("template manager ignores unchanged template refreshes", () => {
     assert.equal(activeBlockTemplates[""].extraNonce, 0);
     assert.equal(activeBlockTemplates[""].extraNonce2, 0);
     assert.equal(activeBlockTemplates[""].sharedNonceSubmissions, undefined);
+
+    lastBlockHash[""] = "same-header";
+    lastBlockTime[""] = Date.now();
+    templateManager.templateUpdate("", false);
+    assert.equal(daemonFailureSince["xmr:39001"], daemonFailureSince["xtm:39001"]);
+    assert.equal(Number.isFinite(daemonFailureSince["xmr:39001"]), true);
+    templateManager.templateUpdate("", false);
+    assert.deepEqual(daemonFailureSince, {});
 });
 
 test("server final replies honor explicit delay windows with random jitter", () => {
