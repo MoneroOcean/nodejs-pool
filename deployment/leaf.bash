@@ -346,12 +346,21 @@ PY
 }
 
 configure_pool_firewall() {
-  local obsolete_rule source rule
+  local added_rule obsolete_rule source rule
   local -a trusted_sources p2p_sources
 
   ufw default deny incoming
   ufw default allow outgoing
   configure_pool_connlimits
+
+  # Rebuild source-based rules so removing an address from leaf.conf revokes it.
+  while IFS= read -r added_rule; do
+    if [[ "$added_rule" =~ ^ufw\ allow\ from\ ([0-9]{1,3}(\.[0-9]{1,3}){3}(/32)?)\ to\ any\ proto\ tcp$ ]]; then
+      ufw --force delete allow from "${BASH_REMATCH[1]}" to any proto tcp
+    elif [[ "$added_rule" =~ ^ufw\ allow\ from\ ([0-9]{1,3}(\.[0-9]{1,3}){3}(/32)?)\ to\ any\ port\ 18080\ proto\ tcp$ ]]; then
+      ufw --force delete allow from "${BASH_REMATCH[1]}" to any port 18080 proto tcp
+    fi
+  done < <(ufw show added)
 
   IFS=, read -r -a trusted_sources <<<"$POOL_TRUSTED_SOURCE_IPV4S"
   for source in "${trusted_sources[@]}"; do

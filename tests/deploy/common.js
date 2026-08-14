@@ -58,6 +58,8 @@ test("leaf staged sync modes and P2P source rules stay narrowly scoped", () => {
     assert.match(script, /LEAF_SKIP_SYNC_WAIT and LEAF_FINALIZE_SYNC_ONLY are mutually exclusive/);
     assert.match(script, /validate_ipv4_source_list MONERO_P2P_SOURCE_IPV4S "\$MONERO_P2P_SOURCE_IPV4S"/);
     assert.match(script, /ufw allow from "\$source" to any port 18080 proto tcp/);
+    assert.match(script, /ufw --force delete allow from "\$\{BASH_REMATCH\[1\]\}" to any proto tcp/);
+    assert.match(script, /ufw --force delete allow from "\$\{BASH_REMATCH\[1\]\}" to any port 18080 proto tcp/);
     assert.match(script, /if \[ "\$LEAF_SKIP_SYNC_WAIT" = 1 \]; then\s+systemctl disable xtm_mm/);
     assert.match(script, /finalize_leaf_after_sync\(\) \{[\s\S]*?systemctl enable xtm_mm[\s\S]*?systemctl start xtm_mm/);
 
