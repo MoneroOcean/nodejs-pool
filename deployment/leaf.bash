@@ -687,7 +687,7 @@ configure_ssh_hardening
 ufw default deny incoming
 ufw default allow outgoing
 configure_pool_connlimits
-for rule in ssh "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18141 18189; do
+for rule in ssh "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18189; do
   ufw allow "$rule"
 done
 ufw --force enable

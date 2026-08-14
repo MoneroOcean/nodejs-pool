@@ -370,7 +370,7 @@ fi
 
 ufw default deny incoming
 ufw default allow outgoing
-for rule in ssh 443 18141 18189; do
+for rule in ssh 443 18189; do
   ufw allow "$rule"
 done
 ufw --force enable
