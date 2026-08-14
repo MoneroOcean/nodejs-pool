@@ -237,6 +237,7 @@ function waitForSocketJson(socket, timeout = 1000) {
 
 async function startHarness(extra = {}) {
     installTestGlobals();
+    if (extra.poolConfig) Object.assign(global.config.pool, extra.poolConfig);
     global.coinFuncs.__testUseRealMainPow = Boolean(extra.realMainPow);
     global.coinFuncs.__testMainPowVectors = extra.mainPowVectors || null;
 
@@ -251,6 +252,7 @@ async function startHarness(extra = {}) {
     }
     const runtimeOptions = { ...extra };
     delete runtimeOptions.includeErg;
+    delete runtimeOptions.poolConfig;
 
     const runtime = await poolModule.startTestRuntime({
         ports: global.config.ports,

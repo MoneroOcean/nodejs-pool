@@ -1,5 +1,8 @@
 "use strict";
+const tls = require("node:tls");
 const test = require("node:test");
+
+const { getPoolSecurityConfig } = require("../../../lib/pool/security.js");
 
 const {
     assert,
@@ -127,6 +130,138 @@ test("unauthenticated sockets are closed after socketAuthTimeout", async () => {
         global.config.pool.socketAuthTimeout = originalSocketAuthTimeout;
         if (socket) socket.destroy();
         await runtime.stop();
+    }
+});
+
+test("TLS connection limits apply before a client completes its handshake", async () => {
+    const { runtime } = await startHarness({
+        ports: [{ ...global.config.ports[0], ssl: true }],
+        poolConfig: {
+            socketAuthTimeout: 1,
+            maxConnectionsPerIP: 1,
+            maxConnectionsPerSubnet: 2
+        }
+    });
+    let stalled;
+    let rejected;
+
+    try {
+        stalled = await openRawSocket(MAIN_PORT);
+        await flushTimers();
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], 1);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], 1);
+
+        rejected = await openRawSocket(MAIN_PORT);
+        await waitForSocketClose(rejected, 1000);
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], 1);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], 1);
+
+        await waitForSocketClose(stalled, 2000);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], undefined);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], undefined);
+    } finally {
+        if (stalled) stalled.destroy();
+        if (rejected) rejected.destroy();
+        await runtime.stop();
+    }
+});
+
+test("TLS client disconnects release pre-handshake reservations", async () => {
+    const { runtime } = await startHarness({
+        ports: [{ ...global.config.ports[0], ssl: true }]
+    });
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], 1);
+        const closed = waitForSocketClose(socket, 1000);
+        socket.destroy();
+        await closed;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], undefined);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], undefined);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("TLS handshake errors release pre-handshake reservations", async () => {
+    const { runtime } = await startHarness({
+        ports: [{ ...global.config.ports[0], ssl: true }]
+    });
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], 1);
+        socket.write("not a TLS handshake");
+        await waitForSocketClose(socket, 1000);
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], undefined);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], undefined);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("TLS secure connections keep one reservation and release it exactly once", async () => {
+    const { runtime } = await startHarness({
+        ports: [{ ...global.config.ports[0], ssl: true }]
+    });
+    let socket;
+
+    try {
+        socket = tls.connect({
+            host: "127.0.0.1",
+            port: MAIN_PORT,
+            rejectUnauthorized: false
+        });
+        await new Promise((resolve, reject) => {
+            socket.once("secureConnect", resolve);
+            socket.once("error", reject);
+        });
+
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], 1);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], 1);
+
+        await new Promise((resolve) => {
+            socket.once("close", resolve);
+            socket.destroy();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], undefined);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], undefined);
+
+        socket.destroy();
+        await flushTimers();
+        assert.equal(runtime.getState().activeConnectionsByIP["127.0.0.1"], undefined);
+        assert.equal(runtime.getState().activeConnectionsBySubnet["127.0.0.0/24"], undefined);
+    } finally {
+        if (socket) socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("TLS handshake timeout is capped independently of socket auth timeout", () => {
+    const originalSocketAuthTimeout = global.config.pool.socketAuthTimeout;
+
+    try {
+        global.config.pool.socketAuthTimeout = 120;
+        const securityConfig = getPoolSecurityConfig();
+        assert.equal(securityConfig.socketAuthTimeoutMs, 120000);
+        assert.equal(securityConfig.tlsHandshakeTimeoutMs, 30000);
+
+        global.config.pool.socketAuthTimeout = 5;
+        assert.equal(getPoolSecurityConfig().tlsHandshakeTimeoutMs, 5000);
+
+        global.config.pool.socketAuthTimeout = 0;
+        assert.equal(getPoolSecurityConfig().tlsHandshakeTimeoutMs, 1000);
+
+        global.config.pool.socketAuthTimeout = -1;
+        assert.equal(getPoolSecurityConfig().tlsHandshakeTimeoutMs, 1000);
+    } finally {
+        global.config.pool.socketAuthTimeout = originalSocketAuthTimeout;
     }
 });
 

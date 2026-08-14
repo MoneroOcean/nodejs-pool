@@ -889,6 +889,7 @@ test("server startup skips configured listen ports while keeping other pplns por
 test("TLS stratum handshakes use the auth timeout and destroy failed handshakes", async () => {
     let tlsOptions;
     let tlsClientErrorHandler;
+    let tlsConnectionListenerPrepended = false;
     const state = {
         threadName: "(Test) ",
         activeConnectionsByIP: {},
@@ -908,6 +909,9 @@ test("TLS stratum handshakes use the auth timeout and destroy failed handshakes"
             return {
                 once() {},
                 removeListener() {},
+                prependListener(event) {
+                    if (event === "connection") tlsConnectionListenerPrepended = true;
+                },
                 on(event, handler) {
                     if (event === "tlsClientError") tlsClientErrorHandler = handler;
                 },
@@ -927,6 +931,7 @@ test("TLS stratum handshakes use the auth timeout and destroy failed handshakes"
 
     await serverFactory.startPortServers([{ port: 443, portType: "pplns", ssl: true }]);
     assert.equal(tlsOptions.handshakeTimeout, 7000);
+    assert.equal(tlsConnectionListenerPrepended, true);
     const socket = { destroyed: false, destroy() { this.destroyed = true; } };
     tlsClientErrorHandler(new Error("handshake timeout"), socket);
     assert.equal(socket.destroyed, true);
