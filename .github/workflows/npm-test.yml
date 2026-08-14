@@ -32,5 +32,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-package-lock
 
+      - name: Generate test TLS certificate
+        run: openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" -keyout cert.key -out cert.pem
+
       - name: Run tests
         run: npm test
