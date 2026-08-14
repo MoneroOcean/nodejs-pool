@@ -584,4 +584,10 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
             }
         }
     });
+
+    test("leaf deployment opens public pool ports as TCP only", function testLeafPoolProtocols() {
+        const script = fs.readFileSync(path.join(__dirname, "..", "deployment", "leaf.bash"), "utf8");
+        assert.ok(script.includes('ufw allow "$rule/tcp"'));
+        assert.ok(!script.includes('ufw allow "$rule"\n'));
+    });
 });

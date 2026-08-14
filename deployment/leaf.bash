@@ -373,8 +373,12 @@ configure_pool_firewall() {
     source="${source//[[:space:]]/}"
     [ -z "$source" ] || ufw allow from "$source" to any proto tcp
   done
-  for rule in ssh "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18189; do
-    ufw allow "$rule"
+  ufw allow ssh
+  for rule in "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18189; do
+    ufw allow "$rule/tcp"
+    if ufw show added | grep -Fqx "ufw allow $rule"; then
+      ufw --force delete allow "$rule"
+    fi
   done
   for obsolete_rule in 18141/tcp 18141/udp 18141; do
     if ufw show added | grep -Fqx "ufw allow $obsolete_rule"; then
