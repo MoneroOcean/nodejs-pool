@@ -57,7 +57,7 @@ Run the installer as `root`:
 
 ```bash
 curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/deploy.bash | \
-WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudflare API Token" CERTBOT_EMAIL=ops@example.com bash -x
+WWW_DNS=pool.example.com API_DNS=api.pool.example.com CF_DNS_API_TOKEN="Cloudflare API Token" CERTBOT_EMAIL=ops@example.com bash
 ```
 
 `WWW_DNS`, `API_DNS`, and `CERTBOT_EMAIL` default to the MoneroOcean production values if omitted. Set them explicitly for any non-production install.
@@ -96,15 +96,17 @@ For a leaf-only install:
 
 ```bash
 curl -L https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/leaf.bash \
-  | TARI_WALLET_PAYMENT_ADDRESS=<your_tari_wallet_address> bash -x
+  | TARI_WALLET_PAYMENT_ADDRESS=<your_tari_wallet_address> bash
 ```
 
 `TARI_WALLET_PAYMENT_ADDRESS` is required so Tari merge-mining rewards are paid to a wallet you control.
-Set `MONERO_RELEASE_TAG` or `TARI_RELEASE_TAG` before `bash -x` to use a different reviewed release tag on leaf nodes.
+Set `MONERO_RELEASE_TAG` or `TARI_RELEASE_TAG` before `bash` to use a different reviewed release tag on leaf nodes.
 Leaf installs retain 10,000 Tari blocks by default; override this with `TARI_PRUNING_HORIZON` when more history is required.
 The installer disables root/password SSH access and enables an SSH Fail2ban jail. Set `SSH_FAIL2BAN_IGNORE_IPS` to a whitespace-separated list of trusted management addresses or CIDRs that must never be banned; SSH itself remains reachable from any address allowed by UFW.
 Site-specific trust settings can be stored in `/etc/moneroocean/leaf.conf`, which must be a root-owned regular file without group/other write permissions. Keep it outside the repository and use shell assignments such as `SSH_FAIL2BAN_IGNORE_IPS="..."` and `POOL_TRUSTED_SOURCE_IPV4S="..."`; the latter is a comma-separated IPv4 list. Override the path with `LEAF_CONFIG_FILE` when needed.
 Fresh daemon synchronization can take hours. `MONERO_SYNC_TIMEOUT_SECONDS` and `TARI_SYNC_TIMEOUT_SECONDS` default to 172,800 seconds and accept `0` for no timeout.
+
+The installers load `deployment/common.bash` from a local checkout when available. In the documented curl-pipe form they fetch the reviewed helper over HTTPS into a private temporary file; they do not read deployment files from the caller's working directory. Installer output intentionally avoids shell tracing so credentials and other environment values are not echoed.
 
 After install, update the leaf config so it points at the main pool infrastructure, then start the `pool` module on that node.
 

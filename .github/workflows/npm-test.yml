@@ -21,6 +21,9 @@ jobs:
           node-version: 24
           package-manager-cache: false
 
+      - name: Scan tracked files for sensitive data
+        run: node scripts/lint-sensitive-data.js
+
       - name: Install native build dependencies
         run: |
           sudo apt-get update

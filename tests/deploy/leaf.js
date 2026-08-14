@@ -15,7 +15,7 @@ const DEFAULT_CASE_TIMEOUT_MS = 45 * 60 * 1000;
 const XMR_POOL_ADDRESS = "46yzCCD3Mza9tRj7aqPSaxVbbePtuAeKzf8Ky2eRtcXGcEgCg1iTBio6N4sPmznfgGEUGDoBz5CLxZ2XPTyZu1yoCAG7zt6";
 const XMR_FEE_ADDRESS = "463tWEBn5XZJSxLU6uLQnQ2iY9xuNcDbjLSjkn3XAXHCbLrTTErJrBWYgHJQyrCwkNgYvyV3z8zctJLPCZy24jvb3NiTcTJ";
 const XMR_MINER_ADDRESS = "862wu9yae6qSUaUGz3KjjSeQ3xPKKxhzf8eYd9qXFx4eTpWm1qp6tvY9mzX4YiUQyYNdwZ9T8Muy1NfydEnExWkER25EfNj";
-const MYSQL_POOL_PASSWORD = "98erhfiuehw987fh23d";
+const MYSQL_POOL_PASSWORD = "test";
 const TARI_WALLET_PAYMENT_ADDRESS = "12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5";
 const TARI_PROXY_PORT = 18081;
 const MONEROD_PORT = 18083;
@@ -302,6 +302,7 @@ async function bootstrapLeafPool(context) {
     const configScript = `
 const fs = require("fs");
 const config = JSON.parse(fs.readFileSync("/home/user/nodejs-pool/config_example.json", "utf8"));
+config.mysql.password = ${JSON.stringify(MYSQL_POOL_PASSWORD)};
 config.db_storage_path = "/home/user/pool_db/";
 config.hostname = "leaf-test.local";
 config.bind_ip = "127.0.0.1";

@@ -8,7 +8,9 @@ module.exports = [
       // Downloaded third-party miner code pulled in by live tests (gitignored).
       ".cache/**",
       // Generated local test outputs (gitignored).
-      "test-artifacts/**"
+      "test-artifacts/**",
+      // Local operator scratch scripts (gitignored).
+      "_*.js"
     ]
   },
   js.configs.recommended,

@@ -300,7 +300,7 @@ async function runInstaller(context) {
 
 async function verifyDeployInstall(context) {
     await verifyRequiredFiles(context, "deploy checks", [
-        "/root/mysql_pass", "/home/user/nodejs-pool/config.json", "/home/user/wallets/wallet.address.txt",
+        "/root/mysql_pass", "/root/pool_mysql_pass", "/home/user/nodejs-pool/config.json", "/home/user/wallets/wallet.address.txt",
         "/home/user/wallets/wallet_fee.address.txt", "/lib/systemd/system/monero.service",
         "/lib/systemd/system/xtm.service", "/lib/systemd/system/xtm_mm.service",
         "/usr/local/src/tari/target/release/minotari_node", "/usr/local/src/tari/target/release/minotari_merge_mining_proxy",
@@ -317,6 +317,12 @@ async function verifyDeployInstall(context) {
         "/home/user/nodejs-pool/fix_daemon.sh",
         "/swapfile"
     ]);
+    await execInContainer(context.containerName, [
+        "test \"$(stat -c %U:%G /root/pool_mysql_pass)\" = root:root",
+        "test \"$(stat -c %a /root/pool_mysql_pass)\" = 600",
+        "POOL_SQL_PASS=$(cat /root/pool_mysql_pass) /usr/bin/node -e 'const fs=require(\"fs\"); const config=JSON.parse(fs.readFileSync(\"/home/user/nodejs-pool/config.json\", \"utf8\")); process.exit(config.mysql.password === process.env.POOL_SQL_PASS ? 0 : 1)'"
+    ].join(" && "));
+    await appendCheckLog(context, "verified generated pool database credential storage and config");
     await execInContainer(context.containerName, [
         "grep -Fq 'Unattended-Upgrade::Package-Blacklist' /etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
         "grep -Fq '^mysql-server$' /etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
