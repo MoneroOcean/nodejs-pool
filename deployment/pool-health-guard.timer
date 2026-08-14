@@ -1,5 +1,5 @@
 [Unit]
-Description=Check MoneroOcean pool health every 15 seconds
+Description=Check MoneroOcean pool conntrack pressure every 15 seconds
 
 [Timer]
 OnBootSec=30s

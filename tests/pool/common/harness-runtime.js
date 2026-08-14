@@ -23,8 +23,7 @@ function installTestGlobals() {
         eth_pool_support: false,
         payout: {},
         general: {
-            adminEmail: "admin@example.com",
-            allowStuckPoolKill: false
+            adminEmail: "admin@example.com"
         },
         daemon: {
             port: MAIN_PORT,

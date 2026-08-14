@@ -11,7 +11,7 @@ function createLifecycleHarness(rows, template) {
         activeBlockTemplates: { "": template },
         lastBlockLagStartTime: {},
         lastBlockFixTime: {},
-        lastBlockFixCount: {},
+        daemonFailureSince: {},
         threadName: ""
     };
 
@@ -25,8 +25,7 @@ function createLifecycleHarness(rows, template) {
             stuckTemplateCheckInterval: 60000
         },
         general: {
-            adminEmail: "ops@example.com",
-            allowStuckPoolKill: false
+            adminEmail: "ops@example.com"
         },
         hostname: "pool.test"
     };
@@ -145,6 +144,62 @@ test("stuck template recovery uses one full-stack fix when XMR and XTM both lag"
             xtmHeight: 200,
             expectedXtmHeight: 205
         });
+    } finally {
+        restoreGlobals();
+    }
+});
+
+test("direct merged-RPC failure recovers before startup and exits stale runtime after 20 minutes", async () => {
+    const restoreGlobals = saveGlobals();
+    let now = 100000;
+    const template = { port: 18081, height: 100, xtm_height: 200, timeCreated: 1 };
+    const rows = [
+        { port: 18081, blockID: 100, xtmBlockID: 200 },
+        { port: 18081, blockID: 100, xtmBlockID: 200 }
+    ];
+    const { fixes, lifecycle, state } = createLifecycleHarness(rows, template);
+    Date.now = function () { return now; };
+    state.daemonFailureSince["xmr:18081"] = now;
+    state.daemonFailureSince["xtm:18081"] = now;
+    delete state.activeBlockTemplates[""];
+
+    try {
+        const unhealthySince = now;
+        assert.equal((await lifecycle.checkStuckTemplateHealth()).xmr, "grace");
+        now += 301000;
+        assert.equal((await lifecycle.checkStuckTemplateHealth()).xmr, "fix");
+        assert.equal(fixes.length, 1);
+        assert.equal(fixes[0].reason, "template-stuck");
+
+        state.activeBlockTemplates[""] = template;
+        now = unhealthySince + 20 * 60 * 1000 - 1;
+        assert.equal((await lifecycle.checkStuckTemplateHealth()).exiting, false);
+
+        now += 1;
+        assert.equal((await lifecycle.checkStuckTemplateHealth()).exiting, true);
+    } finally {
+        restoreGlobals();
+    }
+});
+
+test("XTM peer lag uses the same bounded exit policy", async () => {
+    const restoreGlobals = saveGlobals();
+    let now = 100000;
+    const template = { port: 18081, height: 100, xtm_height: 200, timeCreated: 1 };
+    const rows = [
+        { port: 18081, blockID: 100, xtmBlockID: 200 },
+        { port: 18081, blockID: 100, xtmBlockID: 205 }
+    ];
+    const { fixes, lifecycle } = createLifecycleHarness(rows, template);
+    Date.now = function () { return now; };
+
+    try {
+        await lifecycle.checkStuckTemplateHealth();
+        now += 301000;
+        assert.equal((await lifecycle.checkStuckTemplateHealth()).xtm, "fix");
+        assert.equal(fixes[0].reason, "xtm-lag");
+        now += 20 * 60 * 1000;
+        assert.equal((await lifecycle.checkStuckTemplateHealth()).exiting, true);
     } finally {
         restoreGlobals();
     }

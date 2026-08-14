@@ -547,7 +547,7 @@ retry_command npx playwright install --with-deps chromium
 retry_command npm run build
 EOF
 
-# Temporarily disabled: pool-health-guard's daemon recovery is not deployed.
+# The conntrack pressure guard is installed on public leaf nodes only.
 # configure_pool_health_guard
 
 systemctl start xtm xtm_mm

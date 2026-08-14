@@ -288,6 +288,43 @@ test("templateUpdate2 rejects blobless CCX templates before they reach BlockTemp
     }
 });
 
+test("template updates retain stale-header health until a fresh template succeeds", async () => {
+    const { runtime } = await startHarness();
+    const originalTemplateRpc = global.coinFuncs.getPortBlockTemplate;
+    const originalHasTemplateBlob = global.coinFuncs.hasTemplateBlob;
+    const originalMaxAge = global.config.daemon.maxBlockAgeSeconds;
+    const originalNow = Date.now;
+    const now = 20_000_000;
+    const template = createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "daemon-health", height: 400 });
+
+    try {
+        global.config.daemon.maxBlockAgeSeconds = 10800;
+        Date.now = function () { return now; };
+        global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) { callback(template); };
+        global.coinFuncs.hasTemplateBlob = function hasTemplateBlob() { return true; };
+
+        poolModule.templateUpdate2("", MAIN_PORT, true, false, 1, false, {
+            height: 400,
+            hash: "stale-header",
+            timestamp: now / 1000 - 10801
+        });
+        assert.equal(runtime.getState().daemonFailureSince[`xmr:${  MAIN_PORT}`], now);
+
+        poolModule.templateUpdate2("", MAIN_PORT, true, false, 1, false, {
+            height: 400,
+            hash: "fresh-header",
+            timestamp: now / 1000
+        });
+        assert.equal(runtime.getState().daemonFailureSince[`xmr:${  MAIN_PORT}`], undefined);
+    } finally {
+        global.coinFuncs.getPortBlockTemplate = originalTemplateRpc;
+        global.coinFuncs.hasTemplateBlob = originalHasTemplateBlob;
+        global.config.daemon.maxBlockAgeSeconds = originalMaxAge;
+        Date.now = originalNow;
+        await runtime.stop();
+    }
+});
+
 test("setNewCoinHashFactor marks matching miners for extra verification on hash-factor changes", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;

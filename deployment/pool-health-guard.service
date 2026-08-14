@@ -1,5 +1,5 @@
 [Unit]
-Description=MoneroOcean pool fail-closed health guard
+Description=MoneroOcean pool conntrack pressure guard
 After=network-online.target pm2-user.service
 Wants=network-online.target
 ConditionFileIsExecutable=/usr/local/libexec/moneroocean/pool-health-guard
