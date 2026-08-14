@@ -355,7 +355,7 @@ configure_pool_firewall() {
 
   # Rebuild source-based rules so removing an address from leaf.conf revokes it.
   while IFS= read -r added_rule; do
-    if [[ "$added_rule" =~ ^ufw\ allow\ from\ ([0-9]{1,3}(\.[0-9]{1,3}){3}(/32)?)\ to\ any\ proto\ tcp$ ]]; then
+    if [[ "$added_rule" =~ ^ufw\ allow\ from\ ([0-9]{1,3}(\.[0-9]{1,3}){3}(/32)?)(\ to\ any)?\ proto\ tcp$ ]]; then
       ufw --force delete allow from "${BASH_REMATCH[1]}" to any proto tcp
     elif [[ "$added_rule" =~ ^ufw\ allow\ from\ ([0-9]{1,3}(\.[0-9]{1,3}){3}(/32)?)\ to\ any\ port\ 18080\ proto\ tcp$ ]]; then
       ufw --force delete allow from "${BASH_REMATCH[1]}" to any port 18080 proto tcp
