@@ -16,7 +16,7 @@ TARI_EXTERNAL_IP="${TARI_EXTERNAL_IP:-}"
 TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-}"
 TARI_PRUNING_HORIZON="${TARI_PRUNING_HORIZON:-10000}"
 TARI_PRUNING_INTERVAL="${TARI_PRUNING_INTERVAL:-50}"
-SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-}"
+SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-198.51.100.10}"
 MONERO_SYNC_TIMEOUT_SECONDS="${MONERO_SYNC_TIMEOUT_SECONDS:-172800}"
 TARI_SYNC_TIMEOUT_SECONDS="${TARI_SYNC_TIMEOUT_SECONDS:-172800}"
 SYNC_POLL_INTERVAL_SECONDS="${SYNC_POLL_INTERVAL_SECONDS:-10}"
@@ -35,6 +35,10 @@ POOL_CONN_LIMIT_PER_IP="${POOL_CONN_LIMIT_PER_IP:-1500}"
 # one source cannot bypass the rate by moving between port groups.
 POOL_NEW_CONN_RATE_PER_IP="${POOL_NEW_CONN_RATE_PER_IP:-5/second}"
 POOL_NEW_CONN_BURST="${POOL_NEW_CONN_BURST:-100}"
+# These two control-plane hosts already have broad TCP access in UFW. Accept
+# their pool-port SYNs before the public rate and connection limits so relay,
+# verification, and management traffic cannot consume the public quota.
+POOL_TRUSTED_SOURCE_IPV4S="${POOL_TRUSTED_SOURCE_IPV4S:-192.0.2.10,198.51.100.10}"
 POOL_PLAIN_PORTS=(80 10001 10002 10004 10008 10016 10032 10064 10128 10256 10512 11024 12048 14096 18192)
 POOL_TLS_PORTS=(443 20001 20002 20004 20008 20016 20032 20064 20128 20256 20512 21024 22048 24096 28192)
 
@@ -260,7 +264,8 @@ configure_pool_connlimits() {
       hash_name=moneroocean_pool_new_v6
     fi
     cp --preserve=mode,ownership,timestamps "$file" "$candidate"
-    python3 - "$candidate" "$chain" "$mask" "$POOL_CONN_LIMIT_PER_IP" "$POOL_NEW_CONN_RATE_PER_IP" "$POOL_NEW_CONN_BURST" "$plain_ports" "$tls_ports" "$hash_name" <<'PY'
+    python3 - "$candidate" "$chain" "$mask" "$POOL_CONN_LIMIT_PER_IP" "$POOL_NEW_CONN_RATE_PER_IP" "$POOL_NEW_CONN_BURST" "$plain_ports" "$tls_ports" "$hash_name" "$POOL_TRUSTED_SOURCE_IPV4S" <<'PY'
+import ipaddress
 from pathlib import Path
 import sys
 
@@ -273,10 +278,30 @@ burst = sys.argv[6]
 plain_ports = sys.argv[7]
 tls_ports = sys.argv[8]
 hash_name = sys.argv[9]
+trusted_source_ipv4s = []
+for value in sys.argv[10].split(","):
+    value = value.strip()
+    if not value:
+        continue
+    address = ipaddress.ip_address(value)
+    if address.version != 4:
+        raise SystemExit(f"trusted pool source is not IPv4: {value}")
+    trusted_source_ipv4s.append(str(address))
+trusted_begin = "# BEGIN MONEROOCEAN POOL TRUSTED SOURCES"
+trusted_end = "# END MONEROOCEAN POOL TRUSTED SOURCES"
 rate_begin = "# BEGIN MONEROOCEAN POOL CONNRATE"
 rate_end = "# END MONEROOCEAN POOL CONNRATE"
 begin = "# BEGIN MONEROOCEAN POOL CONNLIMIT"
 end = "# END MONEROOCEAN POOL CONNLIMIT"
+trusted_rules = []
+if mask == "32":
+    trusted_rules = [trusted_begin]
+    for source in trusted_source_ipv4s:
+        trusted_rules.extend([
+            f"-A {chain} -s {source}/32 -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {plain_ports} -j ACCEPT",
+            f"-A {chain} -s {source}/32 -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {tls_ports} -j ACCEPT",
+        ])
+    trusted_rules.append(trusted_end)
 rate_rules = [
     rate_begin,
     f"-A {chain} -p tcp -m tcp --syn -m conntrack --ctstate NEW -m multiport --dports {plain_ports} -m hashlimit --hashlimit-above {rate} --hashlimit-burst {burst} --hashlimit-mode srcip --hashlimit-name {hash_name} -j DROP",
@@ -302,6 +327,7 @@ def remove_managed_block(lines, block_begin, block_end):
 
 # Remove both current and legacy managed blocks before inserting canonical
 # rules. Removing all copies also repairs partially duplicated prior runs.
+remove_managed_block(lines, trusted_begin, trusted_end)
 remove_managed_block(lines, rate_begin, rate_end)
 remove_managed_block(lines, begin, end)
 # Remove the original unmarked rules from early deployments before inserting
@@ -320,7 +346,7 @@ anchor = next((index for index, line in enumerate(lines)
                if line.startswith(f"-A {chain} ") and "RELATED,ESTABLISHED" in line and line.endswith("-j ACCEPT")), None)
 if anchor is None:
     raise SystemExit(f"cannot find established-traffic anchor in {path}")
-lines[anchor:anchor] = rate_rules + connlimit_rules
+lines[anchor:anchor] = trusted_rules + rate_rules + connlimit_rules
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
   done
@@ -332,6 +358,31 @@ PY
   mv "$candidate4" "$rules_dir/before.rules"
   mv "$candidate6" "$rules_dir/before6.rules"
   rmdir "$candidate_dir"
+}
+
+configure_pool_firewall() {
+  local obsolete_rule source rule
+  local -a trusted_sources
+
+  ufw default deny incoming
+  ufw default allow outgoing
+  configure_pool_connlimits
+
+  IFS=, read -r -a trusted_sources <<<"$POOL_TRUSTED_SOURCE_IPV4S"
+  for source in "${trusted_sources[@]}"; do
+    source="${source//[[:space:]]/}"
+    [ -z "$source" ] || ufw allow from "$source" to any proto tcp
+  done
+  for rule in ssh "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18189; do
+    ufw allow "$rule"
+  done
+  for obsolete_rule in 18141/tcp 18141/udp 18141; do
+    if ufw show added | grep -Fqx "ufw allow $obsolete_rule"; then
+      ufw --force delete allow "$obsolete_rule"
+    fi
+  done
+  ufw --force enable
+  ufw reload
 }
 
 configure_swap() {
@@ -650,6 +701,11 @@ EOF
   fi
 }
 
+if [ "${LEAF_FIREWALL_ONLY:-0}" = "1" ]; then
+  configure_pool_firewall
+  exit 0
+fi
+
 configure_overcommit
 configure_swap
 configure_journald_retention
@@ -684,13 +740,7 @@ fi
 # Validate and reload SSH only after the key has safely moved to the new user.
 configure_ssh_hardening
 
-ufw default deny incoming
-ufw default allow outgoing
-configure_pool_connlimits
-for rule in ssh "${POOL_PLAIN_PORTS[@]}" "${POOL_TLS_PORTS[@]}" 18189; do
-  ufw allow "$rule"
-done
-ufw --force enable
+configure_pool_firewall
 configure_ssh_fail2ban
 
 printf 'colorscheme desert\nset fo-=ro\n' >/root/.vimrc
