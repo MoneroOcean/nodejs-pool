@@ -58,6 +58,7 @@ function createLifecycleHarness(rows, template) {
         templateManager: {},
         messageHandler() {},
         startPortServers() {},
+        scheduleExit() { return { unref() {} }; },
         formatCoinPort(_coin, port) { return `XMR:${  port}`; },
         formatPoolEvent(label, fields) { return `${label  } ${  JSON.stringify(fields || {})}`; }
     });
