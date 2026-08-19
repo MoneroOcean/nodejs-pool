@@ -28,6 +28,12 @@ install_node_dependencies() {
   fi
 }
 
+configure_user_npm_min_release_age() {
+  local npm_user_config="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+  npm config set min-release-age 7 --location=user
+  chmod 600 "$npm_user_config"
+}
+
 configure_journald_retention() {
   install -d -m 755 /etc/systemd/journald.conf.d
   cat >/etc/systemd/journald.conf.d/90-moneroocean-retention.conf <<'EOF'

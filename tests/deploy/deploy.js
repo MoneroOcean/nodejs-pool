@@ -309,6 +309,7 @@ async function verifyDeployInstall(context) {
         "/usr/local/src/grpc-json-proxy/base_node.proto",
         "/usr/local/src/grpc-json-proxy/node_modules/@grpc/grpc-js/package.json",
         "/usr/local/bin/node",
+        "/home/user/.npmrc",
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
         "/etc/sysctl.d/92-moneroocean-conntrack.conf",
@@ -324,6 +325,8 @@ async function verifyDeployInstall(context) {
         "POOL_SQL_PASS=$(cat /root/pool_mysql_pass) /usr/bin/node -e 'const fs=require(\"fs\"); const config=JSON.parse(fs.readFileSync(\"/home/user/nodejs-pool/config.json\", \"utf8\")); process.exit(config.mysql.password === process.env.POOL_SQL_PASS ? 0 : 1)'"
     ].join(" && "));
     await appendCheckLog(context, "verified generated pool database credential storage and config");
+    await execInContainer(context.containerName, "test \"$(stat -c '%U:%G:%a' /home/user/.npmrc)\" = user:user:600 && su user -l -c 'npm config get min-release-age --location=user' | grep -Fxq 7");
+    await appendCheckLog(context, "verified user-wide npm seven-day minimum release age");
     await execInContainer(context.containerName, [
         "grep -Fq 'Unattended-Upgrade::Package-Blacklist' /etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",
         "grep -Fq '^mysql-server$' /etc/apt/apt.conf.d/52moneroocean-unattended-upgrades-blacklist",

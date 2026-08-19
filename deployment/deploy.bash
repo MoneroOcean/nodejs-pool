@@ -531,6 +531,7 @@ su -l user -s /bin/bash <<EOF
 set -e
 $(declare -f retry_command)
 $(declare -f install_node_dependencies)
+$(declare -f configure_user_npm_min_release_age)
 if [ ! -f /home/user/.nvm/nvm.sh ]; then
   retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
 fi
@@ -538,6 +539,7 @@ source /home/user/.nvm/nvm.sh
 retry_command nvm install $NODEJS_VERSION
 NODEJS_VERSION="\$(nvm version "$NODEJS_VERSION")"
 nvm alias default "\$NODEJS_VERSION"
+configure_user_npm_min_release_age
 NODE_BINARY="\$(command -v node)"
 sudo install -m 755 "\$NODE_BINARY" /usr/local/bin/node
 sudo ln -sfn /usr/local/bin/node /usr/bin/node

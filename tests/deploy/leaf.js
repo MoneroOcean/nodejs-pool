@@ -356,6 +356,7 @@ async function verifyLeafInstall(context) {
         "/etc/ssh/sshd_config.d/00-moneroocean-hardening.conf",
         "/etc/fail2ban/jail.d/moneroocean-sshd.local",
         "/usr/local/bin/node",
+        "/home/user/.npmrc",
         "/home/user/nodejs-pool/fix_daemon.sh", "/home/user/nodejs-pool/pool_health_guard.sh",
         "/usr/local/libexec/moneroocean/pool-health-guard",
         "/lib/systemd/system/pool-health-guard.service", "/lib/systemd/system/pool-health-guard.timer",
@@ -393,6 +394,8 @@ async function verifyLeafInstall(context) {
     await appendCheckLog(context, "verified SSH Fail2ban policy");
     await execInContainer(context.containerName, "test \"$(readlink -f /usr/bin/node)\" = /usr/local/bin/node");
     await appendCheckLog(context, "verified service-safe system Node binary");
+    await execInContainer(context.containerName, "test \"$(stat -c '%U:%G:%a' /home/user/.npmrc)\" = user:user:600 && su user -l -c 'npm config get min-release-age --location=user' | grep -Fxq 7");
+    await appendCheckLog(context, "verified user-wide npm seven-day minimum release age");
     await execInContainer(context.containerName, "grep -Fq -- '--rpc-bind-ip=127.0.0.1' /lib/systemd/system/monero.service && grep -Fq -- \"--log-level '*:ERROR,cn:ERROR,blockchain:ERROR,verify:ERROR'\" /lib/systemd/system/monero.service && grep -Fq -- \"--block-notify '/bin/bash /home/user/nodejs-pool/block_notify.sh'\" /lib/systemd/system/monero.service && ! grep -Fq -- '--restricted-rpc' /lib/systemd/system/monero.service");
     await execInContainer(context.containerName, "getfacl -cp /home/user | grep -q '^user:monerodaemon:--x$'");
     await appendCheckLog(context, "verified local unrestricted Monero RPC and post-sync block notification config");

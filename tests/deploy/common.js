@@ -32,7 +32,7 @@ test("common deployment helper exposes the versioned source-only API", () => {
     const command = [
         `source ${JSON.stringify(COMMON_PATH)}`,
         "test \"$MONEROOCEAN_COMMON_API_VERSION\" = 1",
-        "declare -F retry_command configure_monero_hugepages write_monero_service write_tari_service write_tari_merge_mining_service >/dev/null",
+        "declare -F retry_command configure_user_npm_min_release_age configure_monero_hugepages write_monero_service write_tari_service write_tari_merge_mining_service >/dev/null",
         "test \"$(type -t retry_command)\" = function"
     ].join(" && ");
     const result = runBash(["-c", command]);
