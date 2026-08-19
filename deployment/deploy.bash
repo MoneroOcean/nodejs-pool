@@ -52,10 +52,12 @@ TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
 TARI_USER="${TARI_USER:-taridaemon}"
 TARI_HOME="${TARI_HOME:-/home/$TARI_USER}"
 TARI_CONFIG_PATCH_URL="${TARI_CONFIG_PATCH_URL:-https://raw.githubusercontent.com/MoneroOcean/nodejs-pool/master/deployment/patch-tari-config.sh}"
-TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5}"
+TARI_WALLET_PAYMENT_ADDRESS="${TARI_WALLET_PAYMENT_ADDRESS:-}"
 TARI_PRUNING_HORIZON="${TARI_PRUNING_HORIZON:-10000}"
 TARI_PRUNING_INTERVAL="${TARI_PRUNING_INTERVAL:-50}"
 POOL_CONNTRACK_MAX="${POOL_CONNTRACK_MAX:-1048576}"
+POOL_DEPLOY_PREPARE="${POOL_DEPLOY_PREPARE:-0}"
+POOL_HOSTNAME="${POOL_HOSTNAME:-pool}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root"
@@ -73,8 +75,30 @@ if [[ ! "$POOL_CONNTRACK_MAX" =~ ^[1-9][0-9]*$ ]]; then
   echo "POOL_CONNTRACK_MAX must be a positive integer" >&2
   exit 1
 fi
+if [[ "$POOL_DEPLOY_PREPARE" != 0 && "$POOL_DEPLOY_PREPARE" != 1 ]]; then
+  echo "POOL_DEPLOY_PREPARE must be 0 or 1" >&2
+  exit 1
+fi
+if [[ ! "$POOL_HOSTNAME" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
+  echo "POOL_HOSTNAME contains invalid characters" >&2
+  exit 1
+fi
+if [[ ! "$TARI_NETWORK" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "TARI_NETWORK contains invalid characters" >&2
+  exit 1
+fi
 
 export DEBIAN_FRONTEND=noninteractive
+
+# Keep the replacement host's identity explicit. This is intentionally local
+# to the host running the installer and does not touch DNS or the old pool.
+if [ "${POOL_DEPLOY_TEST_MODE:-0}" != "1" ]; then
+  if command -v hostnamectl >/dev/null 2>&1; then
+    hostnamectl set-hostname "$POOL_HOSTNAME" >/dev/null 2>&1 || hostname "$POOL_HOSTNAME"
+  else
+    hostname "$POOL_HOSTNAME"
+  fi
+fi
 
 configure_unattended_upgrade_blacklist() {
   install -d -m 755 /etc/apt/apt.conf.d
@@ -105,6 +129,7 @@ MONERO_RANDOMX_HUGEPAGES="${MONERO_RANDOMX_HUGEPAGES:-384}"
 MONERO_LOG_CATEGORIES="${MONERO_LOG_CATEGORIES:-*:ERROR,global:INFO,sync-info:INFO,cn:ERROR,blockchain:ERROR,verify:ERROR}"
 
 wait_for_monero_sync() {
+  [ "$POOL_DEPLOY_PREPARE" = 1 ] && { echo "Skipping Monero sync wait in prepare mode"; return 0; }
   echo "Please wait until Monero daemon is fully synced"
   for _ in $(seq 1 360); do
     if rpc_synced http://127.0.0.1:18083/json_rpc get_info; then
@@ -118,6 +143,7 @@ wait_for_monero_sync() {
 }
 
 wait_for_tari_sync() {
+  [ "$POOL_DEPLOY_PREPARE" = 1 ] && { echo "Skipping Tari sync wait in prepare mode"; return 0; }
   echo "Please wait until Tari daemon is fully synced"
   for _ in $(seq 1 360); do
     if rpc_synced http://127.0.0.1:18146/json_rpc GetTipInfo; then
@@ -135,19 +161,42 @@ install_tari_suite() {
   checkout_repo_ref "$TARI_REPO_URL" "$TARI_INSTALL_DIR" "$TARI_RELEASE_TAG"
   # Build-script paths are embedded in Cargo's target artifacts; remove stale
   # artifacts when the source tree has been moved or switched between releases.
-  rm -rf "$TARI_INSTALL_DIR/target"
+  if [ ! -x "$TARI_INSTALL_DIR/target/release/minotari_node" ] || [ ! -x "$TARI_INSTALL_DIR/target/release/minotari_merge_mining_proxy" ]; then
+    rm -rf "$TARI_INSTALL_DIR/target"
+  fi
   TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy
-  if [ ! -f "$TARI_HOME/.tari/mainnet/config/config.toml" ]; then
-    sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/target/release/minotari_node" --init --network mainnet --non-interactive-mode --disable-splash-screen
+  if [ ! -f "$TARI_HOME/.tari/$TARI_NETWORK/config/config.toml" ]; then
+    sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/target/release/minotari_node" --init --network "$TARI_NETWORK" --non-interactive-mode --disable-splash-screen
   fi
 }
 
 patch_tari_config() {
   local patcher="/usr/local/src/patch-tari-config.sh"
-  local config="$TARI_HOME/.tari/mainnet/config/config.toml"
+  local config="$TARI_HOME/.tari/$TARI_NETWORK/config/config.toml"
   local args=("$config" "--no-backup" "--pruning-horizon" "$TARI_PRUNING_HORIZON" "--pruning-interval" "$TARI_PRUNING_INTERVAL")
   retry_command curl -fsSL -o "$patcher" "$TARI_CONFIG_PATCH_URL"
   chmod 755 "$patcher"
+  # An imported config is allowed to supply the address. A fresh deployment
+  # must receive it explicitly; never silently fall back to a repository-wide
+  # wallet address on a replacement host.
+  if [ -z "$TARI_WALLET_PAYMENT_ADDRESS" ] && [ -f "$config" ]; then
+    TARI_WALLET_PAYMENT_ADDRESS="$(awk '
+      /^\[merge_mining_proxy\]$/ { in_section=1; next }
+      /^\[/ { in_section=0 }
+      in_section && /^[[:space:]]*wallet_payment_address[[:space:]]*=/ {
+        sub(/^[^=]*=[[:space:]]*/, "")
+        sub(/[[:space:]]*#.*/, "")
+        gsub(/\047/, "")
+        gsub(/"/, "")
+        print
+        exit
+      }
+    ' "$config" | tr -d '[:space:]')"
+  fi
+  if [ -z "$TARI_WALLET_PAYMENT_ADDRESS" ]; then
+    echo "TARI_WALLET_PAYMENT_ADDRESS must be set (or present in the imported Tari config)" >&2
+    return 1
+  fi
   args+=("--wallet-payment-address" "$TARI_WALLET_PAYMENT_ADDRESS")
   "$patcher" "${args[@]}"
   chown "$TARI_USER:$TARI_USER" "$config"
@@ -156,6 +205,7 @@ patch_tari_config() {
 build_monero_release() {
   USE_SINGLE_BUILDDIR=1 make -j$(nproc) release || USE_SINGLE_BUILDDIR=1 make -j1 release
   git rev-parse HEAD >build/release/.moneroocean-build-commit
+  uname -m >build/release/.moneroocean-build-arch
 }
 
 monero_build_is_current() {
@@ -165,7 +215,9 @@ monero_build_is_current() {
   fi
   [ -x /usr/local/src/monero/build/release/bin/monerod ] &&
     [ -r build/release/.moneroocean-build-commit ] &&
-    [ "$(cat build/release/.moneroocean-build-commit)" = "$(git rev-parse HEAD)" ]
+    [ "$(cat build/release/.moneroocean-build-commit)" = "$(git rev-parse HEAD)" ] &&
+    [ -r build/release/.moneroocean-build-arch ] &&
+    [ "$(cat build/release/.moneroocean-build-arch)" = "$(uname -m)" ]
 }
 
 configure_unattended_upgrade_blacklist
@@ -185,16 +237,24 @@ configure_pool_conntrack
 timedatectl set-timezone Etc/UTC
 
 id -u user >/dev/null 2>&1 || adduser --disabled-password --gecos "" user
-grep -q "user ALL=(ALL) NOPASSWD:ALL" /etc/sudoers || echo "user ALL=(ALL) NOPASSWD:ALL" >>/etc/sudoers
+install -d -m 755 /etc/sudoers.d
+printf 'user ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/user
+chmod 440 /etc/sudoers.d/user
+visudo -cf /etc/sudoers >/dev/null
 install -d -m 700 -o user -g user /home/user/.ssh
 if [ -f "/root/.ssh/authorized_keys" ]; then
-  mv /root/.ssh/authorized_keys /home/user/.ssh/authorized_keys
+  touch /home/user/.ssh/authorized_keys
+  cat /root/.ssh/authorized_keys >>/home/user/.ssh/authorized_keys
+  sort -u -o /home/user/.ssh/authorized_keys /home/user/.ssh/authorized_keys
   chown user:user /home/user/.ssh/authorized_keys
   chmod 600 /home/user/.ssh/authorized_keys
-  sed -i 's/#\?PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/sshd_config
-  sed -i 's/#\?PermitRootLogin .\+/PermitRootLogin no/g' /etc/ssh/sshd_config
-  sed -i 's/#\?PermitEmptyPasswords .\+/PermitEmptyPasswords no/g' /etc/ssh/sshd_config
-  service ssh restart
+  if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
+    sed -i 's/#\?PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/sshd_config
+    sed -i 's/#\?PermitRootLogin .\+/PermitRootLogin no/g' /etc/ssh/sshd_config
+    sed -i 's/#\?PermitEmptyPasswords .\+/PermitEmptyPasswords no/g' /etc/ssh/sshd_config
+    sshd -t
+    systemctl reload ssh
+  fi
 fi
 
 ufw default deny incoming
@@ -207,7 +267,7 @@ ufw --force enable
 printf 'colorscheme desert\nset fo-=ro\n' >/root/.vimrc
 install -m 644 -o user -g user /root/.vimrc /home/user/.vimrc
 mkdir -p /etc/letsencrypt
-if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ]; then
+if [ "${POOL_DEPLOY_TEST_MODE:-0}" = "1" ] || [ "$POOL_DEPLOY_PREPARE" = 1 ]; then
   cat >/etc/letsencrypt/options-ssl-nginx.conf <<'EOF'
 ssl_session_cache shared:le_nginx_SSL:10m;
 ssl_session_timeout 1440m;
@@ -221,6 +281,7 @@ fi
 echo "dns_cloudflare_api_token=$CF_DNS_API_TOKEN" >/root/dns_cloudflare_api_token.ini
 chmod 600 /root/dns_cloudflare_api_token.ini
 for dns in "$WWW_DNS" "$API_DNS"; do
+  [ "$POOL_DEPLOY_PREPARE" = 1 ] && continue
   if [ ! -f "/etc/letsencrypt/live/$dns/fullchain.pem" ]; then
     certbot certonly --non-interactive --agree-tos --email "$CERTBOT_EMAIL" --dns-cloudflare --dns-cloudflare-propagation-seconds 30 --dns-cloudflare-credentials /root/dns_cloudflare_api_token.ini -d "$dns"
   fi
@@ -314,7 +375,9 @@ server {
 EOF
 chown -R www-data:www-data /var/www
 chmod g+s /var/www
-systemctl restart nginx
+if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
+  systemctl restart nginx
+fi
 checkout_repo_ref "$MONERO_REPO_URL" /usr/local/src/monero "$MONERO_RELEASE_TAG"
 retry_command git submodule update --init
 if ! monero_build_is_current; then
@@ -322,7 +385,14 @@ if ! monero_build_is_current; then
   build_monero_release
 fi
 
-su -l user -s /bin/bash <<EOF
+if [ "$POOL_DEPLOY_PREPARE" = 1 ]; then
+  # Wallet files are copied separately from the encrypted production mount.
+  # Never generate a second wallet or block unattended preparation on a seed
+  # prompt when the replacement is being staged.
+  install -d -m 700 -o user -g user /home/user/wallets
+  echo "Prepare mode: preserving imported wallet files; skipping wallet generation"
+else
+  su -l user -s /bin/bash <<EOF
 set -e
 mkdir -p ~/wallets
 cd ~/wallets
@@ -334,17 +404,22 @@ if [ ! -f ~/wallets/wallet_fee.address.txt ]; then
   echo 1 | /usr/local/src/monero/build/release/bin/monero-wallet-cli --offline --create-address-file --generate-new-wallet ~/wallets/wallet_fee --password-file ~/wallets/wallet_pass --command address
 fi
 EOF
-echo; echo; echo
-if [ ! -f /root/.moneroocean-wallet-seeds-confirmed ]; then
-  read -p "*** Write down your seeds for wallet and wallet_fee listed above and press ENTER to continue ***"
-  touch /root/.moneroocean-wallet-seeds-confirmed
+  echo; echo; echo
+  if [ ! -f /root/.moneroocean-wallet-seeds-confirmed ]; then
+    read -p "*** Write down your seeds for wallet and wallet_fee listed above and press ENTER to continue ***"
+    touch /root/.moneroocean-wallet-seeds-confirmed
+  fi
 fi
 
 id -u monerodaemon >/dev/null 2>&1 || useradd -m monerodaemon -d /home/monerodaemon
 ensure_tari_user
 configure_monero_hugepages
 
-write_monero_service enable-block-notify
+if [ "$POOL_DEPLOY_PREPARE" = 1 ]; then
+  write_monero_service
+else
+  write_monero_service enable-block-notify
+fi
 
 install_tari_suite
 clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
@@ -355,7 +430,13 @@ write_tari_service
 write_tari_merge_mining_service "monero.service xtm.service"
 
 systemctl daemon-reload
-systemctl enable monero xtm xtm_mm
+if [ "$POOL_DEPLOY_PREPARE" = 1 ]; then
+  systemctl enable monero xtm
+  systemctl disable xtm_mm >/dev/null 2>&1 || true
+  systemctl stop xtm_mm >/dev/null 2>&1 || true
+else
+  systemctl enable monero xtm xtm_mm
+fi
 systemctl start monero
 wait_for_monero_sync
 rm -f /etc/mysql/conf.d/mysql-native-password.cnf
@@ -375,6 +456,10 @@ ROOT_SQL_PASS="$(openssl rand -hex 32)"
 DEBIAN_MAINT_PASS=""
 DEBIAN_MAINT_SQL=""
 DEBIAN_MAINT_GRANT=""
+MYSQL_ROOT_CMD=(mysql --protocol=socket -u root)
+if [ -s /root/mysql_pass ]; then
+  MYSQL_ROOT_CMD=(mysql -u root --password="$(cat /root/mysql_pass)")
+fi
 if [[ -r /etc/mysql/debian.cnf ]]; then
   DEBIAN_MAINT_PASS="$(
     awk -F= '
@@ -385,14 +470,14 @@ if [[ -r /etc/mysql/debian.cnf ]]; then
       }
     ' /etc/mysql/debian.cnf
   )"
-  case "$DEBIAN_MAINT_PASS" in
-    ""|*[!A-Za-z0-9]*)
-      echo "Invalid password format in /etc/mysql/debian.cnf" >&2
-      exit 1
-      ;;
-  esac
+  # Debian-maintenance credentials are generated by the package and may contain
+  # punctuation. Do not interpolate unsafe values into SQL; the fresh-host
+  # installer does not need to rewrite this account.
+  if [[ ! "$DEBIAN_MAINT_PASS" =~ ^[A-Za-z0-9._@+-]+$ ]]; then
+    DEBIAN_MAINT_PASS=""
+  fi
 fi
-if mysql -Nse "SHOW PLUGINS" | awk '$1=="mysql_native_password" && $2=="ACTIVE" { found=1 } END { exit !found }'; then
+if "${MYSQL_ROOT_CMD[@]}" -Nse "SHOW PLUGINS" | awk '$1=="mysql_native_password" && $2=="ACTIVE" { found=1 } END { exit !found }'; then
   ROOT_SQL_AUTH="ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$ROOT_SQL_PASS';"
   USER_SQL_CMD="sudo mysql -u root --password='$ROOT_SQL_PASS'"
   if [[ -n "$DEBIAN_MAINT_PASS" ]]; then
@@ -492,17 +577,26 @@ fi
   for i in mdb_copy mdb_dump mdb_load mdb_stat; do cp \$i /home/user/.bin/; done
 )
 mkdir -p /home/user/pool_db
-POOL_SQL_PASS="$POOL_SQL_PASS" node -e '
+POOL_SQL_PASS="$POOL_SQL_PASS" POOL_DEPLOY_PREPARE="$POOL_DEPLOY_PREPARE" node -e '
   const fs = require("fs");
   const exists = fs.existsSync("config.json");
   const config = JSON.parse(fs.readFileSync(exists ? "config.json" : "config_example.json", "utf8"));
-  if (!exists) config.db_storage_path = "/home/user/pool_db/";
-  config.mysql.password = process.env.POOL_SQL_PASS;
-  fs.writeFileSync("config.json", JSON.stringify(config, null, 2) + "\n");
+  const prepare = process.env.POOL_DEPLOY_PREPARE === "1";
+  if (!exists) {
+    config.db_storage_path = "/home/user/pool_db/";
+    config.mysql.password = process.env.POOL_SQL_PASS;
+    fs.writeFileSync("config.json", JSON.stringify(config, null, 2) + "\n");
+  } else if (!prepare) {
+    config.mysql.password = process.env.POOL_SQL_PASS;
+    fs.writeFileSync("config.json", JSON.stringify(config, null, 2) + "\n");
+  }
 '
+pool_database_exists=1
 if ! $USER_SQL_CMD -e "USE pool" >/dev/null 2>&1; then
+  pool_database_exists=0
   $USER_SQL_CMD <deployment/base.sql
 fi
+if [ "$POOL_DEPLOY_PREPARE" != 1 ] || [ "$pool_database_exists" = 0 ]; then
 $USER_SQL_CMD <<SQL
 CREATE USER IF NOT EXISTS 'pool'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY '$POOL_SQL_PASS';
 CREATE USER IF NOT EXISTS 'pool'@'localhost' IDENTIFIED WITH mysql_native_password BY '$POOL_SQL_PASS';
@@ -514,20 +608,27 @@ FLUSH PRIVILEGES;
 SQL
 $USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'authKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Auth key sent with all Websocket frames for validation.')"
 $USER_SQL_CMD -e "INSERT IGNORE INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('api', 'secKey', '$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)', 'string', 'Secret key for signing miner email unsubscribe links.')"
-$USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet.address.txt)' WHERE module = 'pool' and item = 'address';"
+if [ -f /home/user/wallets/wallet.address.txt ] && [ -f /home/user/wallets/wallet_fee.address.txt ]; then
+  $USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet.address.txt)' WHERE module = 'pool' and item = 'address';"
 $USER_SQL_CMD -e "UPDATE pool.config SET item_value = '$(cat /home/user/wallets/wallet_fee.address.txt)' WHERE module = 'payout' and item = 'feeAddress';"
+fi
+fi
+if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
 pm2 describe api >/dev/null 2>&1 || pm2 start init.js --name=api --log-date-format="YYYY-MM-DD HH:mm Z" -- --module=api
-pm2 describe monero-wallet-rpc >/dev/null 2>&1 || pm2 start /usr/local/src/monero/build/release/bin/monero-wallet-rpc -- --rpc-bind-port 18082 --password-file /home/user/wallets/wallet_pass --wallet-file /home/user/wallets/wallet --trusted-daemon --disable-rpc-login
+pm2 describe monero-wallet-rpc >/dev/null 2>&1 || pm2 start /usr/local/src/monero/build/release/bin/monero-wallet-rpc -- --daemon-address 127.0.0.1:18083 --rpc-bind-port 18082 --password-file /home/user/wallets/wallet_pass --wallet-file /home/user/wallets/wallet --trusted-daemon --disable-rpc-login
 sleep 30
 pm2 describe block_manager >/dev/null 2>&1 || pm2 start init.js --name=block_manager --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z"  -- --module=block_manager
 pm2 describe worker >/dev/null 2>&1 || pm2 start init.js --name=worker --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --node-args="--max_old_space_size=8192" -- --module=worker
 pm2 describe payments >/dev/null 2>&1 || pm2 start init.js --name=payments --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --no-autorestart -- --module=payments
 pm2 describe remote_share >/dev/null 2>&1 || pm2 start init.js --name=remote_share --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=remote_share
 pm2 describe long_runner >/dev/null 2>&1 || pm2 start init.js --name=long_runner --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=long_runner
+fi
 #pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
-sleep 20
-pm2 describe pool_stats >/dev/null 2>&1 || pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
-pm2 save
+if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
+  sleep 20
+  pm2 describe pool_stats >/dev/null 2>&1 || pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
+fi
+if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then pm2 save; fi
 sudo env PATH=\$PATH:/home/user/.nvm/versions/node/\$NODEJS_VERSION/bin /home/user/.nvm/versions/node/\$NODEJS_VERSION/lib/node_modules/pm2/bin/pm2 startup systemd -u user --hp /home/user
 cd /home/user
 if [ ! -d /home/user/mo-pool-ui/.git ]; then
@@ -550,7 +651,11 @@ EOF
 # The conntrack pressure guard is installed on public leaf nodes only.
 # configure_pool_health_guard
 
-systemctl start xtm xtm_mm
+if [ "$POOL_DEPLOY_PREPARE" = 1 ]; then
+  systemctl start xtm
+else
+  systemctl start xtm xtm_mm
+fi
 wait_for_tari_sync
 
 echo 'Frontend is installed in /home/user/mo-pool-ui and deployed to /var/www/mo-pool-ui. To rebuild it later, log in as "user" and run: cd ~/mo-pool-ui && npm ci && npm run build'

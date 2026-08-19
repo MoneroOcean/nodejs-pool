@@ -46,7 +46,7 @@
     "express": "4.22.2",
     "node-blocktemplate": "git+https://github.com/MoneroOcean/node-blocktemplate.git#v15.8.22",
     "node-lmdb": "0.10.1",
-    "node-powhash": "github:MoneroOcean/node-powhash#v29.2.6",
+    "node-powhash": "github:MoneroOcean/node-powhash#5300f1eb24b47744f54972b910da401423bbf7ce",
     "promise-mysql": "3.0.0",
     "protocol-buffers": "5.0.0"
   },

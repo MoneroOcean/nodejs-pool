@@ -72,3 +72,21 @@ test("leaf staged sync modes and P2P source rules stay narrowly scoped", () => {
     assert.match(script, /if \[ "\$LEAF_FINALIZE_SYNC_ONLY" = 1 \]; then[\s\S]*?require_local_daemons_synced[\s\S]*?finalize_leaf_after_sync/);
     assert.match(script, /require_local_daemons_synced\(\) \{[\s\S]*?rpc_synced http:\/\/127\.0\.0\.1:18083\/json_rpc get_info[\s\S]*?rpc_synced http:\/\/127\.0\.0\.1:18146\/json_rpc GetTipInfo/);
 });
+
+test("pool deployment prepare mode is non-mutating and architecture-aware", () => {
+    const script = fs.readFileSync(path.join(DEPLOYMENT_DIR, "deploy.bash"), "utf8");
+    assert.match(script, /POOL_DEPLOY_PREPARE="\$\{POOL_DEPLOY_PREPARE:-0\}"/);
+    assert.match(script, /POOL_DEPLOY_PREPARE must be 0 or 1/);
+    assert.match(script, /Skipping Monero sync wait in prepare mode/);
+    assert.match(script, /Skipping Tari sync wait in prepare mode/);
+    assert.match(script, /\[ "\$POOL_DEPLOY_PREPARE" != 1 \]; then\s+pm2 describe api/);
+    assert.match(script, /--daemon-address 127\.0\.0\.1:18083/);
+    assert.match(script, /\.moneroocean-build-arch/);
+    assert.match(script, /uname -m >build\/release\/\.moneroocean-build-arch/);
+    assert.match(script, /POOL_DEPLOY_PREPARE" = 1[\s\S]*skipping wallet generation/);
+    assert.match(script, /TARI_WALLET_PAYMENT_ADDRESS must be set/);
+    assert.match(script, /TARI_HOME\/\.tari\/\$TARI_NETWORK\/config\/config\.toml/);
+    assert.match(script, /install -d -m 755 \/etc\/sudoers\.d/);
+    assert.match(script, /visudo -cf \/etc\/sudoers/);
+    assert.match(script, /sshd -t/);
+});
