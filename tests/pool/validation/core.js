@@ -518,7 +518,7 @@ test("xmrig-proxy connections are limited by the proxy worker limit path", async
     const { runtime } = await startHarness();
 
     try {
-        global.config.pool.workerMax = 1;
+        global.config.pool.proxyWorkerMax = 1;
 
         const first = invokePoolMethod({
             socket: {},
@@ -548,7 +548,7 @@ test("xmrig-proxy connections are limited by the proxy worker limit path", async
             timeout: 600
         }]);
     } finally {
-        global.config.pool.workerMax = 20;
+        global.config.pool.proxyWorkerMax = 40;
         await runtime.stop();
     }
 });

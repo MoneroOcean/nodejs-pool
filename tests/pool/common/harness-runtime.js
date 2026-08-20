@@ -47,6 +47,7 @@ function installTestGlobals() {
             trustMin: 0,
             trustedMiners: false,
             workerMax: 20,
+            proxyWorkerMax: 40,
             maxConnectionsPerIP: 256,
             maxConnectionsPerSubnet: 1024,
             loginRateLimitPerSecond: 5,
