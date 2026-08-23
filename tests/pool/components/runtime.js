@@ -151,6 +151,82 @@ test("disabled miner debug skips formatting RPC bodies", () => {
     }
 });
 
+test("reply serialization failures stay socket-local for asynchronous and delayed replies", async () => {
+    const originalConfig = global.config;
+    const circular = {};
+    circular.self = circular;
+    const debug = function noopDebug() {};
+    debug.enabled = false;
+
+    try {
+        global.config = { pool: {} };
+        const state = {
+            threadName: "(Test) ",
+            activeConnectionsByIP: {},
+            activeConnectionsBySubnet: {},
+            activeMiners: new Map(),
+            activeMinerSockets: new Map(),
+            freeEthExtranonces: []
+        };
+        const serverFactory = createServerFactory({
+            debug,
+            fs: require("node:fs"),
+            net: require("node:net"),
+            tls: require("node:tls"),
+            state,
+            handleMinerData(_socket, _id, method, _params, _ip, _port, sendReply, sendReplyFinal) {
+                if (method === "asynchronous") setImmediate(() => sendReply(null, circular));
+                else if (method === "delayed") sendReplyFinal(circular, 600);
+                else sendReply(null, { ok: true });
+            },
+            removeMiner() {}
+        });
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+
+        function makeSocket(remotePort) {
+            const writes = [];
+            const socket = new EventEmitter();
+            socket.remoteAddress = "127.0.0.2";
+            socket.remotePort = remotePort;
+            socket.writable = true;
+            socket.destroyed = false;
+            socket.setKeepAlive = function setKeepAlive() {};
+            socket.setEncoding = function setEncoding() {};
+            socket.write = function write(payload) { writes.push(payload); };
+            socket.end = function end(payload) {
+                if (payload) writes.push(payload);
+                socket.writable = false;
+            };
+            socket.destroy = function destroy() {
+                socket.destroyed = true;
+                socket.writable = false;
+            };
+            handleSocket(socket);
+            return { socket, writes };
+        }
+
+        for (const method of ["asynchronous", "delayed"]) {
+            const { socket, writes } = makeSocket(method === "asynchronous" ? 40001 : 40002);
+            assert.doesNotThrow(() => socket.emit("data", `${JSON.stringify({ id: 1, method, params: {} })}\n`));
+            if (method === "asynchronous") await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(socket.destroyed, true);
+            assert.equal(socket.finalizing, true);
+            assert.equal(socket.destroyReason, "reply-serialization");
+            assert.deepEqual(writes, []);
+            assert.ok(!socket.finalReplyTimer);
+            socket.emit("close");
+        }
+
+        const { socket: healthySocket, writes: healthyWrites } = makeSocket(40003);
+        healthySocket.emit("data", `${JSON.stringify({ id: "healthy", method: "healthy", params: {} })}\n`);
+        assert.equal(healthySocket.destroyed, false);
+        assert.equal(JSON.parse(healthyWrites[0]).id, "healthy");
+        healthySocket.emit("close");
+    } finally {
+        global.config = originalConfig;
+    }
+});
+
 test("eth-style nonces are deduped across miners on the same block template", () => {
     const originalConfig = global.config;
     const originalCoinFuncs = global.coinFuncs;

@@ -63,6 +63,62 @@ test("socket parser accepts JSON-RPC id zero", async () => {
     }
 });
 
+test("socket parser rejects non-scalar and deeply nested RPC ids and methods before dispatch", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+    const depth = 5000;
+    const nestedId = `${"[".repeat(depth)}0${"]".repeat(depth)}`;
+    const loginParams = { login: MAIN_WALLET, pass: "nested-rpc-fields" };
+
+    try {
+        for (const id of [null, true, false]) {
+            socket.write(`${JSON.stringify({ id, method: "login", params: loginParams })}\n`);
+            await assertNoSocketData(socket);
+        }
+        assert.equal(runtime.getState().activeMiners.size, 0);
+        const scalarLogin = await requestRawJson(socket, { id: "scalar-id", method: "login", params: loginParams });
+        assert.equal(scalarLogin.error, null);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+
+    const { runtime: methodRuntime } = await startHarness();
+    const methodSocket = await openRawSocket(MAIN_PORT);
+    try {
+        const nestedIdRequest = `{"id":${nestedId},"method":"login","params":${JSON.stringify(loginParams)}}\n`;
+        assert.ok(Buffer.byteLength(nestedIdRequest) < 102400);
+        methodSocket.write(nestedIdRequest);
+        await assertNoSocketData(methodSocket);
+        assert.equal(methodRuntime.getState().activeMiners.size, 0);
+
+        const loginReply = await requestRawJson(methodSocket, {
+            id: 1800,
+            method: "login",
+            params: loginParams
+        });
+        const submitParams = {
+            id: loginReply.result.id,
+            job_id: loginReply.result.job.job_id,
+            nonce: "00000031",
+            result: VALID_RESULT
+        };
+        const nestedMethod = `${"[".repeat(depth)}"submit"${"]".repeat(depth)}`;
+        const nestedMethodRequest = `{"id":"Stratum","method":${nestedMethod},"params":${JSON.stringify(submitParams)}}\n`;
+        assert.ok(Buffer.byteLength(nestedMethodRequest) < 102400);
+        methodSocket.write(nestedMethodRequest);
+        await assertNoSocketData(methodSocket);
+        assert.equal(methodRuntime.getState().shareStats.totalShares, 0);
+
+        const submitReply = await requestRawJson(methodSocket, { id: 1801, method: "submit", params: submitParams });
+        assert.equal(submitReply.error, null);
+        assert.equal(methodRuntime.getState().shareStats.totalShares, 1);
+    } finally {
+        methodSocket.destroy();
+        await methodRuntime.stop();
+    }
+});
+
 test("socket parser ignores requests missing an RPC method", async () => {
     const { runtime } = await startHarness();
     const socket = await openRawSocket(MAIN_PORT);
@@ -72,6 +128,43 @@ test("socket parser ignores requests missing an RPC method", async () => {
         await assertNoSocketData(socket);
     } finally {
         socket.destroy();
+        await runtime.stop();
+    }
+});
+
+test("worker-limit delayed final replies remain process-safe for scalar ids", async () => {
+    const originalRandom = Math.random;
+    const { runtime } = await startHarness({ poolConfig: { workerMax: 1 } });
+    const held = new JsonLineClient(MAIN_PORT);
+    let overflow;
+
+    try {
+        Math.random = () => 0;
+        await held.connect();
+        const loginReply = await held.request({
+            id: 1802,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "held-worker" }
+        });
+        assert.equal(loginReply.error, null);
+
+        overflow = await openRawSocket(MAIN_PORT);
+        overflow.write(`${JSON.stringify({
+            id: "delayed-scalar-id",
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "overflow-worker" }
+        })}\n`);
+        const delayedReply = await waitForSocketJson(overflow, 2000);
+        assert.equal(delayedReply.id, "delayed-scalar-id");
+        assert.match(delayedReply.error.message, /connected too many workers/);
+        await waitForSocketClose(overflow, 1000);
+
+        const livenessReply = await held.request({ id: 1803, method: "getjob", params: {} });
+        assert.equal(livenessReply.error, null);
+    } finally {
+        Math.random = originalRandom;
+        if (overflow) overflow.destroy();
+        await held.close();
         await runtime.stop();
     }
 });
