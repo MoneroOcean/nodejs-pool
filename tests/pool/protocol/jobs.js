@@ -677,6 +677,106 @@ test("legacy submit charges invalid job ids to the authenticated socket miner", 
     }
 });
 
+test("factor drops replace same-template jobs and expire the old easier target", async () => {
+    const hashesPerDifficulty = global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT);
+    const oldFactor = 2 / hashesPerDifficulty;
+    const currentFactor = 1 / hashesPerDifficulty;
+    const { runtime } = await startHarness({
+        coinHashFactors: { ETH: oldFactor },
+        templates: [
+            createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-factor-template", height: 101 }),
+            {
+                ...createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "same-factor-template", height: 201 }),
+                difficulty: 1000,
+                coinHashFactor: oldFactor
+            }
+        ]
+    });
+    const originalPortDifficulty = global.config.ports[1].difficulty;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const socket = {};
+    let slowHashAsyncCalls = 0;
+
+    try {
+        global.config.ports[1].difficulty = 20;
+        global.coinFuncs.slowHashAsync = function countedSlowHashAsync(...args) {
+            slowHashAsyncCalls += 1;
+            return originalSlowHashAsync.apply(this, args);
+        };
+
+        invokePoolMethod({
+            socket,
+            id: 481,
+            method: "mining.subscribe",
+            params: ["FactorRegression/1.0"],
+            portData: global.config.ports[1]
+        });
+        const authorizeReply = invokePoolMethod({
+            socket,
+            id: 482,
+            method: "mining.authorize",
+            params: [ETH_WALLET, "factor-regression"],
+            portData: global.config.ports[1]
+        });
+        const oldNotify = authorizeReply.pushes.find((entry) => entry.method === "mining.notify");
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        const oldJob = miner.validJobs.toarray().find((entry) => entry.id === oldNotify.params[0]);
+        const pushesBefore = authorizeReply.pushes.length;
+
+        poolModule.setNewCoinHashFactor(true, "ETH", currentFactor);
+
+        const replacementPushes = authorizeReply.pushes.slice(pushesBefore);
+        const newNotify = replacementPushes.find((entry) => entry.method === "mining.notify");
+        const newJob = miner.validJobs.toarray().find((entry) => entry.id === newNotify.params[0]);
+        const staleReply = invokePoolMethod({
+            socket,
+            id: 483,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                oldNotify.params[0],
+                "0x000000000000002a",
+                `0x${oldNotify.params[1]}`,
+                `0x${"11".repeat(32)}`
+            ],
+            portData: global.config.ports[1]
+        });
+
+        assert.equal(oldJob.blockHash, newJob.blockHash);
+        assert.equal(oldJob.difficulty, 10);
+        assert.equal(newJob.difficulty, 20);
+        assert.equal(newJob.coinHashFactor, currentFactor);
+        assert.deepEqual(staleReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.equal(oldJob.submissions.size, 0);
+        assert.equal(slowHashAsyncCalls, 0);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
+        assert.equal(runtime.getState().activeMiners.has(socket.miner_id), true);
+
+        poolModule.setNewCoinHashFactor(true, "ETH", 0);
+        const disabledReply = invokePoolMethod({
+            socket,
+            id: 484,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                newNotify.params[0],
+                "0x000000000000002b",
+                `0x${newNotify.params[1]}`,
+                `0x${"22".repeat(32)}`
+            ],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(disabledReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.equal(newJob.submissions.size, 0);
+        assert.equal(slowHashAsyncCalls, 0);
+    } finally {
+        global.config.ports[1].difficulty = originalPortDifficulty;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await runtime.stop();
+    }
+});
+
 test("getjob applies forged params ids to the authenticated socket miner only", async () => {
     const { runtime } = await startHarness();
     const victimSocket = {};
