@@ -490,6 +490,51 @@ test("getjob can switch a miner from default jobs to kawpow-style jobs when algo
     }
 });
 
+test("getjob rejects nested algo tuning without poisoning later factor updates", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 48,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-nested-algo-tuning",
+                algo: ["rx/0"],
+                "algo-perf": { "rx/0": "3.5" },
+                "algo-min-time": 0
+            }
+        });
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        assert.equal(miner.coin_perf[""], 3.5);
+        assert.equal(miner.algo_min_time, 60);
+
+        let nested = [];
+        for (let index = 0; index < 6000; ++index) nested = [nested];
+        const getjob = (perf, minTime) => invokePoolMethod({
+            socket,
+            method: "getjob",
+            params: { id: socket.miner_id, algo: ["rx/0"], "algo-perf": { "rx/0": perf }, "algo-min-time": minTime }
+        });
+
+        assert.equal(getjob(nested, 0).replies[0].error, "algo-perf values must be finite numbers");
+        assert.equal(miner.coin_perf[""], 3.5);
+        assert.equal(miner.algo_min_time, 60);
+        miner.curr_coin_time = 0;
+        assert.doesNotThrow(() => poolModule.setNewCoinHashFactor(true, "", 2));
+
+        assert.equal(getjob(4.5, nested).replies[0].error, "algo-min-time must be a finite number");
+        assert.equal(miner.coin_perf[""], 3.5);
+        assert.equal(miner.algo_min_time, 60);
+        assert.doesNotThrow(() => poolModule.setNewCoinHashFactor(true, "", 3));
+        assert.equal(loginReply.pushes.length, 2);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("main-coin jobs stay valid when only the kawpow template rotates", async () => {
     const { runtime } = await startHarness();
     const socket = {};
