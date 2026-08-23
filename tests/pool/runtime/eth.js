@@ -7,6 +7,7 @@ const {
     MAIN_PORT,
     ETH_PORT,
     ETH_WALLET,
+    ALT_WALLET,
     JsonLineClient,
     startHarness,
     flushTimers,
@@ -113,7 +114,7 @@ test("block-submit test mode still emails admin for unresolved zero hashes", asy
     }
 });
 
-test("block submission failures reset wallet trust even when the share stays accepted", async () => {
+test("block submission failures reset only the matching payout-distribution trust", async () => {
     const coinHashFactor = 1 / global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT);
     const { runtime } = await startHarness({
         coinHashFactors: { ETH: coinHashFactor },
@@ -129,8 +130,7 @@ test("block submission failures reset wallet trust even when the share stays acc
     const originalTrustedMiners = global.config.pool.trustedMiners;
     const originalRandomBytes = crypto.randomBytes;
     const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
-    const socketA = {};
-    const socketB = {};
+    const sockets = [{}, {}, {}, {}];
 
     try {
         global.config.pool.trustedMiners = true;
@@ -140,52 +140,50 @@ test("block submission failures reset wallet trust even when the share stays acc
             callback({ result: "high-hash" }, 200);
         };
 
-        invokePoolMethod({
-            socket: socketA,
-            id: 204,
-            method: "mining.subscribe",
-            params: ["HarnessEthMiner/1.0"],
-            portData: global.config.ports[1]
+        const logins = [
+            `${ETH_WALLET}%25%${ALT_WALLET}`,
+            `${ETH_WALLET}%25%${ALT_WALLET}`,
+            `${ETH_WALLET}%30%${ALT_WALLET}`,
+            ETH_WALLET
+        ];
+        sockets.forEach(function subscribeMiner(socket, index) {
+            invokePoolMethod({
+                socket,
+                id: 204 + index,
+                method: "mining.subscribe",
+                params: ["HarnessEthMiner/1.0"],
+                portData: global.config.ports[1]
+            });
         });
-        invokePoolMethod({
-            socket: socketB,
-            id: 2041,
-            method: "mining.subscribe",
-            params: ["HarnessEthMiner/1.0"],
-            portData: global.config.ports[1]
-        });
-
-        const authorizeReplyA = invokePoolMethod({
-            socket: socketA,
-            id: 205,
-            method: "mining.authorize",
-            params: [ETH_WALLET, "worker-trust-reset"],
-            portData: global.config.ports[1]
-        });
-        invokePoolMethod({
-            socket: socketB,
-            id: 2051,
-            method: "mining.authorize",
-            params: [ETH_WALLET, "worker-trust-reset-peer"],
-            portData: global.config.ports[1]
+        const authorizeReplies = sockets.map(function authorizeMiner(socket, index) {
+            return invokePoolMethod({
+                socket,
+                id: 208 + index,
+                method: "mining.authorize",
+                params: [logins[index], `worker-trust-reset-${  index}`],
+                portData: global.config.ports[1]
+            });
         });
 
         const state = runtime.getState();
-        const minerA = state.activeMiners.get(socketA.miner_id);
-        const minerB = state.activeMiners.get(socketB.miner_id);
-        const notifyPush = authorizeReplyA.pushes.find((entry) => entry.method === "mining.notify");
-        state.walletTrust[ETH_WALLET] = 1000;
-        minerA.trust.trust = 1000;
-        minerA.trust.check_height = 0;
-        minerB.trust.trust = 1000;
-        minerB.trust.check_height = 0;
+        const miners = sockets.map((socket) => state.activeMiners.get(socket.miner_id));
+        const matchingTrustKey = miners[0].trust_key;
+        const otherSplitTrustKey = miners[2].trust_key;
+        const notifyPush = authorizeReplies[0].pushes.find((entry) => entry.method === "mining.notify");
+        state.walletTrust[matchingTrustKey] = 0;
+        state.walletTrust[otherSplitTrustKey] = 2000;
+        state.walletTrust[ETH_WALLET] = 3000;
+        miners.forEach(function seedSessionTrust(miner) {
+            miner.trust.trust = 1000;
+            miner.trust.check_height = 0;
+        });
 
         const submitReply = invokePoolMethod({
-            socket: socketA,
-            id: 206,
+            socket: sockets[0],
+            id: 212,
             method: "mining.submit",
             params: [
-                ETH_WALLET,
+                logins[0],
                 notifyPush.params[0],
                 "0x0000000000000003",
                 `0x${notifyPush.params[1]}`,
@@ -196,9 +194,13 @@ test("block submission failures reset wallet trust even when the share stays acc
 
         await flushTimers();
         assert.deepEqual(submitReply.replies, [{ error: null, result: true }]);
-        assert.ok(Math.abs(minerA.trust.trust - 1) < 1e-12);
-        assert.equal(minerB.trust.trust, 0);
-        assert.equal(state.walletTrust[ETH_WALLET], 0);
+        assert.ok(Math.abs(miners[0].trust.trust - 1) < 1e-12);
+        assert.equal(miners[1].trust.trust, 0);
+        assert.equal(state.walletTrust[matchingTrustKey], 0);
+        assert.equal(miners[2].trust.trust, 1000);
+        assert.equal(state.walletTrust[otherSplitTrustKey], 2000);
+        assert.equal(miners[3].trust.trust, 1000);
+        assert.equal(state.walletTrust[ETH_WALLET], 3000);
     } finally {
         global.config.pool.trustedMiners = originalTrustedMiners;
         crypto.randomBytes = originalRandomBytes;
