@@ -241,6 +241,46 @@ test("payment split shares are persisted to each payout target with proportional
     }
 });
 
+test("prototype-named worker identifiers are persisted without inherited-property collisions", async () => {
+    const { runtime, database } = await startHarness();
+    const workerNames = ["__proto__", "constructor", "toString"];
+
+    try {
+        for (const [index, workerName] of workerNames.entries()) {
+            const socket = {};
+            const loginReply = invokePoolMethod({
+                socket,
+                id: 103 + index * 2,
+                method: "login",
+                params: {
+                    login: MAIN_WALLET,
+                    pass: workerName
+                }
+            });
+            assertLoginAccepted(loginReply);
+
+            const submitReply = invokePoolMethod({
+                socket,
+                id: 104 + index * 2,
+                method: "submit",
+                params: {
+                    id: socket.miner_id,
+                    job_id: loginReply.replies[0].result.job.job_id,
+                    nonce: `000000${40 + index}`,
+                    result: VALID_RESULT
+                }
+            });
+
+            await flushShareAccumulator(() => database.shares.length === index + 1);
+            assert.deepEqual(submitReply.replies, [{ error: null, result: { status: "OK" } }]);
+        }
+
+        assert.deepEqual(database.shares.map((entry) => entry.payload.identifier), workerNames);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("alt-port shares are stored against the current anchor height", async () => {
     const { runtime, database } = await startHarness();
     const client = new JsonLineClient(ETH_PORT);
