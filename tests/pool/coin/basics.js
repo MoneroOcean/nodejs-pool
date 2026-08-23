@@ -297,6 +297,75 @@ test("proxy miners use standard jobs when proxy nonce layout is disabled", () =>
     }
 });
 
+test("XTM-C jobs use the whole-cycle difficulty represented by their target", () => {
+    const originalGetPoolProfile = global.coinFuncs.getPoolProfile;
+    const realCoinFuncs = global.coinFuncs.__realCoinFuncs;
+    const xtmCPort = realCoinFuncs.COIN2PORT("XTM-C");
+    const xtmCPoolSettings = realCoinFuncs.getPoolProfile(xtmCPort).pool;
+    const validJobs = [];
+    let targetDifficulty;
+    const miner = {
+        proxy: false,
+        jobLastBlockHash: null,
+        newDiffToSet: null,
+        newDiffRecommendation: null,
+        difficulty: 63,
+        curr_coin_min_diff: 1,
+        cachedJob: null,
+        eth_extranonce: "0001",
+        validJobs: { enq(job) { validJobs.push(job); } }
+    };
+    const blockTemplate = {
+        idHash: "xtm-c-integer-difficulty",
+        difficulty: 100,
+        height: 303,
+        seed_hash: "33".repeat(32),
+        port: xtmCPort,
+        block_version: 0,
+        extraNonce: 0,
+        nextBlobHex() { return "aa"; }
+    };
+
+    try {
+        assert.equal(xtmCPoolSettings.integerDifficulty, true);
+        global.coinFuncs.getPoolProfile = function getPoolProfile() {
+            return {
+                blobType: 105,
+                pool: {
+                    ...xtmCPoolSettings,
+                    buildJobPayload(ctx) {
+                        targetDifficulty = ctx.coinDiff;
+                        return { target: ctx.getTargetHex(ctx.coinDiff, 8) };
+                    }
+                }
+            };
+        };
+        createMinerJobs({})(miner, {
+            protoVersion: 1,
+            getCoinJobParams() {},
+            getNewId() { return "job-xtm-c"; },
+            getNewEthJobId() { return "eth-job-xtm-c"; },
+            getTargetHex(diff) { return `target-${  diff}`; },
+            getRavenTargetHex() { return ""; },
+            toBigInt(value) { return BigInt(value); }
+        });
+
+        const payload = miner.getCoinJob("XTM-C", {
+            bt: blockTemplate,
+            algo_name: "c29",
+            coinHashFactor: 1,
+            hashesPerDifficulty: 42
+        });
+
+        assert.deepEqual(payload, { target: "target-1" });
+        assert.equal(targetDifficulty, 1);
+        assert.equal(validJobs[0].difficulty, 1);
+        assert.equal(validJobs[0].norm_diff, 42);
+    } finally {
+        global.coinFuncs.getPoolProfile = originalGetPoolProfile;
+    }
+});
+
 test("BlockTemplate uses the SAL blob marker when daemon reserved offset is stale", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const marker = Buffer.concat([Buffer.from([0x02, 17]), Buffer.alloc(17, 0)]);
