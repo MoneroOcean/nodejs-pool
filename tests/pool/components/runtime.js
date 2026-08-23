@@ -154,12 +154,19 @@ test("disabled miner debug skips formatting RPC bodies", () => {
 test("eth-style nonces are deduped across miners on the same block template", () => {
     const originalConfig = global.config;
     const originalCoinFuncs = global.coinFuncs;
+    const originalWarn = console.warn;
+    const warnings = [];
 
     try {
+        console.warn = function captureWarning(message) {
+            warnings.push(message);
+        };
         global.config = {
             pool: {
                 minerThrottleShareWindow: 10,
                 minerThrottleSharePerSec: 1000,
+                submitRateLimitPerSecond: 1000000,
+                submitRateLimitBurst: 1000000,
                 trustedMiners: false,
                 targetTime: 30
             }
@@ -203,6 +210,7 @@ test("eth-style nonces are deduped across miners on the same block template", ()
 
         let shareCalls = 0;
         let invalidShareCalls = 0;
+        let shareResult = true;
         const protocolHandler = createProtocolHandler({
             debug() {},
             retention,
@@ -231,7 +239,7 @@ test("eth-style nonces are deduped across miners on the same block template", ()
             shareProcessor: {
                 processShare(_miner, _job, _blockTemplate, _params, callback) {
                     shareCalls += 1;
-                    callback(true);
+                    callback(shareResult);
                 }
             },
             removeMiner() {},
@@ -306,18 +314,106 @@ test("eth-style nonces are deduped across miners on the same block template", ()
         }
 
         const firstSubmit = submitShare(minerA.miner.id, minerA.job.id, "0x0008000000000001");
+        shareResult = false;
+        const failedSubmit = submitShare(minerA.miner.id, minerA.job.id, "0x0008000000000002");
+        shareResult = null;
+        const throttledSubmit = submitShare(minerA.miner.id, minerA.job.id, "0x0008000000000003");
+        shareResult = true;
         const replaySubmit = submitShare(minerB.miner.id, minerB.job.id, "0x0008000000000001");
 
         assert.deepEqual(firstSubmit.finals, []);
         assert.deepEqual(firstSubmit.replies, [{ error: null, result: true }]);
+        assert.deepEqual(failedSubmit.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.deepEqual(throttledSubmit.replies, [{ error: "Throttled down share submission (please increase difficulty)", result: undefined }]);
         assert.deepEqual(replaySubmit.finals, []);
         assert.deepEqual(replaySubmit.replies, [{ error: "Duplicate share", result: undefined }]);
-        assert.equal(shareCalls, 1);
+        assert.equal(shareCalls, 3);
         assert.equal(invalidShareCalls, 1);
         assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.has("0008000000000001"), true);
+        assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.has("0008000000000002"), false);
+        assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.has("0008000000000003"), false);
+
+        const templateSubmissionLimit = 65536;
+        for (let index = 4; index < templateSubmissionLimit + 3; ++index) {
+            submitShare(minerA.miner.id, minerA.job.id, `0x0008${  index.toString(16).padStart(12, "0")}`);
+        }
+        const replayAfterChurn = submitShare(minerB.miner.id, minerB.job.id, "0x0008000000000001");
+        const overCapacitySubmit = submitShare(minerA.miner.id, minerA.job.id, `0x0008${  (templateSubmissionLimit + 3).toString(16).padStart(12, "0")}`);
+        const secondOverCapacitySubmit = submitShare(minerA.miner.id, minerA.job.id, `0x0008${  (templateSubmissionLimit + 4).toString(16).padStart(12, "0")}`);
+
+        assert.deepEqual(replayAfterChurn.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.deepEqual(overCapacitySubmit.replies, [{ error: "Too many share submissions for the current template. Wait for a new template.", result: undefined }]);
+        assert.deepEqual(secondOverCapacitySubmit.replies, [{ error: "Too many share submissions for the current template. Wait for a new template.", result: undefined }]);
+        assert.equal(shareCalls, templateSubmissionLimit + 2);
+        assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.size, templateSubmissionLimit);
+        assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.has("0008000000000001"), true);
+        assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.has("0008000000010002"), true);
+        assert.equal(state.activeBlockTemplates.ETH.templateSubmissions.has("0008000000010003"), false);
+        assert.equal(warnings.filter((warning) => warning.includes("Template share limit")).length, 1);
     } finally {
+        console.warn = originalWarn;
         global.config = originalConfig;
         global.coinFuncs = originalCoinFuncs;
+    }
+});
+
+test("C29 proof submit modes require fixed-size uint32 edge arrays", () => {
+    const proofSize = 42;
+    const validProof = Array.from({ length: proofSize }, function proofEdge(_, index) { return index; });
+    validProof[proofSize - 1] = 0xffffffff;
+    const submitModes = [{
+        name: "generic proof",
+        settings: pool.grin(),
+        params: { nonce: 7 }
+    }, {
+        name: "XTM-C",
+        settings: pool.xtmC(),
+        params: { nonce: "abcd000000000001" }
+    }];
+    const baseContext = {
+        coinFuncs: {
+            c29ProofSize() {
+                return proofSize;
+            }
+        },
+        job: { blob_type_num: 107 },
+        miner: { eth_extranonce: "abcd" },
+        state: { nonceCheck64: /^[0-9a-f]{16}$/ }
+    };
+
+    for (const mode of submitModes) {
+        assert.equal(mode.settings.validateSubmitParams({
+            ...baseContext,
+            params: { ...mode.params, pow: validProof }
+        }), true, `${mode.name} rejected uint32 boundary values`);
+
+        for (const invalidEdge of ["1", -1, 0x100000000, 1.5, NaN, Infinity]) {
+            const invalidProof = validProof.slice();
+            invalidProof[1] = invalidEdge;
+            assert.equal(mode.settings.validateSubmitParams({
+                ...baseContext,
+                params: { ...mode.params, pow: invalidProof }
+            }), false, `${mode.name} accepted invalid edge ${String(invalidEdge)}`);
+        }
+
+        assert.equal(mode.settings.validateSubmitParams({
+            ...baseContext,
+            params: { ...mode.params, pow: validProof.slice(1) }
+        }), false, `${mode.name} accepted the wrong proof size`);
+    }
+
+    const genericProofMode = submitModes[0];
+    for (const nonce of [0, 0xffffffff]) {
+        assert.equal(genericProofMode.settings.validateSubmitParams({
+            ...baseContext,
+            params: { nonce, pow: validProof }
+        }), true, `generic proof rejected uint32 nonce ${nonce}`);
+    }
+    for (const nonce of ["1", -1, 0x100000000, 1.5, NaN, Infinity]) {
+        assert.equal(genericProofMode.settings.validateSubmitParams({
+            ...baseContext,
+            params: { nonce, pow: validProof }
+        }), false, `generic proof accepted invalid nonce ${String(nonce)}`);
     }
 });
 
@@ -361,6 +457,7 @@ test("XTM-C proofs are deduped across jobs on the same block template", () => {
 
         let shareCalls = 0;
         let invalidShareCalls = 0;
+        let synchronousShareError = null;
         const protocolHandler = createProtocolHandler({
             debug() {},
             retention,
@@ -389,6 +486,7 @@ test("XTM-C proofs are deduped across jobs on the same block template", () => {
             shareProcessor: {
                 processShare(_miner, _job, _blockTemplate, _params, callback) {
                     shareCalls += 1;
+                    if (synchronousShareError) throw synchronousShareError;
                     callback(true);
                 }
             },
@@ -459,19 +557,38 @@ test("XTM-C proofs are deduped across jobs on the same block template", () => {
 
         const firstProof = Array.from({ length: 42 }, function proofEdge(_, index) { return index + 1; });
         const secondProof = firstProof.map(function nextProofEdge(edge) { return edge + 100; });
+        const retryProof = firstProof.map(function retryProofEdge(edge) { return edge + 200; });
+        const malformedProof = firstProof.slice();
+        malformedProof[0] = "9".repeat(4096);
         const firstSubmit = submitShare("submit-a", jobs[0].id, "abcd000000000001", firstProof);
         const replaySubmit = submitShare("submit-b", jobs[1].id, "abcd000000000001", firstProof);
+        const malformedSubmit = submitShare("submit-c", jobs[1].id, "abcd000000000002", malformedProof);
+
+        synchronousShareError = new Error("synchronous share failure");
+        assert.throws(function submitThrowingShare() {
+            submitShare("submit-d", jobs[1].id, "abcd000000000003", retryProof);
+        }, /synchronous share failure/);
+        synchronousShareError = null;
+
+        assert.equal(jobs[1].submissions.has(retryProof.join(":")), false);
+        assert.equal(state.activeBlockTemplates["XTM-C"].templateSubmissions.has(retryProof.join(":")), false);
+
+        const retrySubmit = submitShare("submit-e", jobs[1].id, "abcd000000000003", retryProof);
         const freshSubmit = submitShare("submit-c", jobs[1].id, "abcd000000000002", secondProof);
 
         assert.deepEqual(firstSubmit, [{ error: null, result: true }]);
         assert.deepEqual(replaySubmit, [{ error: "Duplicate share", result: undefined }]);
+        assert.deepEqual(malformedSubmit, [{ error: "Duplicate share", result: undefined }]);
+        assert.deepEqual(retrySubmit, [{ error: null, result: true }]);
         assert.deepEqual(freshSubmit, [{ error: null, result: true }]);
-        assert.equal(shareCalls, 2);
-        assert.equal(invalidShareCalls, 1);
+        assert.equal(shareCalls, 4);
+        assert.equal(invalidShareCalls, 2);
         assert.equal(jobs[0].submissions.has(firstProof.join(":")), true);
         assert.equal(jobs[1].submissions.has(firstProof.join(":")), false);
         assert.equal(jobs[1].submissions.has(secondProof.join(":")), true);
+        assert.equal(jobs[1].submissions.has(retryProof.join(":")), true);
         assert.equal(state.activeBlockTemplates["XTM-C"].templateSubmissions.has(firstProof.join(":")), true);
+        assert.equal(state.activeBlockTemplates["XTM-C"].templateSubmissions.size, 3);
     } finally {
         global.config = originalConfig;
         global.coinFuncs = originalCoinFuncs;
