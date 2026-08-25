@@ -126,16 +126,14 @@ run_service() {
 run_optional_service() {
   local action="$1"
   local unit="$2"
-  if [ "$dry_run" -eq 1 ]; then
-    log "DRY-RUN: systemctl $action $unit (if present)"
-    return 0
-  fi
   if service_exists "$unit"; then
     if [ "$action" != "stop" ] && ! service_enabled "$unit"; then
       log "skipping $action $unit because the unit is disabled"
       return 0
     fi
     run_service "$action" "$unit"
+  elif [ "$dry_run" -eq 1 ]; then
+    log "DRY-RUN: systemctl $action $unit (if present)"
   else
     log "skipping $action $unit because the unit is not present"
   fi
@@ -207,13 +205,25 @@ tari_rpc_ready() {
   grep -q '"result"[[:space:]]*:' <<<"$response"
 }
 
-xtm_restart_safe() {
-  if ! service_exists xtm.service; then
+local_xtm_enabled() {
+  service_exists xtm.service && service_enabled xtm.service
+}
+
+restart_local_xtm() {
+  if ! local_xtm_enabled; then
+    log "skipping restart xtm.service because local XTM recovery is disabled"
     return 0
   fi
-  if ! service_enabled xtm.service; then
-    log "deferring XTM recovery: xtm.service is disabled"
-    return 1
+  run_service restart xtm.service
+}
+
+xtm_restart_safe() {
+  if ! local_xtm_enabled; then
+    # A disabled or masked unit means this host intentionally uses a remote
+    # base node. Recovery may restart the local relay/proxy, but must never
+    # start the local daemon or attempt to administer the remote daemon.
+    log "local XTM recovery is disabled; leaving local and remote Tari daemons untouched"
+    return 0
   fi
   if systemctl_cmd is-active --quiet xtm.service && ! tari_rpc_ready; then
     log "deferring xtm restart: active Tari node RPC is unavailable (startup/migration)"
@@ -250,11 +260,9 @@ case "$reason" in
       exit 0
     fi
     run_xtm_mm_service stop || true
-    run_optional_service restart xtm.service
+    restart_local_xtm
     restart_relay_pool
-    if service_exists xtm.service || [ "$dry_run" -eq 1 ]; then
-      wait_tari_rpc || true
-    fi
+    wait_tari_rpc || true
     run_xtm_mm_service start
     ;;
   template-stuck|unknown|*)
@@ -264,12 +272,10 @@ case "$reason" in
     fi
     run_xtm_mm_service stop || true
     run_service restart monero.service
-    run_optional_service restart xtm.service
+    restart_local_xtm
     restart_relay_pool
     wait_monero_rpc || true
-    if service_exists xtm.service || [ "$dry_run" -eq 1 ]; then
-      wait_tari_rpc || true
-    fi
+    wait_tari_rpc || true
     run_xtm_mm_service start
     ;;
 esac
