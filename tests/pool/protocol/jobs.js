@@ -529,7 +529,7 @@ test("getjob rejects nested algo tuning without poisoning later factor updates",
         assert.equal(miner.coin_perf[""], 3.5);
         assert.equal(miner.algo_min_time, 60);
         assert.doesNotThrow(() => poolModule.setNewCoinHashFactor(true, "", 3));
-        assert.equal(loginReply.pushes.length, 2);
+        assert.equal(loginReply.pushes.length, 0);
     } finally {
         await runtime.stop();
     }
@@ -722,7 +722,7 @@ test("legacy submit charges invalid job ids to the authenticated socket miner", 
     }
 });
 
-test("factor drops replace same-template jobs and expire the old easier target", async () => {
+test("factor drops keep same-template jobs while invalid factors fail closed", async () => {
     const hashesPerDifficulty = global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT);
     const oldFactor = 2 / hashesPerDifficulty;
     const currentFactor = 1 / hashesPerDifficulty;
@@ -771,49 +771,49 @@ test("factor drops replace same-template jobs and expire the old easier target",
         poolModule.setNewCoinHashFactor(true, "ETH", currentFactor);
 
         const replacementPushes = authorizeReply.pushes.slice(pushesBefore);
-        const newNotify = replacementPushes.find((entry) => entry.method === "mining.notify");
-        const newJob = miner.validJobs.toarray().find((entry) => entry.id === newNotify.params[0]);
-        const staleReply = invokePoolMethod({
-            socket,
-            id: 483,
-            method: "mining.submit",
-            params: [
-                ETH_WALLET,
-                oldNotify.params[0],
-                "0x000000000000002a",
-                `0x${oldNotify.params[1]}`,
-                `0x${"11".repeat(32)}`
-            ],
-            portData: global.config.ports[1]
-        });
-
-        assert.equal(oldJob.blockHash, newJob.blockHash);
+        assert.equal(replacementPushes.length, 0);
         assert.equal(oldJob.difficulty, 10);
-        assert.equal(newJob.difficulty, 20);
-        assert.equal(newJob.coinHashFactor, currentFactor);
-        assert.deepEqual(staleReply.replies, [{ error: "Block expired", result: undefined }]);
         assert.equal(oldJob.submissions.size, 0);
         assert.equal(slowHashAsyncCalls, 0);
         assert.equal(runtime.getState().shareStats.invalidShares, 0);
         assert.equal(runtime.getState().activeMiners.has(socket.miner_id), true);
 
         poolModule.setNewCoinHashFactor(true, "ETH", 0);
-        const disabledReply = invokePoolMethod({
+        const zeroFactorReply = invokePoolMethod({
             socket,
-            id: 484,
+            id: 483,
             method: "mining.submit",
             params: [
                 ETH_WALLET,
-                newNotify.params[0],
+                oldNotify.params[0],
                 "0x000000000000002b",
-                `0x${newNotify.params[1]}`,
+                `0x${oldNotify.params[1]}`,
                 `0x${"22".repeat(32)}`
             ],
             portData: global.config.ports[1]
         });
 
-        assert.deepEqual(disabledReply.replies, [{ error: "Block expired", result: undefined }]);
-        assert.equal(newJob.submissions.size, 0);
+        assert.deepEqual(zeroFactorReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.equal(oldJob.submissions.size, 0);
+        assert.equal(slowHashAsyncCalls, 0);
+
+        poolModule.setNewCoinHashFactor(true, "ETH", NaN);
+        const nanFactorReply = invokePoolMethod({
+            socket,
+            id: 484,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                oldNotify.params[0],
+                "0x000000000000002c",
+                `0x${oldNotify.params[1]}`,
+                `0x${"33".repeat(32)}`
+            ],
+            portData: global.config.ports[1]
+        });
+
+        assert.deepEqual(nanFactorReply.replies, [{ error: "Block expired", result: undefined }]);
+        assert.equal(oldJob.submissions.size, 0);
         assert.equal(slowHashAsyncCalls, 0);
     } finally {
         global.config.ports[1].difficulty = originalPortDifficulty;

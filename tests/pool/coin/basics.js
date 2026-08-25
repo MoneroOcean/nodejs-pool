@@ -335,7 +335,7 @@ test("XTM-C jobs use the whole-cycle difficulty represented by their target", ()
                     ...xtmCPoolSettings,
                     buildJobPayload(ctx) {
                         targetDifficulty = ctx.coinDiff;
-                        return { target: ctx.getTargetHex(ctx.coinDiff, 8) };
+                        return xtmCPoolSettings.buildJobPayload(ctx);
                     }
                 }
             };
@@ -357,7 +357,8 @@ test("XTM-C jobs use the whole-cycle difficulty represented by their target", ()
             hashesPerDifficulty: 42
         });
 
-        assert.deepEqual(payload, { target: "target-1" });
+        assert.equal(payload.target, "target-1");
+        assert.equal(payload.xn, "0001");
         assert.equal(targetDifficulty, 1);
         assert.equal(validJobs[0].difficulty, 1);
         assert.equal(validJobs[0].norm_diff, 42);
