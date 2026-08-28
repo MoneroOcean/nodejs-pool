@@ -10,6 +10,8 @@ const path = require('path');
 const applyConfigRows = require("./lib/common/config_rows.js");
 const isPrimaryProcess = require("./lib/common/is_primary_process.js");
 
+const STARTUP_FAILURE_RESTART_DELAY_MS = 60 * 1000;
+
 global.support = require("./lib/common/support.js")();
 global.config = JSON.parse(config);
 global.mysql = mysql.createPool(global.config.mysql);
@@ -227,4 +229,10 @@ global.mysql.query("SELECT * FROM config").then(function (rows) {
         }).join(", ")}`);
         process.exit(1);
     }
+}).catch(function onStartupError(error) {
+    console.error(`Pool startup failed while loading config: ${  shutdownErrorMessage(error)}`);
+    console.error(`Exiting with status 1 in ${  STARTUP_FAILURE_RESTART_DELAY_MS / 1000  } seconds so PM2 can restart it`);
+    setTimeout(function exitAfterStartupFailure() {
+        process.exit(1);
+    }, STARTUP_FAILURE_RESTART_DELAY_MS);
 });
