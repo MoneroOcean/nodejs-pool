@@ -593,6 +593,14 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         assert.doesNotMatch(source, /exitAfterStartupFailure[\s\S]{0,120}\.unref\(\)/);
     });
 
+    test("daemon recovery never leaves xtm_mm explicitly stopped", function testXtmMmRecovery() {
+        const source = fs.readFileSync(path.join(__dirname, "..", "fix_daemon.sh"), "utf8");
+        assert.doesNotMatch(source, /run_optional_service stop xtm_mm\.service/);
+        assert.doesNotMatch(source, /systemctl(?:_cmd)? stop xtm_mm\.service/);
+        assert.match(source, /restart_xtm_mm_service\(\) \{\s*run_optional_service restart xtm_mm\.service/);
+        assert.equal(source.match(/^\s*restart_xtm_mm_service$/gm).length, 3);
+    });
+
     test("leaf deployment opens public pool ports as TCP only", function testLeafPoolProtocols() {
         const script = fs.readFileSync(path.join(__dirname, "..", "deployment", "leaf.bash"), "utf8");
         assert.ok(script.includes('ufw allow "$rule/tcp"'));

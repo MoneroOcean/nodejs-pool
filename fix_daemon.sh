@@ -143,8 +143,8 @@ restart_relay_pool() {
   run_optional_service restart relay-pool.service
 }
 
-run_xtm_mm_service() {
-  run_optional_service "$1" xtm_mm.service
+restart_xtm_mm_service() {
+  run_optional_service restart xtm_mm.service
 }
 
 wait_json_rpc() {
@@ -248,35 +248,32 @@ log "starting $reason recovery$(describe_context)"
 
 case "$reason" in
   xmr-lag|proxy-unhealthy)
-    run_xtm_mm_service stop || true
     run_service restart monero.service
     restart_relay_pool
     wait_monero_rpc || true
-    run_xtm_mm_service start
+    restart_xtm_mm_service
     ;;
   xtm-lag)
     if ! xtm_restart_safe; then
       log "deferred xtm-lag recovery"
       exit 0
     fi
-    run_xtm_mm_service stop || true
     restart_local_xtm
     restart_relay_pool
     wait_tari_rpc || true
-    run_xtm_mm_service start
+    restart_xtm_mm_service
     ;;
   template-stuck|unknown|*)
     if ! xtm_restart_safe; then
       log "deferred template recovery: active Tari node RPC is unavailable"
       exit 0
     fi
-    run_xtm_mm_service stop || true
     run_service restart monero.service
     restart_local_xtm
     restart_relay_pool
     wait_monero_rpc || true
     wait_tari_rpc || true
-    run_xtm_mm_service start
+    restart_xtm_mm_service
     ;;
 esac
 
