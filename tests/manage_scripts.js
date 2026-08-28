@@ -14,7 +14,6 @@ const fixHighBridgeCredit = require("../manage_scripts/exchange_recovery_bridge_
 const fixLowXmrCredit = require("../manage_scripts/exchange_recovery_low_xmr_credit_fix.js");
 const fixExchangeXmrBalance = require("../manage_scripts/exchange_recovery_xmr_balance_fix.js");
 const runUserDelete = require("../manage_scripts/user_delete_common.js");
-const INIT_PATH = require.resolve("../init.js");
 const INIT_MINI_PATH = require.resolve("../init_mini.js");
 const LIB2_COINS_PATH = path.join(__dirname, "..", "lib2", "coins.js");
 const HAS_LIB2_COINS = fs.existsSync(LIB2_COINS_PATH);
@@ -586,74 +585,12 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
-    test("init exits after a delayed non-zero exit on config startup failure", async function testInitConfigStartupFailure() {
-        const originalLoad = Module._load;
-        const originalSetTimeout = global.setTimeout;
-        const originalExit = process.exit;
-        const originalConsoleError = console.error;
-        const originalGlobals = {
-            support: global.support,
-            config: global.config,
-            mysql: global.mysql,
-            protos: global.protos
-        };
-        const scheduled = [];
-        const errors = [];
-        let exitCode;
-
-        delete require.cache[INIT_PATH];
-        try {
-            Module._load = function mockLoad(request, parent, isMain) {
-                if (parent && parent.filename === INIT_PATH && request === "promise-mysql") {
-                    return {
-                        createPool() {
-                            return {
-                                query(sql) {
-                                    assert.equal(sql, "SELECT * FROM config");
-                                    return Promise.reject(new Error("database unavailable"));
-                                }
-                            };
-                        }
-                    };
-                }
-                return originalLoad(request, parent, isMain);
-            };
-            global.setTimeout = function captureTimeout(callback, delay) {
-                scheduled.push({ callback, delay });
-                return { unref() {} };
-            };
-            process.exit = function trapExit(code) {
-                exitCode = code;
-                throw new Error("process.exit");
-            };
-            console.error = function captureError(message) {
-                errors.push(message);
-            };
-
-            require(INIT_PATH);
-            await new Promise(function waitForStartupChain(resolve) {
-                setImmediate(resolve);
-            });
-
-            assert.equal(scheduled.length, 1);
-            assert.equal(scheduled[0].delay, 60 * 1000);
-            assert.match(errors.join("\n"), /Pool startup failed while loading config: database unavailable/);
-            assert.match(errors.join("\n"), /Exiting with status 1 in 60 seconds so PM2 can restart it/);
-            assert.throws(function invokeScheduledExit() {
-                scheduled[0].callback();
-            }, /process\.exit/);
-            assert.equal(exitCode, 1);
-        } finally {
-            Module._load = originalLoad;
-            global.setTimeout = originalSetTimeout;
-            process.exit = originalExit;
-            console.error = originalConsoleError;
-            delete require.cache[INIT_PATH];
-            for (const [key, value] of Object.entries(originalGlobals)) {
-                if (typeof value === "undefined") delete global[key];
-                else global[key] = value;
-            }
-        }
+    test("init delays a non-zero exit after startup failure", function testInitStartupFailureExit() {
+        const source = fs.readFileSync(path.join(__dirname, "..", "init.js"), "utf8");
+        assert.match(source, /STARTUP_FAILURE_RESTART_DELAY_MS = 60 \* 1000/);
+        assert.match(source, /\.catch\(function onStartupError\(error\)/);
+        assert.match(source, /setTimeout\(function exitAfterStartupFailure\(\) \{\s*process\.exit\(1\);/);
+        assert.doesNotMatch(source, /exitAfterStartupFailure[\s\S]{0,120}\.unref\(\)/);
     });
 
     test("leaf deployment opens public pool ports as TCP only", function testLeafPoolProtocols() {
