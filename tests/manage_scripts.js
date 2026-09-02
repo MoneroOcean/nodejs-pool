@@ -8,6 +8,7 @@ const test = require("node:test");
 
 const accountUtils = require("../script_account_utils.js");
 const moveBalance = require("../user_scripts/user_balance_move_common.js");
+const insertBan = require("../user_scripts/user_ban_common.js");
 const unblockCatalog = require("../manage_scripts/exchange_recovery_help.js");
 const cacheFindUnused = require("../manage_scripts/cache_unused_find.js");
 const fixHighBridgeCredit = require("../manage_scripts/exchange_recovery_bridge_credit_fix.js");
@@ -170,6 +171,35 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         assert.throws(function onEmptyPaymentId() {
             accountUtils.splitUser("addr.");
         }, /address>\.<paymentId>/);
+    });
+
+    test("manual bans discard a later reason for an existing mining address", async function testDuplicateBan() {
+        const originalMysql = global.mysql;
+        const address = "wallet-address";
+        const bans = [];
+        const calls = [];
+        global.mysql = {
+            query(sql, params) {
+                calls.push({ sql, params });
+                const duplicate = bans.some(function hasAddress(row) {
+                    return row.mining_address === params[0];
+                });
+                if (!duplicate) bans.push({ mining_address: params[0], reason: params[1] });
+                return Promise.resolve({ affectedRows: duplicate ? 0 : 1 });
+            }
+        };
+
+        try {
+            await insertBan(address, "first reason");
+            await insertBan(address, "later reason");
+            assert.deepEqual(bans, [{ mining_address: address, reason: "first reason" }]);
+            assert.equal(calls.length, 2);
+            assert.match(calls[0].sql, /ON DUPLICATE KEY UPDATE id=id$/);
+            assert.deepEqual(calls[1].params, [address, "later reason"]);
+        } finally {
+            if (typeof originalMysql === "undefined") delete global.mysql;
+            else global.mysql = originalMysql;
+        }
     });
 
     test("refactored trade-context fix aligns XMR baseline to the current exchange balance", function testTradeContextFix() {
