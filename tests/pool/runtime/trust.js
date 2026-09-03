@@ -820,7 +820,7 @@ test("failed wallet verification forces the queued generation through verificati
     }
 });
 
-test("trusted queue overflow is throttled and releases the tracked nonce", async () => {
+test("submission throttle drops trusted shares while verification is in flight", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
     const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
@@ -838,24 +838,27 @@ test("trusted queue overflow is throttled and releases the tracked nonce", async
             verifierCallbacks.push(callback);
         };
 
-        const { miner, jobId, trackedJob } = loginTrustedMiner(runtime, socket, 2115, "worker-trusted-queue-limit");
+        const { state, jobId, trackedJob } = loginTrustedMiner(runtime, socket, 2115, "worker-trusted-queue-limit");
         selectVerificationThenTrust();
 
         const verifyingReply = submitShare(socket, 2116, jobId, "00000038");
         const queuedReply = submitShare(socket, 2117, jobId, "00000039");
         const overflowReply = submitShare(socket, 2118, jobId, "0000003a");
 
-        assert.deepEqual(queuedReply.replies, []);
+        assert.deepEqual(queuedReply.replies, THROTTLED_REPLY);
         assert.deepEqual(overflowReply.replies, THROTTLED_REPLY);
+        assert.equal(trackedJob.submissions.has("00000039"), false);
         assert.equal(trackedJob.submissions.has("0000003a"), false);
+        assert.equal(verifierCallbacks.length, 1);
+        assert.equal(state.minerWallets[MAIN_WALLET].last_ver_shares, 3);
 
         verifierCallbacks.shift()(VALID_RESULT);
-        miner.lastSlowHashAsyncDelay = 0;
         await flushTimers();
 
         assert.deepEqual(verifyingReply.replies, OK_REPLY);
-        assert.deepEqual(queuedReply.replies, OK_REPLY);
-        assert.equal(runtime.getState().shareStats.throttledShares, 1);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+        assert.equal(runtime.getState().shareStats.trustedShares, 0);
+        assert.equal(runtime.getState().shareStats.throttledShares, 2);
     } finally {
         global.config.pool.trustedMiners = originalTrustedMiners;
         global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;

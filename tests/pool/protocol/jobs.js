@@ -396,6 +396,84 @@ test("trusted kawpow submit uses the same trusted-share fast path as other algos
     }
 });
 
+test("throttled trusted kawpow shares skip trust and verification", async () => {
+    const coinHashFactor = 1 / global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT);
+    const { runtime, database } = await startHarness({
+        coinHashFactors: { ETH: coinHashFactor },
+        templates: [
+            createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-template-1", height: 101 }),
+            {
+                ...createBaseTemplate({ coin: "ETH", port: ETH_PORT, idHash: "eth-template-1", height: 201 }),
+                coinHashFactor
+            }
+        ]
+    });
+    const client = new JsonLineClient(ETH_PORT);
+    const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
+    const originalThrottleWindow = global.config.pool.minerThrottleShareWindow;
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    let randomBytesCalls = 0;
+    let slowHashAsyncCalls = 0;
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 1;
+        global.config.pool.minerThrottleShareWindow = 1;
+        global.config.pool.trustedMiners = true;
+        crypto.randomBytes = function countTrustDraws() {
+            randomBytesCalls += 1;
+            return Buffer.from([255]);
+        };
+        global.coinFuncs.slowHashAsync = function countedSlowHashAsync(...args) {
+            slowHashAsyncCalls += 1;
+            return originalSlowHashAsync.apply(this, args);
+        };
+
+        await client.connect();
+        await client.request({ id: 4524, method: "mining.subscribe", params: ["HarnessEthMiner/1.0"] });
+        await client.request({ id: 4525, method: "mining.authorize", params: [ETH_WALLET, "eth-kawpow-trusted-audit"] });
+        const state = runtime.getState();
+        const miner = Array.from(state.activeMiners.values())[0];
+        miner.trust.trust = 1000;
+        miner.trust.check_height = 0;
+        state.minerWallets[ETH_WALLET].last_ver_shares = 1;
+
+        await client.waitFor((message) => message.method === "mining.set_target");
+        const notifyPush = await client.waitFor((message) => message.method === "mining.notify");
+        const submitReply = await client.request({
+            id: 4526,
+            method: "mining.submit",
+            params: [
+                ETH_WALLET,
+                notifyPush.params[0],
+                "0x0000000000000024",
+                `0x${notifyPush.params[1]}`,
+                `0x${"ab".repeat(32)}`
+            ]
+        });
+        await flushTimers();
+
+        assert.equal(submitReply.error.message, "Throttled down share submission (please increase difficulty)");
+        assert.equal(submitReply.result, undefined);
+        assert.equal(randomBytesCalls, 0);
+        assert.equal(slowHashAsyncCalls, 0);
+        assert.equal(state.minerWallets[ETH_WALLET].last_ver_shares, 2);
+        assert.equal(runtime.getState().shareStats.throttledShares, 1);
+        assert.equal(runtime.getState().shareStats.trustedShares, 0);
+        assert.equal(runtime.getState().shareStats.normalShares, 0);
+        assert.equal(database.shares.length, 0);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
+        global.config.pool.minerThrottleShareWindow = originalThrottleWindow;
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        await client.close();
+        await runtime.stop();
+    }
+});
+
 test("kawpow submit rejects shares whose header hash does not match the converted blob", async () => {
     const { runtime, database } = await startHarness();
     const client = new JsonLineClient(ETH_PORT);

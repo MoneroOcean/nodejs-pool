@@ -206,9 +206,6 @@ test("erg handlers preserve the pre-refactor autolykos share verification and su
             params: {
                 nonce: "56".repeat(8)
             },
-            shareThrottled() {
-                return false;
-            },
             verifyShareCB(...args) {
                 verifyArgs = args;
             }
@@ -694,9 +691,6 @@ test("xtm submit and verify handlers preserve the pre-refactor special-case tari
         },
         reportMinerShare() {
             throw new Error("XTM-C verify path should not report an invalid share");
-        },
-        shareThrottled() {
-            throw new Error("XTM-C verify path should not use throttling");
         },
         verifyShareCB(...args) {
             verifyArgs = args;

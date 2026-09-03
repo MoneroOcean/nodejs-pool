@@ -80,20 +80,33 @@ test("throttled shares do not retain duplicate nonce entries", async () => {
     }
 });
 
-test("throttled trusted miners cannot replay a tracked nonce", async () => {
+test("throttle drops unlisted trusted shares without affecting a whitelisted peer", async () => {
     const validVector = RX0_MAIN_SHARE_VECTORS[0];
     const { runtime } = await startHarness();
     const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
     const originalThrottleWindow = global.config.pool.minerThrottleShareWindow;
     const originalTrustedMiners = global.config.pool.trustedMiners;
     const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
     const socket = {};
+    const whitelistedSocket = {};
+    const whitelistedIp = "10.0.0.204";
+    let randomBytesCalls = 0;
+    let slowHashAsyncCalls = 0;
 
     try {
         global.config.pool.minerThrottleSharePerSec = 1;
         global.config.pool.minerThrottleShareWindow = 1;
         global.config.pool.trustedMiners = true;
-        crypto.randomBytes = () => Buffer.from([255]);
+        crypto.randomBytes = function countTrustDraws() {
+            randomBytesCalls += 1;
+            return Buffer.from([255]);
+        };
+        global.coinFuncs.slowHashAsync = function countVerifications(...args) {
+            slowHashAsyncCalls += 1;
+            return originalSlowHashAsync.apply(this, args);
+        };
+        runtime.getState().ip_whitelist[whitelistedIp] = 1;
 
         const loginReply = invokePoolMethod({
             socket,
@@ -104,30 +117,33 @@ test("throttled trusted miners cannot replay a tracked nonce", async () => {
                 pass: "worker-throttled-trusted-replay"
             }
         });
+        const whitelistedLoginReply = invokePoolMethod({
+            socket: whitelistedSocket,
+            id: 1952,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-whitelisted-throttle-bypass"
+            },
+            ip: whitelistedIp
+        });
 
         const state = runtime.getState();
         const miner = state.activeMiners.get(socket.miner_id);
+        const whitelistedMiner = state.activeMiners.get(whitelistedSocket.miner_id);
         const jobId = loginReply.replies[0].result.job.job_id;
+        const whitelistedJobId = whitelistedLoginReply.replies[0].result.job.job_id;
         const job = miner.validJobs.toarray().find((entry) => entry.id === jobId);
+        const whitelistedJob = whitelistedMiner.validJobs.toarray().find((entry) => entry.id === whitelistedJobId);
         const threshold = global.config.pool.minerThrottleSharePerSec * global.config.pool.minerThrottleShareWindow;
         state.walletTrust[MAIN_WALLET] = 1000;
         state.minerWallets[MAIN_WALLET].last_ver_shares = threshold;
         miner.trust.trust = 1000;
         miner.trust.check_height = 0;
+        whitelistedMiner.trust.trust = 1000;
+        whitelistedMiner.trust.check_height = 0;
 
         const firstReply = invokePoolMethod({
-            socket,
-            id: 1952,
-            method: "submit",
-            params: {
-                id: socket.miner_id,
-                job_id: jobId,
-                nonce: validVector.nonce,
-                result: validVector.expected
-            }
-        });
-
-        const replayReply = invokePoolMethod({
             socket,
             id: 1953,
             method: "submit",
@@ -139,16 +155,64 @@ test("throttled trusted miners cannot replay a tracked nonce", async () => {
             }
         });
 
+        const replayReply = invokePoolMethod({
+            socket,
+            id: 1954,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: validVector.nonce,
+                result: validVector.expected
+            }
+        });
+
         await flushTimers();
-        assert.deepEqual(firstReply.replies, [{ error: null, result: { status: "OK" } }]);
-        assert.deepEqual(replayReply.replies, [{ error: "Duplicate share", result: undefined }]);
-        assert.equal(job.submissions.has(validVector.nonce), true);
+        const throttledReply = [{
+            error: "Throttled down share submission (please increase difficulty)",
+            result: undefined
+        }];
+        assert.deepEqual(firstReply.replies, throttledReply);
+        assert.deepEqual(replayReply.replies, throttledReply);
+        assert.equal(job.submissions.size, 0);
+        assert.equal(randomBytesCalls, 0);
+        assert.equal(slowHashAsyncCalls, 0);
+        assert.equal(state.minerWallets[MAIN_WALLET].last_ver_shares, threshold + 2);
+        assert.equal(runtime.getState().shareStats.throttledShares, 2);
+        assert.equal(runtime.getState().shareStats.trustedShares, 0);
+        assert.equal(runtime.getState().shareStats.normalShares, 0);
+        assert.equal(state.walletTrust[MAIN_WALLET], 1000);
+        assert.equal(miner.trust.trust, 1000);
+
+        const whitelistedReply = invokePoolMethod({
+            socket: whitelistedSocket,
+            id: 1955,
+            method: "submit",
+            params: {
+                id: whitelistedSocket.miner_id,
+                job_id: whitelistedJobId,
+                nonce: RX0_MAIN_SHARE_VECTORS[1].nonce,
+                result: RX0_MAIN_SHARE_VECTORS[1].expected
+            },
+            ip: whitelistedIp
+        });
+
+        await flushTimers();
+        assert.deepEqual(whitelistedReply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(whitelistedMiner.whiteList, true);
+        assert.equal(whitelistedJob.submissions.has(RX0_MAIN_SHARE_VECTORS[1].nonce), true);
+        assert.equal(randomBytesCalls, 1);
+        assert.equal(slowHashAsyncCalls, 0);
+        assert.equal(state.minerWallets[MAIN_WALLET].last_ver_shares, threshold + 2);
+        assert.equal(runtime.getState().shareStats.throttledShares, 2);
         assert.equal(runtime.getState().shareStats.trustedShares, 1);
+        assert.equal(runtime.getState().shareStats.normalShares, 0);
     } finally {
         global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
         global.config.pool.minerThrottleShareWindow = originalThrottleWindow;
         global.config.pool.trustedMiners = originalTrustedMiners;
         crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
         await runtime.stop();
     }
 });

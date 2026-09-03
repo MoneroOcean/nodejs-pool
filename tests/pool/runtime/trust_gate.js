@@ -85,7 +85,6 @@ test("trustChange slows the session-branch ramp (stricter gate while rebuilding)
 
 function makeShareCtx(slowHashResult, errorKind, spies) {
     return {
-        shareThrottled: () => false,
         getBlockSubmitTestResultBuffer: () => null,
         blockTemplate: { hash: "00".repeat(32), port: 8545 },
         params: { nonce: "00000000" },

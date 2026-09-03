@@ -113,7 +113,7 @@ test("throttled shares return the explicit increase-difficulty message", async (
     }
 });
 
-test("extreme low-difficulty throttling is eventually invalidated with a high safety multiplier", async () => {
+test("extreme low-difficulty throttling remains a neutral drop", async () => {
     const { runtime, database } = await startHarness();
     const socket = {};
 
@@ -146,11 +146,11 @@ test("extreme low-difficulty throttling is eventually invalidated with a high sa
         });
 
         assert.deepEqual(submitReply.replies, [{
-            error: "Low difficulty share",
+            error: "Throttled down share submission (please increase difficulty)",
             result: undefined
         }]);
-        assert.equal(runtime.getState().shareStats.throttledShares, 0);
-        assert.equal(runtime.getState().shareStats.invalidShares, 1);
+        assert.equal(runtime.getState().shareStats.throttledShares, 1);
+        assert.equal(runtime.getState().shareStats.invalidShares, 0);
         assert.equal(database.invalidShares.length, 0);
     } finally {
         global.config.pool.minerThrottleSharePerSec = 1000;
