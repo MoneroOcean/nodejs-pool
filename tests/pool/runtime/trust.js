@@ -8,6 +8,7 @@ const {
     MAIN_WALLET,
     VALID_RESULT,
     startHarness,
+    flushShareAccumulator,
     flushTimers,
     invokePoolMethod,
     RX0_MAIN_SHARE_VECTORS,
@@ -869,9 +870,10 @@ test("submission throttle drops trusted shares while verification is in flight",
     }
 });
 
-test("wallet bans discard active and pending trusted queue entries", async () => {
-    const { runtime } = await startHarness();
+test("wallet bans finish active trusted queue entries and discard pending entries", async () => {
+    const { runtime, database } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalShareAccTime = global.config.pool.shareAccTime;
     const originalRandomBytes = crypto.randomBytes;
     const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
     const socket = {};
@@ -879,6 +881,7 @@ test("wallet bans discard active and pending trusted queue entries", async () =>
 
     try {
         global.config.pool.trustedMiners = true;
+        global.config.pool.shareAccTime = 0.001;
         global.coinFuncs.slowHashAsync = function holdWalletVerification(_buffer, _blockTemplate, _wallet, callback) {
             verifierCallbacks.push(callback);
         };
@@ -897,12 +900,25 @@ test("wallet bans discard active and pending trusted queue entries", async () =>
         await flushTimers();
 
         assert.deepEqual(verifyingReply.replies, OK_REPLY);
-        assert.deepEqual(queuedReply.replies, THROTTLED_REPLY);
+        assert.deepEqual(queuedReply.replies, OK_REPLY);
         assert.deepEqual(pendingReply.replies, THROTTLED_REPLY);
-        assert.equal(trackedJob.submissions.has("0000003c"), false);
+        assert.equal(trackedJob.submissions.has("0000003c"), true);
         assert.equal(trackedJob.submissions.has("0000003d"), false);
+
+        const retryReply = submitShare(socket, 2123, jobId, "0000003c");
+        assert.deepEqual(retryReply.replies, [{ error: "Duplicate share", result: undefined }]);
+        await flushShareAccumulator(() => database.shares.length > 0);
+
+        const credited = database.shares.reduce((totals, entry) => {
+            totals.shareNum += Number(entry.payload.share_num);
+            totals.shares2 += Number(entry.payload.shares2);
+            return totals;
+        }, { shareNum: 0, shares2: 0 });
+        const expectedShareWork = trackedJob.difficulty * (trackedJob.hashesPerDifficulty || 1) * trackedJob.coinHashFactor;
+        assert.deepEqual(credited, { shareNum: 2, shares2: 2 * expectedShareWork });
     } finally {
         global.config.pool.trustedMiners = originalTrustedMiners;
+        global.config.pool.shareAccTime = originalShareAccTime;
         crypto.randomBytes = originalRandomBytes;
         global.coinFuncs.slowHashAsync = originalSlowHashAsync;
         await runtime.stop();
