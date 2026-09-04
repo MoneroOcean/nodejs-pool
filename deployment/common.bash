@@ -183,6 +183,21 @@ sys.exit(1)
 ' "$method"
 }
 
+tari_http_synced() {
+  local url="$1"
+  local response
+  response="$(curl -fsS "$url")" || return 1
+  printf '%s' "$response" | python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+metadata = payload.get("metadata") or {}
+height = int(metadata.get("best_block_height") or 0)
+sys.exit(0 if payload.get("is_synced") is True and height > 0 else 1)
+'
+}
+
 ensure_rust_toolchain() {
   if [ -s "$HOME/.cargo/env" ]; then
     . "$HOME/.cargo/env"
@@ -262,15 +277,27 @@ EOF
 }
 
 write_tari_service() {
+  local mode="${1:-with-json-bridges}"
+  local exec_start
+  if [ "$mode" = "base-node-only" ]; then
+    # The pool relay already owns 18146/18148. The merge-mining proxy talks to
+    # the local base-node gRPC listener directly on 18142.
+    exec_start='/usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen'
+  elif [ "$mode" = "with-json-bridges" ]; then
+    # Tari SubmitBlock JSON bodies can exceed grpc-json-proxy's 1 MiB default
+    # when the block carries a large proof body.
+    exec_start='/bin/bash -c "(sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142 --max-body-bytes 16777216) & (sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142 --max-body-bytes 16777216) & /usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen"'
+  else
+    echo "Invalid Tari service mode: $mode" >&2
+    return 1
+  fi
   cat >/lib/systemd/system/xtm.service <<EOF
 [Unit]
 Description=Tari Daemon
 After=network.target
 
 [Service]
-# Tari SubmitBlock JSON bodies can exceed grpc-json-proxy's 1 MiB default when
-# the block carries a large proof body.
-ExecStart=/bin/bash -c "(sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142 --max-body-bytes 16777216) & (sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142 --max-body-bytes 16777216) & /usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen"
+ExecStart=$exec_start
 Restart=always
 User=$TARI_USER
 Environment=HOME=$TARI_HOME

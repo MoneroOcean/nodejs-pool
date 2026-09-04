@@ -45,7 +45,7 @@ WWW_DNS="${WWW_DNS:-moneroocean.stream}"
 API_DNS="${API_DNS:-api.moneroocean.stream}"
 CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN:-n/a}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-support@moneroocean.stream}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.6.0}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.7.0-pre.3}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
@@ -146,7 +146,9 @@ wait_for_tari_sync() {
   [ "$POOL_DEPLOY_PREPARE" = 1 ] && { echo "Skipping Tari sync wait in prepare mode"; return 0; }
   echo "Please wait until Tari daemon is fully synced"
   for _ in $(seq 1 360); do
-    if rpc_synced http://127.0.0.1:18146/json_rpc GetTipInfo; then
+    # Ports 18146/18148 belong to the pool relay and can point at a remote
+    # daemon. Query the local base node's HTTP service directly instead.
+    if tari_http_synced http://127.0.0.1:9000/get_tip_info; then
       echo "Tari daemon is synced"
       return 0
     fi
@@ -425,7 +427,7 @@ install_tari_suite
 clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
 patch_tari_config
 
-write_tari_service
+write_tari_service base-node-only
 
 write_tari_merge_mining_service "monero.service xtm.service"
 

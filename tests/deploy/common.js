@@ -80,7 +80,10 @@ test("pool deployment prepare mode is non-mutating and architecture-aware", () =
     assert.match(script, /Skipping Monero sync wait in prepare mode/);
     assert.match(script, /Skipping Tari sync wait in prepare mode/);
     assert.match(script, /\[ "\$POOL_DEPLOY_PREPARE" != 1 \]; then\s+pm2 describe api/);
-    assert.match(script, /--daemon-address 127\.0\.0\.1:18083/);
+    assert.doesNotMatch(script, /pm2 start .*monero-wallet-rpc/);
+    assert.doesNotMatch(script, /pm2 start .*payments/);
+    assert.match(script, /TARI_RELEASE_TAG="\$\{TARI_RELEASE_TAG:-v5\.7\.0-pre\.3\}"/);
+    assert.match(script, /tari_http_synced http:\/\/127\.0\.0\.1:9000\/get_tip_info/);
     assert.match(script, /\.moneroocean-build-arch/);
     assert.match(script, /uname -m >build\/release\/\.moneroocean-build-arch/);
     assert.match(script, /POOL_DEPLOY_PREPARE" = 1[\s\S]*skipping wallet generation/);
