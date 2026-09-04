@@ -298,7 +298,7 @@ cat >/etc/nginx/sites-enabled/default <<EOF
 server {
 	listen 80;
 	location /leafApi {
-		proxy_pass http://localhost:8000;
+		proxy_pass http://127.0.0.1:8000;
 		proxy_redirect off;
 	}
 	gzip on;
@@ -617,11 +617,8 @@ fi
 fi
 if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
 pm2 describe api >/dev/null 2>&1 || pm2 start init.js --name=api --log-date-format="YYYY-MM-DD HH:mm Z" -- --module=api
-pm2 describe monero-wallet-rpc >/dev/null 2>&1 || pm2 start /usr/local/src/monero/build/release/bin/monero-wallet-rpc -- --daemon-address 127.0.0.1:18083 --rpc-bind-port 18082 --password-file /home/user/wallets/wallet_pass --wallet-file /home/user/wallets/wallet --trusted-daemon --disable-rpc-login
-sleep 30
 pm2 describe block_manager >/dev/null 2>&1 || pm2 start init.js --name=block_manager --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z"  -- --module=block_manager
 pm2 describe worker >/dev/null 2>&1 || pm2 start init.js --name=worker --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --node-args="--max_old_space_size=8192" -- --module=worker
-pm2 describe payments >/dev/null 2>&1 || pm2 start init.js --name=payments --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" --no-autorestart -- --module=payments
 pm2 describe remote_share >/dev/null 2>&1 || pm2 start init.js --name=remote_share --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=remote_share
 pm2 describe long_runner >/dev/null 2>&1 || pm2 start init.js --name=long_runner --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=long_runner
 fi
@@ -630,7 +627,13 @@ if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
   sleep 20
   pm2 describe pool_stats >/dev/null 2>&1 || pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats
 fi
-if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then pm2 save; fi
+if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
+  # The encrypted wallet is mounted interactively by ~/w.sh.  Keep both the wallet
+  # RPC and payments out of PM2's reboot dump so neither can start against the
+  # unmounted backing directory.
+  pm2 delete monero-wallet-rpc payments >/dev/null 2>&1 || true
+  pm2 save
+fi
 sudo env PATH=\$PATH:/home/user/.nvm/versions/node/\$NODEJS_VERSION/bin /home/user/.nvm/versions/node/\$NODEJS_VERSION/lib/node_modules/pm2/bin/pm2 startup systemd -u user --hp /home/user
 cd /home/user
 if [ ! -d /home/user/mo-pool-ui/.git ]; then

@@ -13,8 +13,7 @@ const ROOT_DIR = path.join(__dirname, "..", "..");
 const ARTIFACT_ROOT = path.join(ROOT_DIR, "test-artifacts", "deploy");
 const DEFAULT_CASE_TIMEOUT_MS = 45 * 60 * 1000;
 const EXPECTED_DEPLOY_PROCESSES = [
-    "api", "monero-wallet-rpc", "block_manager", "worker",
-    "payments", "remote_share", "long_runner", "pool_stats"
+    "api", "block_manager", "worker", "remote_share", "long_runner", "pool_stats"
 ];
 const REMOTE_SHARE_URLS = [
     "http://127.0.0.1:8000/leafApi",
@@ -258,19 +257,6 @@ req.end();`;
     return JSON.parse(result.stdoutTail || '{"statusCode":0,"error":"empty response"}');
 }
 
-async function assertWalletRpc(context) {
-    const parsed = await httpRequest(context, {
-        body: '{"jsonrpc":"2.0","id":"0","method":"getbalance","params":[] }',
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-        url: "http://127.0.0.1:18082/json_rpc"
-    }, { logFile: artifactPath(context, "wallet-rpc.json") });
-    assert.equal(parsed.statusCode, 200, `wallet rpc status ${parsed.statusCode}${parsed.error ? `: ${parsed.error}` : ""}`);
-    const response = JSON.parse(parsed.body);
-    assert.equal(typeof response.result.unlocked_balance, "number");
-    await appendCheckData(context, "wallet rpc getbalance", response.result);
-}
-
 async function assertRemoteShareResponse(context) {
     const probes = [];
     let ok = false;
@@ -391,8 +377,8 @@ async function verifyDeployInstall(context) {
     await appendCheckData(context, "api config response", JSON.parse(apiResult.body));
     await appendCheckLog(context, "deploy checks: remote_share");
     await assertRemoteShareResponse(context);
-    await appendCheckLog(context, "deploy checks: wallet rpc");
-    await assertWalletRpc(context);
+    await execInContainer(context.containerName, "! pm2 describe monero-wallet-rpc >/dev/null 2>&1 && ! pm2 describe payments >/dev/null 2>&1");
+    await appendCheckLog(context, "verified wallet rpc and payments are deferred until the encrypted wallet mount");
 }
 async function createContainer(context) {
     await appendCheckData(context, "creating docker network", context.networkName);
