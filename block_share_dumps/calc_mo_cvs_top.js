@@ -7,12 +7,13 @@ if (Boolean(process.stdin.isTTY) || process.argv.length !== 2) {
 
 let stdin = "";
 
-process.stdin.on('data', function(data) {
+process.stdin.on('data', /** @param {Buffer | string} data */ function(data) {
   stdin += data.toString();
 });
 
 process.stdin.on('end', function() {
   // Only normalized difficulty contributes to this ranking.
+  /** @type {Record<string, number>} */
   const wallets = Object.create(null);
 
   for (const line of stdin.split("\n")) {
@@ -22,12 +23,12 @@ process.stdin.on('end', function() {
       console.error(`Skipped invalid line: ${  line}`);
       continue;
     }
-    const wallet         = items[0];
-    const xmr_diff = parseInt(items[5]);
+    const wallet = items[0] ?? "";
+    const xmr_diff = parseInt(items[5] ?? "");
     wallets[wallet] = (wallets[wallet] ?? 0) + xmr_diff;
   }
 
-  for (const wallet of Object.keys(wallets).sort((a, b) => (wallets[a] < wallets[b]) ? 1 : -1)) {
+  for (const wallet of Object.keys(wallets).sort((a, b) => ((wallets[a] ?? 0) < (wallets[b] ?? 0)) ? 1 : -1)) {
     console.log(`${wallet  }: ${  wallets[wallet]}`);
   }
 

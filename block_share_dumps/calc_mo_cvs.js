@@ -5,14 +5,15 @@ if (Boolean(process.stdin.isTTY) || process.argv.length !== 3) {
   process.exit(1);
 }
 
-const my_wallet = process.argv[2].slice(-16);
+const my_wallet = (process.argv[2] ?? "").slice(-16);
 
 let stdin = "";
 
-process.stdin.on('data', function(data) {
+process.stdin.on('data', /** @param {Buffer | string} data */ function(data) {
   stdin += data.toString();
 });
 
+/** @param {number} hashes @returns {string} */
 function human_hashrate(hashes) {
   const power = Math.pow(10, 2);
   if (hashes > 1000000000000) return `${String(Math.round((hashes / 1000000000000) * power) / power)   } TH/s`;
@@ -30,8 +31,10 @@ process.stdin.on('end', function() {
   let my_share_count    = 0;
   let my_xmr_diff       = 0;
   let my_xmr_diff_payed = 0;
-  const my_coin_raw_diff  = {};
-  const my_coin_xmr_diff  = {};
+  /** @type {Record<string, number>} */
+  const my_coin_raw_diff = Object.create(null);
+  /** @type {Record<string, number>} */
+  const my_coin_xmr_diff = Object.create(null);
 
   for (const line of stdin.split("\n")) {
     if (line.substring(0, 1) === "#") continue;
@@ -40,13 +43,13 @@ process.stdin.on('end', function() {
       console.error(`Skipped invalid line: ${  line}`);
       continue;
     }
-    const wallet         = items[0];
-    const timestamp      = parseInt(items[1], 16);
-    const raw_diff       = parseInt(items[2]);
-    const count          = parseInt(items[3]);
-    const coin           = items[4];
-    const xmr_diff       = parseInt(items[5]);
-    const xmr_diff_payed = items[6] === "" ? xmr_diff : parseInt(items[6]);
+    const wallet         = (items[0] ?? "");
+    const timestamp      = parseInt((items[1] ?? ""), 16);
+    const raw_diff       = parseInt((items[2] ?? ""));
+    const count          = parseInt((items[3] ?? ""));
+    const coin           = (items[4] ?? "");
+    const xmr_diff       = parseInt((items[5] ?? ""));
+    const xmr_diff_payed = (items[6] ?? "") === "" ? xmr_diff : parseInt((items[6] ?? ""));
     pplns_window += xmr_diff;
     if (!oldest_timestamp || timestamp < oldest_timestamp) oldest_timestamp = timestamp;
     if (newest_timestamp < timestamp) newest_timestamp = timestamp;
@@ -54,10 +57,8 @@ process.stdin.on('end', function() {
       my_share_count    += count;
       my_xmr_diff       += xmr_diff;
       my_xmr_diff_payed += xmr_diff_payed;
-      if (!(coin in my_coin_raw_diff)) my_coin_raw_diff[coin] = 0;
-      my_coin_raw_diff[coin] += raw_diff;
-      if (!(coin in my_coin_xmr_diff)) my_coin_xmr_diff[coin] = 0;
-      my_coin_xmr_diff[coin] += xmr_diff;
+      my_coin_raw_diff[coin] = (my_coin_raw_diff[coin] ?? 0) + raw_diff;
+      my_coin_xmr_diff[coin] = (my_coin_xmr_diff[coin] ?? 0) + xmr_diff;
     }
   }
 
@@ -71,7 +72,7 @@ process.stdin.on('end', function() {
   console.log("");
   console.log("You mined these coins:");
   for (const coin of Object.keys(my_coin_raw_diff).sort()) {
-    console.log(`\t${  coin  }: ${  my_coin_raw_diff[coin]  } raw coin hashes (${  ((my_coin_xmr_diff[coin] / my_xmr_diff) * 100).toFixed(6)  }% of XMR normalized hashrate)`);
+    console.log(`\t${  coin  }: ${  my_coin_raw_diff[coin]  } raw coin hashes (${  (((my_coin_xmr_diff[coin] ?? 0) / my_xmr_diff) * 100).toFixed(6)  }% of XMR normalized hashrate)`);
   }
 
   process.exit(0);
