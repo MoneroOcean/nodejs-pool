@@ -1,47 +1,61 @@
 "use strict";
 const mysql = require("promise-mysql");
 const fs = require("fs");
-const cluster = require("cluster");
+// Node exports Cluster directly to CommonJS; @types/node describes its ESM default.
+const cluster = /** @type {import("node:cluster").Cluster} */ (/** @type {unknown} */ (require("node:cluster")));
 const argv = require('./parse_args')(process.argv.slice(2));
-const config = fs.readFileSync("./config.json");
-const coinConfig = fs.readFileSync("./coinConfig.json");
+const config = fs.readFileSync("./config.json", "utf8");
+const coinConfig = fs.readFileSync("./coinConfig.json", "utf8");
 const protobuf = require('protocol-buffers');
+const resolveCoinConfig = require("./resolve_coin_config.js");
 const path = require('path');
 const applyConfigRows = require("./lib/common/config_rows.js");
 const isPrimaryProcess = require("./lib/common/is_primary_process.js");
 
+const moduleOption = argv["module"];
+const toolOption = argv["tool"];
+const moduleName = typeof moduleOption === "string" ? moduleOption : null;
+const toolName = typeof toolOption === "string" ? toolOption : null;
+
 const STARTUP_FAILURE_RESTART_DELAY_MS = 60 * 1000;
 
 global.support = require("./lib/common/support.js")();
-global.config = JSON.parse(config);
+const startupConfig = JSON.parse(config);
+const resolvedCoinConfig = resolveCoinConfig(startupConfig, JSON.parse(coinConfig));
+global.config = startupConfig;
 global.mysql = mysql.createPool(global.config.mysql);
 global.protos = protobuf(fs.readFileSync('./lib/common/data.proto'));
 global.argv = argv;
 let comms;
 let coinInc;
+/** @type {unknown} */
 let activeModule = null;
 const { formatLogEvent } = require("./lib/common/logging.js");
 
+/** @param {string} label @param {Record<string, unknown>} fields */
 function logEvent(label, fields) { console.log(formatLogEvent(label, fields)); }
 
+/** @param {string} kind @param {string} name */
 function logStartup(kind, name) {
     console.log(`=== STARTING ${  kind.toUpperCase()  }: ${  name  } ===`);
 }
 
+/** @param {import("cluster").Cluster} clusterApi */
 function hasClusterWorkers(clusterApi) {
-    if (!clusterApi || !clusterApi.workers) return false;
-    return Object.keys(clusterApi.workers).some(function hasWorker(id) {
-        return Boolean(clusterApi.workers[id]);
-    });
+    const workers = clusterApi.workers;
+    return workers ? Object.values(workers).some(Boolean) : false;
 }
 
-function shutdownErrorMessage(error) { return error && error.message ? error.message : String(error); }
+/** @param {unknown} error */
+function shutdownErrorMessage(error) { return error instanceof Error ? error.message : String(error); }
 
+/** @returns {Promise<unknown>} */
 function stopActiveModule() {
-    if (!activeModule || typeof activeModule.stop !== "function") return Promise.resolve();
+    if (!activeModule || typeof activeModule !== "object" || !("stop" in activeModule) || typeof activeModule.stop !== "function") return Promise.resolve();
     return Promise.resolve(activeModule.stop());
 }
 
+/** @returns {Promise<void>} */
 function disconnectCluster() {
     return new Promise(function onDisconnect(resolve) {
         if (!isPrimaryProcess(cluster) || !hasClusterWorkers(cluster) || typeof cluster.disconnect !== "function") {
@@ -61,6 +75,7 @@ function closeMysql() {
     return Promise.resolve(global.mysql.end());
 }
 
+/** @returns {Promise<void>} */
 function syncDatabaseEnv() {
     return new Promise(function onSync(resolve) {
         const env = global.database && global.database.env;
@@ -90,15 +105,18 @@ function closeDatabaseEnv() {
     }
 }
 
+/** @param {string} name */
 function installGracefulShutdown(name) {
     let shuttingDown = false;
-    const kind = Object.hasOwn(argv, 'module') ? 'module' : 'tool';
+    const kind = (moduleName !== null) ? 'module' : 'tool';
 
+    /** @param {string} signal @returns {Promise<void>} */
     async function handleSignal(signal) {
         if (shuttingDown) return;
         shuttingDown = true;
         logEvent("Shutdown", { kind, name, signal, status: "stopping" });
 
+        /** @param {string} label @param {() => unknown} fn @returns {Promise<void>} */
         async function runStep(label, fn) {
             try {
                 await fn();
@@ -116,6 +134,7 @@ function installGracefulShutdown(name) {
         process.exit(0);
     }
 
+    /** @param {string} signal */
     function triggerShutdown(signal) {
         handleSignal(signal).catch(function onUnhandled(error) {
             console.error(`Graceful shutdown failed for ${  name  }: ${  shutdownErrorMessage(error)}`);
@@ -137,33 +156,31 @@ function installGracefulShutdown(name) {
 }
 
 function loadPoolModule() {
-    global.config.ports = [];
-    return global.mysql.query("SELECT * FROM port_config").then(function(rows){
-        rows.forEach(function(row){
-            row.hidden = row.hidden === 1;
-            row.ssl = row.ssl === 1;
-            global.config.ports.push({
-                port: row.poolPort,
-                difficulty: row.difficulty,
-                desc: row.portDesc,
-                portType: row.portType,
-                hidden: row.hidden,
-                ssl: row.ssl
-            });
-        });
-    }).then(function(){
+    /** @type {Promise<Array<{poolPort: number, difficulty: number, portDesc: string, portType: string, hidden: number, ssl: number}>>} */
+    const rows = global.mysql.query("SELECT * FROM port_config");
+    return rows.then(function configurePorts(ports) {
+        global.config.ports = ports.map((row) => ({
+            port: row.poolPort,
+            difficulty: row.difficulty,
+            desc: row.portDesc,
+            portType: row.portType,
+            hidden: row.hidden === 1,
+            ssl: row.ssl === 1
+        }));
         return require('./lib/pool.js');
     });
 }
 
-function loadOptionalLib2Module(relativePath, moduleName) {
+/** @param {string} relativePath @param {string} optionalModuleName @returns {unknown} */
+function loadOptionalLib2Module(relativePath, optionalModuleName) {
     const absolutePath = path.join(__dirname, relativePath);
     if (!fs.existsSync(absolutePath)) {
-        throw new Error(`Optional module '${  moduleName  }' requires lib2 at ${  absolutePath}`);
+        throw new Error(`Optional module '${  optionalModuleName  }' requires lib2 at ${  absolutePath}`);
     }
     return require(relativePath);
 }
 
+/** @type {Record<string, () => unknown>} */
 const moduleLoaders = {
     pool: loadPoolModule,
     block_manager () {
@@ -184,41 +201,43 @@ const moduleLoaders = {
 // Config Table Layout
 // <module>.<item>
 
-global.mysql.query("SELECT * FROM config").then(function (rows) {
+/** @type {Promise<import("./lib/common/config_rows.js").ConfigRow[]>} */
+const configRows = global.mysql.query("SELECT * FROM config");
+configRows.then(function (rows) {
     applyConfigRows(global.config, rows);
-}).then(function(){
-    global.config['coin'] = JSON.parse(coinConfig)[global.config.coin];
-    coinInc = require(global.config.coin.funcFile);
+}).then(async function(){
+    global.config.coin = resolvedCoinConfig;
+    coinInc = require(resolvedCoinConfig.funcFile);
     global.coinFuncs = new coinInc();
-    if (argv.module === 'pool'){
+    if (moduleName === 'pool'){
         comms = require('./lib/pool/remote_uplink');
     } else {
         comms = require('./lib/common/local_comms');
     }
     global.database = new comms();
     global.database.initEnv();
-    installGracefulShutdown(Object.hasOwn(argv, 'module') ? argv.module : (Object.hasOwn(argv, 'tool') ? argv.tool : 'process'));
+    installGracefulShutdown((moduleName !== null) ? moduleName : ((toolName !== null) ? toolName : 'process'));
     global.coinFuncs.blockedAddresses.push(global.config.pool.address);
     global.coinFuncs.blockedAddresses.push(global.config.payout.feeAddress);
-    if (Object.hasOwn(argv, 'tool') && fs.existsSync(`./tools/${argv.tool}.js`)) {
-        logStartup("tool", argv.tool);
-        activeModule = require(`./tools/${argv.tool}.js`);
-    } else if (Object.hasOwn(argv, 'module')){
-        const loader = moduleLoaders[argv.module];
+    if ((toolName !== null) && fs.existsSync(`./tools/${toolName}.js`)) {
+        logStartup("tool", toolName);
+        activeModule = require(`./tools/${toolName}.js`);
+    } else if ((moduleName !== null)){
+        const loader = Object.hasOwn(moduleLoaders, moduleName) ? moduleLoaders[moduleName] : null;
         if (!loader) {
             console.error("Invalid module provided.  Please provide a valid module");
             process.exit(1);
         }
         if (!cluster.isWorker) {
             console.log("");
-            logStartup("module", argv.module);
+            logStartup("module", moduleName);
         }
-        return Promise.resolve().then(function runLoader() {
+        await Promise.resolve().then(function runLoader() {
             return loader();
         }).then(function(loadedModule) {
             activeModule = loadedModule;
         }).catch(function onLoaderError(error) {
-            console.error(`Failed to load module ${  argv.module  }: ${  shutdownErrorMessage(error)}`);
+            console.error(`Failed to load module ${  moduleName  }: ${  shutdownErrorMessage(error)}`);
             process.exit(1);
         });
     } else {

@@ -239,6 +239,17 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
+    test("coin configuration resolves definite metadata and rejects incomplete boundaries", function testCoinConfig() {
+        const resolveCoinConfig = require("../resolve_coin_config.js");
+        const metadata = { funcFile: "./fake_coin.js", sigDigits: 1000, name: "Test", mixIn: 0, shortCode: "TEST" };
+        assert.deepEqual(resolveCoinConfig({ coin: "test" }, { test: metadata }), metadata);
+        for (const invalid of [null, {}, { coin: undefined }, { coin: "missing" }]) {
+            assert.throws(() => resolveCoinConfig(invalid, { test: metadata }));
+        }
+        assert.throws(() => resolveCoinConfig({ coin: "test" }, { test: { ...metadata, sigDigits: 0 } }));
+        assert.throws(() => resolveCoinConfig({ coin: "test" }, { test: { funcFile: "./fake_coin.js" } }));
+    });
+
     test("CLI integer arguments reject missing, fractional and out-of-range values", async function testIntegerArgs() {
         const cli = require("../script_utils.js")();
         cli.argv.port = "18081";
@@ -796,7 +807,9 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
                             readFileSync(fileName) {
                                 readPaths.push(fileName);
                                 if (fileName === configPath) return JSON.stringify({ mysql: {}, coin: "test" });
-                                if (fileName === coinConfigPath) return JSON.stringify({ test: { funcFile: "./fake_coin.js" } });
+                                if (fileName === coinConfigPath) return JSON.stringify({ test: {
+                                    funcFile: "./fake_coin.js", sigDigits: 1000, name: "Test", mixIn: 0, shortCode: "TEST"
+                                } });
                                 if (fileName === dataProtoPath) return "message Test {}";
                                 throw new Error(`unexpected read: ${  fileName}`);
                             }
