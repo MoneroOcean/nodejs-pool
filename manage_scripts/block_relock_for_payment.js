@@ -1,11 +1,11 @@
 "use strict";
 const cli = require("../script_utils.js")();
-const height = cli.arg("height", "Please specify block height to lock again (to pay it again)");
+const height = cli.integerArg("height", "Please specify block height to lock again (to pay it again)", 0, 0xffffffff);
 
 cli.init(function() {
     // blockDB is opened with keyIsUint32, so the height key must be a Number for
     // both read and write; a String key throws on a keyIsUint32 dbi.
-    const blockHeight = parseInt(height);
+    const blockHeight = height;
     const txn = global.database.env.beginTxn();
     const blockProto = txn.getBinary(global.database.blockDB, blockHeight);
     if (blockProto === null) {

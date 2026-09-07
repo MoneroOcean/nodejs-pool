@@ -178,6 +178,18 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("CLI integer arguments reject missing, fractional and out-of-range values", async function testIntegerArgs() {
+        const cli = require("../script_utils.js")();
+        cli.argv.port = "18081";
+        assert.equal(cli.integerArg("port", "Invalid port", 1, 65535), 18081);
+        await withExitTrap(() => captureConsole("error", () => {
+            for (const value of [undefined, true, "", "1.5", "0", "65536", "18081junk"]) {
+                cli.argv.port = value;
+                assert.throws(() => cli.integerArg("port", "Invalid port", 1, 65535), { code: 1 });
+            }
+        }));
+    });
+
     test("CLI parser preserves positional arrays and rejects reserved option names", function testCliMetadata() {
         const parseArgv = require("../parse_args.js");
         assert.deepEqual(parseArgv(["--depth", "10", "--", "block"], { "--": true }), {
@@ -839,6 +851,44 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         const malformedWithoutHeight = runFixDaemonForTest(["proxy-unhealthy"], "not-json", healthy);
         assert.equal(malformedWithoutHeight.status, 0, malformedWithoutHeight.stderr);
         assert.match(malformedWithoutHeight.calls, /systemctl restart monero\.service/);
+    });
+
+    test("Tor watchdog drains large journals and only restarts without bootstrap evidence", function testTorJournal() {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "pool-tor-watchdog-"));
+        const restartFile = path.join(root, "restarts");
+        fs.writeFileSync(path.join(root, "systemctl"), `#!/bin/bash
+case "$1" in
+    is-active) exit 0 ;;
+    show) if [[ "$3" = MainPID ]]; then echo "$TOR_TEST_PID"; else echo "1 hour ago"; fi ;;
+    restart) echo restart >> "$TOR_TEST_RESTARTS" ;;
+esac
+`, { mode: 0o755 });
+        fs.writeFileSync(path.join(root, "journalctl"), `#!/usr/bin/env node
+if (process.env.TOR_TEST_HEALTHY === "1") console.log("Bootstrapped 100% (done): Done");
+process.stdout.write("routine journal entry\\n".repeat(15000));
+`, { mode: 0o755 });
+        try {
+            for (const healthy of [true, false]) {
+                const result = spawnSync("bash", [path.join(__dirname, "..", "deployment", "check_tor.sh")], {
+                    encoding: "utf8",
+                    env: {
+                        ...process.env,
+                        PATH: `${root}:${process.env.PATH}`,
+                        TOR_TEST_PID: String(process.pid),
+                        TOR_TEST_HEALTHY: healthy ? "1" : "0",
+                        TOR_TEST_RESTARTS: restartFile,
+                        TOR_WATCHDOG_LOCK: path.join(root, "lock"),
+                        TOR_WATCHDOG_LOG: path.join(root, "log"),
+                        TOR_FORCE_RESTART_SECONDS: "21600",
+                        TOR_BOOTSTRAP_GRACE_SECONDS: "600"
+                    }
+                });
+                assert.equal(result.status, 0, result.stderr);
+                assert.equal(fs.existsSync(restartFile), !healthy);
+            }
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     test("leaf deployment opens public pool ports as TCP only", function testLeafPoolProtocols() {

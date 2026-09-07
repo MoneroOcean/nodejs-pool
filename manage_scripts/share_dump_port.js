@@ -1,6 +1,6 @@
 "use strict";
 const cli = require("../script_utils.js")();
-const port = cli.arg("port", "Please specify port to dump");
+const port = cli.integerArg("port", "Please specify port to dump", 1, 65535);
 const depth = cli.get("depth", 10);
 const dumpShares = require("./share_dump_common.js");
 const parsedPort = Number(port);

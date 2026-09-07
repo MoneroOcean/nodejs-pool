@@ -1,7 +1,7 @@
 "use strict";
 const cli = require("../script_utils.js")();
-const port = cli.arg("port", "Please specify port");
-const height = cli.arg("height", "Please specify height");
+const port = cli.integerArg("port", "Please specify port", 1, 65535);
+const height = cli.integerArg("height", "Please specify height", 0, 0xffffffff);
 
 cli.init(function() {
   global.coinFuncs.getPortBlockHeaderByID(port, height, function (err_header, body_header) {
