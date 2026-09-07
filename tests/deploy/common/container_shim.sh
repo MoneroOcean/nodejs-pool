@@ -120,6 +120,9 @@ grpc_server_allow_methods = [
 ]
 use_libtor = true
 
+[base_node.lmdb]
+no_read_ahead = false
+
 [base_node.storage]
 pruning_horizon = 0
 pruning_interval = 0

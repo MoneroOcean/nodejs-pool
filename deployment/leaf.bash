@@ -401,12 +401,14 @@ configure_pool_firewall() {
   ufw reload
 }
 
-TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-$(default_tari_memory_high)}"
+TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-12G}"
+TARI_MEMORY_MAX="${TARI_MEMORY_MAX:-14G}"
 TARI_MEMORY_SWAP_MAX="${TARI_MEMORY_SWAP_MAX:-768M}"
 TARI_MM_MEMORY_HIGH="${TARI_MM_MEMORY_HIGH:-1200M}"
 TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
 
 validate_systemd_memory_limit "$TARI_MEMORY_HIGH" TARI_MEMORY_HIGH
+validate_systemd_memory_limit "$TARI_MEMORY_MAX" TARI_MEMORY_MAX
 validate_systemd_memory_limit "$TARI_MEMORY_SWAP_MAX" TARI_MEMORY_SWAP_MAX
 validate_systemd_memory_limit "$TARI_MM_MEMORY_HIGH" TARI_MM_MEMORY_HIGH
 validate_systemd_memory_limit "$TARI_MM_MEMORY_SWAP_MAX" TARI_MM_MEMORY_SWAP_MAX

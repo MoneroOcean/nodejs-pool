@@ -1,6 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const test = require("node:test");
@@ -8,6 +9,28 @@ const test = require("node:test");
 const DEPLOYMENT_DIR = path.join(__dirname, "..", "..", "deployment");
 const COMMON_PATH = path.join(DEPLOYMENT_DIR, "common.bash");
 const ENTRYPOINTS = ["deploy.bash", "leaf.bash"];
+
+test("Tari config patch disables read-ahead and remains idempotent", () => {
+    const shim = fs.readFileSync(path.join(__dirname, "common", "container_shim.sh"), "utf8");
+    const fixture = shim.match(/const configToml = String.raw`([\s\S]*?)`;/)[1];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tari-config-test-"));
+    try {
+        const config = path.join(dir, "config.toml");
+        fs.writeFileSync(config, fixture);
+        const args = [path.join(DEPLOYMENT_DIR, "patch-tari-config.sh"), config,
+            "--external-ip", "127.0.0.1", "--no-backup"];
+        const first = runBash(args);
+        assert.equal(first.status, 0, first.stderr);
+        const contents = fs.readFileSync(config, "utf8");
+        assert.match(contents, /\[base_node\.lmdb\]\s+no_read_ahead = true/);
+        assert.match(contents, /pruning_horizon = 10000/);
+        const second = runBash(args);
+        assert.equal(second.status, 0, second.stderr);
+        assert.equal(fs.readFileSync(config, "utf8"), contents);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
 
 function runBash(args, options = {}) {
     return spawnSync("bash", args, {

@@ -180,7 +180,7 @@ lines = Path(src).read_text().splitlines(keepends=True)
 
 section_re = re.compile(r"^\s*\[([A-Za-z0-9_.-]+)\]\s*(?:#.*)?$")
 sections = {m.group(1): i for i, line in enumerate(lines) if (m := section_re.match(line))}
-required = {"base_node", "base_node.storage", "base_node.p2p", "base_node.p2p.transport", "wallet", "merge_mining_proxy"}
+required = {"base_node", "base_node.lmdb", "base_node.storage", "base_node.p2p", "base_node.p2p.transport", "wallet", "merge_mining_proxy"}
 missing = sorted(required - set(sections))
 if missing:
     raise SystemExit(f"missing required section(s): {', '.join(missing)}")
@@ -258,6 +258,7 @@ set_value("base_node", "use_libtor", "false")
 set_value("base_node.storage", "pruning_horizon", pruning_horizon)
 set_value("base_node.storage", "pruning_interval", pruning_interval)
 
+set_value("base_node.lmdb", "no_read_ahead", "true")
 set_value("base_node.p2p", "public_addresses", f'["/ip4/{external_ip}/tcp/18189",]')
 set_value("base_node.p2p.transport", "type", '"tcp"')
 set_value("base_node.p2p.transport", "tcp.listener_address", '"/ip4/0.0.0.0/tcp/18189"')

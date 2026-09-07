@@ -299,11 +299,17 @@ After=network.target
 [Service]
 ExecStart=$exec_start
 Restart=always
+RestartSec=10s
+RuntimeMaxSec=6h
+RuntimeRandomizedExtraSec=30min
+TimeoutStopSec=60s
+OOMPolicy=kill
 User=$TARI_USER
 Environment=HOME=$TARI_HOME
 Nice=10
-CPUQuota=400%
+CPUQuota=200%
 MemoryHigh=$TARI_MEMORY_HIGH
+MemoryMax=${TARI_MEMORY_MAX:-14G}
 MemorySwapMax=$TARI_MEMORY_SWAP_MAX
 
 [Install]
