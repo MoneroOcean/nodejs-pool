@@ -54,7 +54,9 @@ if [[ -z "$reason" ]]; then
     fi
 
     if [[ -n "$active_epoch" && $((now - active_epoch)) -gt "$BOOTSTRAP_GRACE_SECONDS" ]]; then
-        if ! journalctl -u "$SERVICE" --since "@${active_epoch}" --no-pager 2>/dev/null | grep -q 'Bootstrapped 100% (done): Done'; then
+        # Drain the journal: grep -q can close the pipe early and make journalctl
+        # fail with SIGPIPE under pipefail, falsely treating Tor as unhealthy.
+        if ! journalctl -u "$SERVICE" --since "@${active_epoch}" --no-pager 2>/dev/null | grep -F 'Bootstrapped 100% (done): Done' >/dev/null; then
             reason="bootstrap did not complete within ${BOOTSTRAP_GRACE_SECONDS}s"
         fi
     fi
