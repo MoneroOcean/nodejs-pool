@@ -1169,3 +1169,22 @@ test("Ergo reward validation rejects malformed outputs and unsafe totals", () =>
     }
     assert.equal(calcErgReward(height, [emission, { outputs: [{ creationHeight: height, value: 100 }] }]), 3e9 + 100);
 });
+
+
+test("coin profile creation normalizes sections and keeps mutable aliases independent", () => {
+    const { createProfile } = require("../../../lib/coins/core/factories.js");
+    const spec = { port: 123, coin: "TEST", displayCoin: "Test coin", algo: "test", blobType: 0, blobTypeName: "test", aliases: ["TEST", "alias", ""] };
+    const first = createProfile(spec);
+    const second = createProfile(spec);
+    assert.deepEqual(first.aliases, ["TEST", "Test coin", "alias"]);
+    assert.equal(first.blob.nonceSize, 4);
+    assert.equal(first.blob.proofSize, 32);
+    for (const section of ["blob", "pool", "pow", "rpc", "template", "perf"]) {
+        assert.equal(typeof first[section], "object");
+        assert.notEqual(first[section], second[section]);
+    }
+    first.aliases.push("private");
+    assert.equal(second.aliases.includes("private"), false);
+    assert.equal(spec.aliases.includes("private"), false);
+    assert.throws(() => createProfile({ port: 123, coin: "TEST" }), /requires an algorithm/);
+});
