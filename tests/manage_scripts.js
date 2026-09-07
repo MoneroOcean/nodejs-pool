@@ -178,6 +178,28 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("share dumps release readers when decoding fails", function testShareDumpCleanup() {
+        const dumpShares = require("../manage_scripts/share_dump_common.js");
+        const originals = { database: global.database, coinFuncs: global.coinFuncs, protos: global.protos };
+        const events = [];
+        global.coinFuncs = { getLastBlockHeader(callback) { callback(null, { height: 1 }); } };
+        global.database = {
+            env: { beginTxn() { return { abort() { events.push("abort"); } }; } },
+            lmdb: { Cursor: class {
+                goToRange(key) { return key; }
+                getCurrentBinary(iterator) { iterator(2, {}); }
+                close() { events.push("close"); }
+            } }
+        };
+        global.protos = { Share: { decode() { throw new Error("decode failed"); } } };
+        try {
+            assert.throws(() => dumpShares(1, () => true), /decode failed/);
+            assert.deepEqual(events, ["close", "abort"]);
+        } finally {
+            Object.assign(global, originals);
+        }
+    });
+
     test("altblock edits close the cursor before committing or aborting", function testAltblockEditCleanup() {
         const updateAltBlocks = require("../manage_scripts/altblock_update_common.js");
         const originalDatabase = global.database;

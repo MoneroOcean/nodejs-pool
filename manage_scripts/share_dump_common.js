@@ -13,22 +13,29 @@ module.exports = function dumpShares(depth, shouldPrint) {
 
         const lastBlock = body.height + 1;
         const txn = global.database.env.beginTxn({ readOnly: true });
-        const cursor = new global.database.lmdb.Cursor(txn, global.database.shareDB);
+        let cursor;
 
-        for (let blockID = lastBlock; blockID > lastBlock - numericDepth; --blockID) {
-            // shareDB keys are block heights with duplicate values; only walk dups when an exact key match exists.
-            for (let found = cursor.goToRange(parseInt(blockID)) === blockID; found; found = cursor.goToNextDup()) {
-                cursor.getCurrentBinary(function (_key, data) {
-                    const shareData = global.protos.Share.decode(data);
-                    if (!shouldPrint(shareData)) return;
-                    const date = new Date(shareData.timestamp);
-                    console.log(`${date.toString()  }: ${  JSON.stringify(shareData)}`);
-                }); // jshint ignore:line
+        try {
+            cursor = new global.database.lmdb.Cursor(txn, global.database.shareDB);
+            for (let blockID = lastBlock; blockID > lastBlock - numericDepth; --blockID) {
+                // shareDB keys are block heights with duplicate values; only walk dups when an exact key match exists.
+                for (let found = cursor.goToRange(parseInt(blockID)) === blockID; found; found = cursor.goToNextDup()) {
+                    cursor.getCurrentBinary(function (_key, data) {
+                        const shareData = global.protos.Share.decode(data);
+                        if (!shouldPrint(shareData)) return;
+                        const date = new Date(shareData.timestamp);
+                        console.log(`${date.toString()  }: ${  JSON.stringify(shareData)}`);
+                    }); // jshint ignore:line
+                }
+            }
+        } finally {
+            // Decoding or printing a damaged share must not retain a read snapshot.
+            try {
+                if (cursor) cursor.close();
+            } finally {
+                txn.abort();
             }
         }
-
-        cursor.close();
-        txn.commit();
         process.exit(0);
     });
 };
