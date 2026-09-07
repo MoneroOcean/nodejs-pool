@@ -347,6 +347,7 @@ async function verifyLeafInstall(context) {
         "/home/user/nodejs-pool/init.js", "/home/user/nodejs-pool/cert.pem",
         "/home/user/nodejs-pool/cert.key", "/lib/systemd/system/monero.service",
         "/lib/systemd/system/xtm_mm.service",
+        "/etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
         "/usr/local/src/tari/target/release/minotari_node", "/usr/local/src/tari/target/release/minotari_merge_mining_proxy",
         "/home/taridaemon/.tari/mainnet/config/config.toml",
         "/etc/sysctl.d/90-monero-overcommit.conf", "/etc/sysctl.d/91-moneroocean-hugepages.conf",
@@ -364,6 +365,16 @@ async function verifyLeafInstall(context) {
     ]);
     await execInContainer(context.containerName, "test ! -e /etc/needrestart/conf.d/moneroocean-critical.conf && grep -Fqx '$nrconf{override_rc}->{qr(^pm2-user\\.service$)} = 0;' /etc/needrestart/conf.d/moneroocean-pm2.conf");
     await appendCheckLog(context, "verified PM2 restart guard");
+    await execInContainer(context.containerName, [
+        "grep -Fqx 'MaxRetentionSec=30day' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'MaxFileSec=1day' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'RuntimeMaxUse=100M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'RuntimeMaxFileSize=10M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'SystemMaxUse=100M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'SystemKeepFree=1G' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'SystemMaxFileSize=10M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf"
+    ].join(" && "));
+    await appendCheckLog(context, "verified journald retention config");
     await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 150$' /etc/sysctl.d/90-monero-overcommit.conf");
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");

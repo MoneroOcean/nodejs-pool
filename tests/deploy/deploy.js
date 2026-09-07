@@ -290,6 +290,7 @@ async function verifyDeployInstall(context) {
         "/root/mysql_pass", "/root/pool_mysql_pass", "/home/user/nodejs-pool/config.json", "/home/user/wallets/wallet.address.txt",
         "/home/user/wallets/wallet_fee.address.txt", "/lib/systemd/system/monero.service",
         "/lib/systemd/system/xtm.service", "/lib/systemd/system/xtm_mm.service",
+        "/etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
         "/usr/local/src/tari/target/release/minotari_node", "/usr/local/src/tari/target/release/minotari_merge_mining_proxy",
         "/usr/local/src/grpc-json-proxy/grpc-json-proxy.js",
         "/usr/local/src/grpc-json-proxy/base_node.proto",
@@ -325,6 +326,16 @@ async function verifyDeployInstall(context) {
     await appendCheckLog(context, "verified unattended-upgrades MySQL blacklist and PM2 restart guard");
     await execInContainer(context.containerName, "grep -q '^vm.overcommit_memory = 2$' /etc/sysctl.d/90-monero-overcommit.conf && grep -q '^vm.overcommit_ratio = 150$' /etc/sysctl.d/90-monero-overcommit.conf");
     await appendCheckLog(context, "verified Monero overcommit sysctl config");
+    await execInContainer(context.containerName, [
+        "grep -Fqx 'MaxRetentionSec=30day' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'MaxFileSec=1day' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'RuntimeMaxUse=100M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'RuntimeMaxFileSize=10M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'SystemMaxUse=100M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'SystemKeepFree=1G' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf",
+        "grep -Fqx 'SystemMaxFileSize=10M' /etc/systemd/journald.conf.d/90-moneroocean-retention.conf"
+    ].join(" && "));
+    await appendCheckLog(context, "verified journald retention config");
     await execInContainer(context.containerName, "grep -q '^vm.nr_hugepages = 384$' /etc/sysctl.d/91-moneroocean-hugepages.conf && grep -Eq '^vm.hugetlb_shm_group = [0-9]+$' /etc/sysctl.d/91-moneroocean-hugepages.conf");
     await appendCheckLog(context, "verified Monero hugepage sysctl config");
     await execInContainer(context.containerName, "grep -q '^nf_conntrack$' /etc/modules-load.d/moneroocean-conntrack.conf && grep -q '^net.netfilter.nf_conntrack_max = 1048576$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
