@@ -318,6 +318,42 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
+    test("RPC block imports reject missing headers and abort failed writes", function testImportBoundaries() {
+        const vm = require("node:vm");
+        for (const script of ["block_import_from_rpc", "altblock_import_from_rpc"]) {
+            for (const scenario of ["missing", "write-failure", "success"]) {
+                const events = [];
+                const header = { hash: "hash", height: 123, timestamp: 1700000000, difficulty: 100, reward: 10 };
+                const reply = callback => callback(null, scenario === "missing" ? undefined : header);
+                const codec = { encode(value) { events.push("encode"); return value; } };
+                const txn = {
+                    getBinary() { return null; },
+                    putBinary() { events.push("write"); if (scenario === "write-failure") throw new Error("write failed"); },
+                    commit() { events.push("commit"); },
+                    abort() { events.push("abort"); }
+                };
+                const context = {
+                    require() { return () => ({ argv: {}, integerArg() { return 123; }, arg() { return "hash"; }, init(callback) { callback(); } }); },
+                    console: { log() {}, error() {} },
+                    process: { exit(code) { throw new Error(`exit:${code}`); } },
+                    global: {
+                        coinFuncs: {
+                            getLastBlockHeader: reply,
+                            getBlockHeaderByID(_height, callback) { reply(callback); },
+                            getPortBlockHeaderByHash(_port, _hash, callback) { reply(callback); },
+                            getPortAnyBlockHeaderByHash(_port, _hash, _include, callback) { reply(callback); }
+                        },
+                        protos: { Block: codec, AltBlock: codec, POOLTYPE: { PPLNS: 0 } },
+                        database: { env: { beginTxn() { events.push("begin"); return txn; } } }
+                    }
+                };
+                const source = fs.readFileSync(path.join(__dirname, "..", "manage_scripts", `${script}.js`), "utf8");
+                assert.throws(() => vm.runInNewContext(source, context), scenario === "missing" ? /exit:1/ : scenario === "success" ? /exit:0/ : /write failed/);
+                assert.deepEqual(events, scenario === "missing" ? [] : ["encode", "begin", "write", scenario === "success" ? "commit" : "abort"]);
+            }
+        }
+    });
+
     test("coin configuration resolves definite metadata and rejects incomplete boundaries", function testCoinConfig() {
         const resolveCoinConfig = require("../resolve_coin_config.js");
         const metadata = { funcFile: "./fake_coin.js", sigDigits: 1000, name: "Test", mixIn: 0, shortCode: "TEST" };
