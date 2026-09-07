@@ -2,6 +2,7 @@
 
 // Applies a synchronous mutation while the LMDB cursor owns the decoded
 // record. Callers retain their operation-specific logging and validation.
+/** @param {string[]} hashes @param {(block: import("../types/runtime").AltBlockMessage) => void} mutate */
 function updateAltBlocks(hashes, mutate) {
     const targetHashes = new Set(hashes);
     const txn = global.database.env.beginTxn();

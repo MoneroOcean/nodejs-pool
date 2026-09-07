@@ -1,6 +1,7 @@
 "use strict";
 
-let argv = {};
+/** @type {import("../parse_args.js").ParsedArgs} */
+let argv = { _: [] };
 
 const EXACT_ACTIVE_KEYS = new Set([
     "active_ports",
@@ -39,6 +40,7 @@ const ACTIVE_KEY_PATTERNS = [
 const PROGRESS_EVERY = 100000;
 const DELETE_BATCH_SIZE = 500;
 
+/** @param {import("../types/runtime").LmdbTxn} txn @param {string} key */
 function hasKey(txn, key) {
     if (!key) return false;
 
@@ -49,6 +51,7 @@ function hasKey(txn, key) {
     }
 }
 
+/** @param {import("../types/runtime").LmdbTxn} txn @param {string} baseKey */
 function hasRelatedCache(txn, baseKey) {
     return hasKey(txn, baseKey) ||
         hasKey(txn, `stats:${  baseKey}`) ||
@@ -56,6 +59,7 @@ function hasRelatedCache(txn, baseKey) {
         hasKey(txn, `identifiers:${  baseKey}`);
 }
 
+/** @param {import("../types/runtime").LmdbTxn} txn @param {string} key */
 function isRuntimeActiveKey(txn, key) {
     if (EXACT_ACTIVE_KEYS.has(key)) return true;
     if (ACTIVE_KEY_PATTERNS.some(function (pattern) { return pattern.test(key); })) return true;
@@ -82,6 +86,7 @@ function isRuntimeActiveKey(txn, key) {
     return hasRelatedCache(txn, key);
 }
 
+/** @param {import("../types/runtime").LmdbTxn} txn @param {string} key @param {number} minKeyLength */
 function isLongRunnerManagedKey(txn, key, minKeyLength) {
     if (!key || key.length < minKeyLength) return false;
 
@@ -97,6 +102,7 @@ function isLongRunnerManagedKey(txn, key, minKeyLength) {
     return key.indexOf("_") >= 0;
 }
 
+/** @param {import("../types/runtime").LmdbTxn} txn @param {string} key @param {number} minKeyLength */
 function classifyReason(txn, key, minKeyLength) {
     if (key.indexOf("history:") === 0) return hasKey(txn, key.slice("history:".length)) ? "managed-history" : "orphan-history";
     if (key.indexOf("stats:") === 0) return hasKey(txn, key.slice("stats:".length)) ? "managed-stats" : "orphan-stats";
@@ -106,6 +112,7 @@ function classifyReason(txn, key, minKeyLength) {
     return "unknown";
 }
 
+/** @param {string[]} keys */
 function flushDeletes(keys) {
     if (keys.length === 0) return 0;
 
@@ -132,13 +139,14 @@ require("../init_mini.js").init(function () {
     const cursor = new global.database.lmdb.Cursor(txn, global.database.cacheDB);
     // Miner-keyed cache entries are at least as long as the pool wallet address; shorter keys are housekeeping.
     const minKeyLength = global.config.pool.address.length;
+    /** @type {string[]} */
     const pendingDeletes = [];
     let scannedCount = 0;
     let foundCount = 0;
     let deletedCount = 0;
     let wroteJsonRow = false;
 
-    if (argv.json) {
+    if (argv["json"]) {
         process.stdout.write("[\n");
     }
 
@@ -155,29 +163,30 @@ require("../init_mini.js").init(function () {
                 if (isRuntimeActiveKey(txn, keyStr)) return;
                 if (isLongRunnerManagedKey(txn, keyStr, minKeyLength)) return;
 
+                /** @type {{key: string, reason: string, value?: string}} */
                 const row = {
                     key: keyStr,
                     reason: classifyReason(txn, keyStr, minKeyLength)
                 };
 
-                if (argv.value) row.value = String(data);
+                if (argv["value"]) row.value = String(data);
                 ++foundCount;
 
-                if (argv.delete) {
+                if (argv["delete"]) {
                     pendingDeletes.push(row.key);
                     if (pendingDeletes.length >= DELETE_BATCH_SIZE) {
                         deletedCount += flushDeletes(pendingDeletes);
                     }
                 }
 
-                if (argv.json) {
+                if (argv["json"]) {
                     if (wroteJsonRow) process.stdout.write(",\n");
                     process.stdout.write(JSON.stringify(row));
                     wroteJsonRow = true;
                     return;
                 }
 
-                if (argv.value) {
+                if (argv["value"]) {
                     console.log(`${row.reason  }\t${  row.key  }\t${  row.value}`);
                 } else {
                     console.log(`${row.reason  }\t${  row.key}`);
@@ -189,18 +198,18 @@ require("../init_mini.js").init(function () {
         txn.abort();
     }
 
-    if (argv.delete) {
+    if (argv["delete"]) {
         deletedCount += flushDeletes(pendingDeletes);
     }
 
-    if (argv.json) {
+    if (argv["json"]) {
         if (wroteJsonRow) process.stdout.write("\n");
         process.stdout.write("]\n");
     } else {
         console.error(`Found ${  foundCount  } cache keys outside runtime usage and long_runner cleanup`);
     }
 
-    if (argv.delete) {
+    if (argv["delete"]) {
         console.error(`Deleted ${  deletedCount  } cache keys`);
     }
     console.error(`Scanned ${  scannedCount  } cache keys total`);

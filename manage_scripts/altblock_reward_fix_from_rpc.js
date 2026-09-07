@@ -7,7 +7,7 @@ fixBlockRewardFromRpc({
     cli,
     hash,
     databaseName: "altblockDB",
-    protoName: "AltBlock",
+    getCodec: () => global.protos.AltBlock,
     label: "altblock",
     getPort: function getAltPort(block) { return block.port; }
 });

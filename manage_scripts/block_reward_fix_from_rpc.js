@@ -7,7 +7,7 @@ fixBlockRewardFromRpc({
     cli,
     hash,
     databaseName: "blockDB",
-    protoName: "Block",
+    getCodec: () => global.protos.Block,
     label: "block",
     // 18081 is the XMR main-chain daemon RPC port; the block arg is ignored here (alt-chain uses block.port).
     getPort: function getMainPort() { return 18081; }

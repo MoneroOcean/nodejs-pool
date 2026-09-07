@@ -3,7 +3,8 @@ const lmdb = require('node-lmdb');
 const fs   = require('fs');
 const cli = require("../script_utils.js")();
 const dir = cli.arg("dir", "Please specify output lmdb dir");
-const size = cli.arg("size", "Please specify output lmdb size in GB");
+const size = Number(cli.arg("size", "Please specify output lmdb size in GB"));
+if (!Number.isFinite(size) || size <= 0) throw new Error("LMDB size must be a positive number of GB");
 
 if (fs.existsSync(`${dir  }/data.mdb`)) {
     console.error("Please specify empty output lmdb dir");
@@ -31,12 +32,12 @@ cli.init(function() {
             {
                 label: "blocks",
                 source: global.database.blockDB,
-                target: env2.openDbi({ name: "blocks", create: true, integerKey: true, keyIsUint32: true })
+                target: env2.openDbi({ name: "blocks", create: true, keyIsUint32: true })
             },
             {
                 label: "altblocks",
                 source: global.database.altblockDB,
-                target: env2.openDbi({ name: "altblocks", create: true, integerKey: true, keyIsUint32: true })
+                target: env2.openDbi({ name: "altblocks", create: true, keyIsUint32: true })
             },
             {
                 label: "shares",
@@ -47,7 +48,6 @@ cli.init(function() {
                     dupSort: true,
                     dupFixed: false,
                     integerDup: true,
-                    integerKey: true,
                     keyIsUint32: true
                 })
             },

@@ -12,7 +12,7 @@ cli.init(function() {
             if (blockData.hash === hash) {
                 is_found = true;
                 global.coinFuncs.getPortBlockHeaderByHash(blockData.port, hash, (err, body) => {
-                    if (err !== null || !body.reward) {
+                    if (err !== null || !body || !body.reward) {
                         if (blockData.valid) {
                             blockData.valid = false;
                             blockData.unlocked = true;
