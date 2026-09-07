@@ -1188,3 +1188,47 @@ test("coin profile creation normalizes sections and keeps mutable aliases indepe
     assert.equal(spec.aliases.includes("private"), false);
     assert.throws(() => createProfile({ port: 123, coin: "TEST" }), /requires an algorithm/);
 });
+
+
+test("remote verifier failures release timers and route the next share to a healthy host", () => {
+    const vm = require("node:vm");
+    const { createRequire } = require("node:module");
+    const { EventEmitter } = require("node:events");
+    const filename = require.resolve("../../../lib/coins/index.js");
+    const nativeRequire = createRequire(filename);
+    const sockets = [];
+    const timers = new Set();
+    class Socket extends EventEmitter {
+        constructor() { super(); sockets.push(this); }
+        connect(_port, host, callback) { this.host = host; callback(); }
+        write() {}
+        destroy() {}
+    }
+    const sandbox = {
+        Buffer, process, console: { log() {}, error() {} }, module: { exports: {} },
+        require(name) { return name === "net" ? { Socket } : nativeRequire(name); },
+        setInterval() {},
+        setTimeout(callback) { timers.add(callback); return callback; },
+        clearTimeout(timer) { timers.delete(timer); },
+        global: {
+            config: { ...global.config, daemon: { ...global.config.daemon, port: 18081 }, verify_shares_host: ["host-a", "host-b"] },
+            support: { sendAdminFyi() {} }, database: {}
+        }
+    };
+    vm.runInNewContext(fs.readFileSync(filename, "utf8"), sandbox, { filename });
+    const coin = new sandbox.module.exports({});
+    const results = [];
+    const template = { port: 18081, height: 1, seed_hash: "00".repeat(32) };
+    coin.slowHashAsync(Buffer.alloc(32), template, "miner", (...args) => results.push(args));
+    assert.equal(sockets[0].host, "host-a");
+    assert.equal(timers.size, 1);
+    sockets[0].emit("error", new Error("connection failed"));
+    assert.equal(timers.size, 0);
+    assert.deepEqual(results, [[false, "verify-host-error"]]);
+    coin.slowHashAsync(Buffer.alloc(32), template, "miner", (...args) => results.push(args));
+    assert.equal(sockets[1].host, "host-b");
+    sockets[1].emit("data", Buffer.from(JSON.stringify({ result: "ab".repeat(32) })));
+    sockets[1].emit("end");
+    assert.equal(timers.size, 0);
+    assert.deepEqual(results[1], ["ab".repeat(32), undefined]);
+});
