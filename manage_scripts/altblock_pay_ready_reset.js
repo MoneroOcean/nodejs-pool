@@ -6,7 +6,7 @@ cli.init(function() {
     const txn = global.database.env.beginTxn();
     const cursor = new global.database.lmdb.Cursor(txn, global.database.altblockDB);
     let is_found = false;
-    for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
+    for (let found = cursor.goToFirst(); found !== null; found = cursor.goToNext()) {
             cursor.getCurrentBinary(function(key, data){  // jshint ignore:line
             const blockData = global.protos.AltBlock.decode(data);
             if (blockData.hash === hash) {

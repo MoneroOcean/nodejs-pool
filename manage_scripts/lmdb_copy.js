@@ -64,7 +64,7 @@ cli.init(function() {
             const cursor = new global.database.lmdb.Cursor(txn, database.source);
             const txn2 = env2.beginTxn();
             try {
-                for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
+                for (let found = cursor.goToFirst(); found !== null; found = cursor.goToNext()) {
                     cursor.getCurrentBinary(function(key, data) {
                         txn2.putBinary(database.target, key, data);
                     });

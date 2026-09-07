@@ -20,7 +20,7 @@ function fixBlockRewardFromRpc(options) {
         const cursor = new global.database.lmdb.Cursor(txn, database);
         let foundBlock = false;
 
-        for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
+        for (let found = cursor.goToFirst(); found !== null; found = cursor.goToNext()) {
             cursor.getCurrentBinary(function onBlock(key, data) {
                 const block = proto.decode(data);
                 if (foundBlock || block.hash !== hash) return;

@@ -143,7 +143,7 @@ require("../init_mini.js").init(function () {
     }
 
     try {
-        for (let found = cursor.goToFirst(); found; found = cursor.goToNext()) {
+        for (let found = cursor.goToFirst(); found !== null; found = cursor.goToNext()) {
             cursor.getCurrentString(function (key, data) {  // jshint ignore:line
                 const keyStr = String(key);
                 ++scannedCount;
