@@ -6,11 +6,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
+/** @typedef {{kind: string, name: string, path: string, line: number, column: number}} Finding */
+
 const IPV4_PATTERN = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])/g;
 const PRIVATE_KEY_PATTERN = new RegExp(
     `${"-".repeat(5)}BEGIN(?: [A-Z0-9][A-Z0-9 _-]*)? PRIVATE KEY-{5}|${"-".repeat(5)}BEGIN PGP PRIVATE KEY BLOCK-{5}`,
     "g"
 );
+/** @type {Array<[string, RegExp]>} */
 const SECRET_PATTERNS = [
     ["aws-access-key", /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g],
     ["github-token", /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g],
@@ -24,11 +27,12 @@ const SQL_PASSWORD_PATTERN = /\bIDENTIFIED(?:\s+WITH\s+[A-Z0-9_]+)?\s+BY\s+(['"`
 
 // These are non-routable, private, documentation, benchmark, multicast, or
 // otherwise reserved IPv4 ranges. Public literals remain findings by design.
+/** @param {string} value @returns {boolean} */
 function isReservedIPv4(value) {
     const octets = value.split(".").map(Number);
     if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return true;
 
-    const [first, second, third] = octets;
+    const [first = 0, second = 0, third = 0] = octets;
     if (first === 0 || first === 10 || first === 127 || first >= 224) return true;
     if (first === 100 && second >= 64 && second <= 127) return true;
     if (first === 169 && second === 254) return true;
@@ -43,6 +47,7 @@ function isReservedIPv4(value) {
     return false;
 }
 
+/** @param {string} value @returns {boolean} */
 function isPlaceholder(value) {
     const normalized = value.trim().toLowerCase();
     return normalized.length === 0 ||
@@ -54,6 +59,7 @@ function isPlaceholder(value) {
         normalized.startsWith("os.environ[");
 }
 
+/** @param {string} text @param {number} offset @returns {{line: number, column: number}} */
 function positionAt(text, offset) {
     const before = text.slice(0, offset);
     const line = before.split("\n").length;
@@ -61,10 +67,12 @@ function positionAt(text, offset) {
     return { line, column: offset - lastNewline };
 }
 
+/** @param {string} filePath @returns {string} */
 function normalizeRelativePath(filePath) {
     return filePath.split(path.sep).join("/");
 }
 
+/** @param {Finding[]} findings @param {string} kind @param {string} name @param {string} text @param {number} offset @param {string} filePath @returns {void} */
 function addFinding(findings, kind, name, text, offset, filePath) {
     const position = positionAt(text, offset);
     findings.push({
@@ -76,35 +84,46 @@ function addFinding(findings, kind, name, text, offset, filePath) {
     });
 }
 
+/** @param {string} text @param {string} filePath @returns {Finding[]} */
 function scanText(text, filePath) {
+    /** @type {Finding[]} */
     const findings = [];
     for (const match of text.matchAll(IPV4_PATTERN)) {
         const value = match[0];
         if (!isReservedIPv4(value)) addFinding(findings, "ipv4", "public-ipv4", text, match.index, filePath);
     }
-    for (const [name, pattern] of [["private-key-marker", PRIVATE_KEY_PATTERN], ...SECRET_PATTERNS]) {
+    /** @type {Array<[string, RegExp]>} */
+    const secretPatterns = [["private-key-marker", PRIVATE_KEY_PATTERN], ...SECRET_PATTERNS];
+    for (const [name, pattern] of secretPatterns) {
         for (const match of text.matchAll(pattern)) addFinding(findings, "secret", name, text, match.index, filePath);
     }
-    for (const [name, pattern] of [["generic-secret-assignment", GENERIC_SECRET_PATTERN], ["sql-password", SQL_PASSWORD_PATTERN]]) {
+    /** @type {Array<[string, RegExp]>} */
+    const assignmentPatterns = [["generic-secret-assignment", GENERIC_SECRET_PATTERN], ["sql-password", SQL_PASSWORD_PATTERN]];
+    for (const [name, pattern] of assignmentPatterns) {
         for (const match of text.matchAll(pattern)) {
             const value = match[2];
+            if (value === undefined) continue;
             if (!isPlaceholder(value)) addFinding(findings, "secret", name, text, match.index, filePath);
         }
     }
     return findings;
 }
 
+/** @param {string} startPath @returns {string} */
 function repositoryRoot(startPath) {
     return execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: startPath, encoding: "utf8" }).trim();
 }
 
+/** @param {string} root @returns {string[]} */
 function trackedFiles(root) {
     const output = execFileSync("git", ["ls-files", "-z", "--"], { cwd: root, encoding: "buffer" });
     return output.toString("utf8").split("\0").filter(Boolean);
 }
 
+/** @param {string} [startPath] @returns {{root: string, filesScanned: number, binaryFilesSkipped: number, findings: Finding[]}} */
 function scanRepository(startPath = process.cwd()) {
     const root = repositoryRoot(path.resolve(startPath));
+    /** @type {Finding[]} */
     const findings = [];
     let filesScanned = 0;
     let binaryFilesSkipped = 0;
@@ -115,7 +134,7 @@ function scanRepository(startPath = process.cwd()) {
             if (!fs.lstatSync(absolutePath).isFile()) continue;
             file = fs.readFileSync(absolutePath);
         } catch (error) {
-            if (error.code === "ENOENT") continue;
+            if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
             throw error;
         }
         if (file.includes(0)) {
@@ -128,17 +147,19 @@ function scanRepository(startPath = process.cwd()) {
     return { root, filesScanned, binaryFilesSkipped, findings };
 }
 
+/** @returns {string} */
 function usage() {
     return "Usage: node scripts/lint-sensitive-data.js [--root PATH]";
 }
 
+/** @param {string[]} argv @returns {{root: string} | null} */
 function parseArguments(argv) {
     const options = { root: process.cwd() };
     for (let index = 0; index < argv.length; index += 1) {
         const argument = argv[index];
         if (argument === "--root") {
             if (!argv[index + 1]) throw new Error(`${argument} requires a path\n${usage()}`);
-            options.root = argv[index + 1];
+            options.root = argv[index + 1] ?? options.root;
             index += 1;
         } else if (argument === "--help" || argument === "-h") {
             console.log(usage());
@@ -150,6 +171,7 @@ function parseArguments(argv) {
     return options;
 }
 
+/** @param {string[]} [argv] @returns {number} */
 function main(argv = process.argv.slice(2)) {
     let options;
     try {
@@ -166,7 +188,7 @@ function main(argv = process.argv.slice(2)) {
         console.error(`Sensitive-data scan failed: ${result.findings.length} finding(s).`);
         return 1;
     } catch (error) {
-        console.error(error.message);
+        console.error(error instanceof Error ? error.message : String(error));
         return 2;
     }
 }
