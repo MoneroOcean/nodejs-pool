@@ -11,27 +11,9 @@ process.stdin.on('data', function(data) {
   stdin += data.toString();
 });
 
-function _human_hashrate(hashes) {
-  const power = Math.pow(10, 2);
-  if (hashes > 1000000000000) return `${String(Math.round((hashes / 1000000000000) * power) / power)   } TH/s`;
-  if (hashes > 1000000000)    return `${String(Math.round((hashes / 1000000000) * power) / power)   } GH/s`;
-  if (hashes > 1000000)       return `${String(Math.round((hashes / 1000000) * power) / power)   } MH/s`;
-  if (hashes > 1000)          return `${String(Math.round((hashes / 1000) * power) / power)   } KH/s`;
-  return `${Math.floor( hashes || 0 )  } H/s`
-};
-
 process.stdin.on('end', function() {
-  let _pplns_window     = 0;
-  let oldest_timestamp  = 0;
-  let newest_timestamp  = 0;
-
-  const wallets = {};
-
-  const _my_share_count    = 0;
-  const _my_xmr_diff       = 0;
-  const _my_xmr_diff_payed = 0;
-  const _my_coin_raw_diff  = {};
-  const _my_coin_xmr_diff  = {};
+  // Only normalized difficulty contributes to this ranking.
+  const wallets = Object.create(null);
 
   for (const line of stdin.split("\n")) {
     if (line.substring(0, 1) === "#") continue;
@@ -41,33 +23,12 @@ process.stdin.on('end', function() {
       continue;
     }
     const wallet         = items[0];
-    const timestamp      = parseInt(items[1], 16);
-    const raw_diff       = parseInt(items[2]);
-    const count          = parseInt(items[3]);
-    const coin           = items[4];
-    const xmr_diff       = parseInt(items[5]);
-    const xmr_diff_payed = items[6] === "" ? xmr_diff : parseInt(items[6]);
-    _pplns_window += xmr_diff;
-    if (!oldest_timestamp || timestamp < oldest_timestamp) oldest_timestamp = timestamp;
-    if (newest_timestamp < timestamp) newest_timestamp = timestamp;
-    if (!(wallet in wallets)) wallets[wallet] = {
-      share_count: 0,
-      xmr_diff: 0,
-      xmr_diff_payed: 0,
-      coin_raw_diff: {},
-      coin_xmr_diff: {},
-    };
-    wallets[wallet].share_count    += count;
-    wallets[wallet].xmr_diff       += xmr_diff;
-    wallets[wallet].xmr_diff_payed += xmr_diff_payed;
-    if (!(coin in wallets[wallet].coin_raw_diff)) wallets[wallet].coin_raw_diff[coin] = 0;
-    wallets[wallet].coin_raw_diff[coin] += raw_diff;
-    if (!(coin in wallets[wallet].coin_xmr_diff)) wallets[wallet].coin_xmr_diff[coin] = 0;
-    wallets[wallet].coin_xmr_diff[coin] += xmr_diff;
+    const xmr_diff = parseInt(items[5]);
+    wallets[wallet] = (wallets[wallet] ?? 0) + xmr_diff;
   }
 
-  for (const wallet of Object.keys(wallets).sort((a, b) => (wallets[a].xmr_diff < wallets[b].xmr_diff) ? 1 : -1)) {
-    console.log(`${wallet  }: ${  wallets[wallet].xmr_diff}`);
+  for (const wallet of Object.keys(wallets).sort((a, b) => (wallets[a] < wallets[b]) ? 1 : -1)) {
+    console.log(`${wallet  }: ${  wallets[wallet]}`);
   }
 
   process.exit(0);
