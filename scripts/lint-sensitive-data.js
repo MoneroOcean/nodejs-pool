@@ -27,7 +27,7 @@ const SQL_PASSWORD_PATTERN = /\bIDENTIFIED(?:\s+WITH\s+[A-Z0-9_]+)?\s+BY\s+(['"`
 
 // These are non-routable, private, documentation, benchmark, multicast, or
 // otherwise reserved IPv4 ranges. Public literals remain findings by design.
-/** @param {string} value @returns {boolean} */
+/** @param {string} value */
 function isReservedIPv4(value) {
     const octets = value.split(".").map(Number);
     if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return true;
@@ -47,7 +47,7 @@ function isReservedIPv4(value) {
     return false;
 }
 
-/** @param {string} value @returns {boolean} */
+/** @param {string} value */
 function isPlaceholder(value) {
     const normalized = value.trim().toLowerCase();
     return normalized.length === 0 ||
@@ -67,12 +67,12 @@ function positionAt(text, offset) {
     return { line, column: offset - lastNewline };
 }
 
-/** @param {string} filePath @returns {string} */
+/** @param {string} filePath */
 function normalizeRelativePath(filePath) {
     return filePath.split(path.sep).join("/");
 }
 
-/** @param {Finding[]} findings @param {string} kind @param {string} name @param {string} text @param {number} offset @param {string} filePath @returns {void} */
+/** @param {Finding[]} findings @param {string} kind @param {string} name @param {string} text @param {number} offset @param {string} filePath */
 function addFinding(findings, kind, name, text, offset, filePath) {
     const position = positionAt(text, offset);
     findings.push({
@@ -109,7 +109,7 @@ function scanText(text, filePath) {
     return findings;
 }
 
-/** @param {string} startPath @returns {string} */
+/** @param {string} startPath */
 function repositoryRoot(startPath) {
     return execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: startPath, encoding: "utf8" }).trim();
 }
@@ -147,7 +147,6 @@ function scanRepository(startPath = process.cwd()) {
     return { root, filesScanned, binaryFilesSkipped, findings };
 }
 
-/** @returns {string} */
 function usage() {
     return "Usage: node scripts/lint-sensitive-data.js [--root PATH]";
 }
@@ -171,7 +170,7 @@ function parseArguments(argv) {
     return options;
 }
 
-/** @param {string[]} [argv] @returns {number} */
+/** @param {string[]} [argv] */
 function main(argv = process.argv.slice(2)) {
     let options;
     try {

@@ -13,7 +13,7 @@ process.stdin.on('data', /** @param {Buffer | string} data */ function(data) {
   stdin += data.toString();
 });
 
-/** @param {number} hashes @returns {string} */
+/** @param {number} hashes */
 function human_hashrate(hashes) {
   const power = Math.pow(10, 2);
   if (hashes > 1000000000000) return `${String(Math.round((hashes / 1000000000000) * power) / power)   } TH/s`;
