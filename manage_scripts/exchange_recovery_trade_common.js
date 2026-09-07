@@ -49,24 +49,16 @@ async function getActiveOrders(exchangeApi, exchange) {
     }
 }
 
-function loadExchangeApi() {
-    try {
-        return require("../lib2/exchanges.js")();
-    } catch (error) {
-        throw new Error(error.message || String(error));
-    }
-}
-
 function loadExchangeApiIfNeeded(cli, balanceOptions) {
     const hasExplicitBalance = balanceOptions.some(function hasOption(name) {
         return cli.get(name) !== null;
     });
     if (hasExplicitBalance && cli.get("active-orders") !== null) return null;
     try {
-        return loadExchangeApi();
+        return require("../lib2/exchanges.js")();
     } catch (error) {
         throw new Error(
-            `Unable to load exchange API (${  error.message 
+            `Unable to load exchange API (${  error.message || String(error)
             }). Rerun with --current-balance=<balance> and --active-orders=false after confirming no open orders.`
         );
     }
