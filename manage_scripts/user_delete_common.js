@@ -1,6 +1,11 @@
 "use strict";
 const accountUtils = require("../script_account_utils.js");
 
+/** @typedef {{force?: boolean, confirmForceDelete?: boolean, requireStaleBalance?: boolean, delayMs?: number, extraTables?: string[]}} DeleteOptions */
+/** @typedef {Awaited<ReturnType<typeof buildUserDeletePlan>>} DeletePlan */
+
+
+/** @param {DeleteOptions} options */
 function requireForceConfirmation(options) {
     if (!options || options.force !== true) return;
     if (options.confirmForceDelete === true) return;
@@ -8,6 +13,7 @@ function requireForceConfirmation(options) {
     process.exit(1);
 }
 
+/** @param {DeletePlan} plan @param {DeleteOptions} options */
 function printPreview(plan, options) {
     const prefix = options && options.force === true ? "FORCE " : "";
     if (options && options.force === true) {
@@ -22,6 +28,7 @@ function printPreview(plan, options) {
     accountUtils.logCacheKeys(plan.user);
 }
 
+/** @param {string} user @param {DeleteOptions} [options] */
 async function buildUserDeletePlan(user, options) {
     const opts = options || {};
     const account = accountUtils.splitUserOrExit(user);
@@ -29,6 +36,7 @@ async function buildUserDeletePlan(user, options) {
     const extraTables = (opts.extraTables || []).map(function toExtraTable(name) {
         return { name, sql: accountUtils.sqlTable(name) };
     });
+    /** @template {import("../types/runtime").SqlRow} [T=import("../types/runtime").SqlRow] @param {string} table @returns {Promise<T[]>} */
     const queryRows = function queryRows(table) {
         return global.mysql.query(`SELECT * FROM ${  table  } WHERE ${  where.clause}`, where.params);
     };
@@ -44,7 +52,9 @@ async function buildUserDeletePlan(user, options) {
     }
     rows2remove += userRows.length;
 
+    /** @type {import("../user_scripts/user_balance_move_common.js").BalanceRow[]} */
     const balanceRows = await queryRows("balance");
+    const balance = balanceRows[0] ?? null;
     if (balanceRows.length > 1) {
         console.error("Too many users were selected!");
         process.exit(1);
@@ -52,18 +62,18 @@ async function buildUserDeletePlan(user, options) {
     // Refuse (even under --force) to delete a balance row reserved by an in-flight payment batch:
     // removing a row whose pending_batch_id is set would make the payment finalizer's reserved-row
     // update mismatch and wedge payout recovery. Mirrors the same guard in user_balance_move.
-    if (balanceRows.length === 1 && balanceRows[0].pending_batch_id !== null && balanceRows[0].pending_batch_id !== undefined) {
-        console.error(`Balance row is reserved by in-flight payment batch ${  balanceRows[0].pending_batch_id 
+    if (balance && balance.pending_batch_id !== null && balance.pending_batch_id !== undefined) {
+        console.error(`Balance row is reserved by in-flight payment batch ${  balance.pending_batch_id 
             }; refusing to delete. Wait for the batch to settle (or clear its pending_batch_id) and retry.`);
         process.exit(1);
     }
-    if (!opts.force && balanceRows.length === 1 && balanceRows[0].amount >= global.support.decimalToCoin(global.config.payout.walletMin)) {
-        console.error(`Remaining payment is too large: ${  global.support.coinToDecimal(balanceRows[0].amount)}`);
+    if (!opts.force && balance && Number(balance.amount) >= global.support.decimalToCoin(global.config.payout.walletMin)) {
+        console.error(`Remaining payment is too large: ${  global.support.coinToDecimal(balance.amount)}`);
         process.exit(1);
     }
-    if (opts.requireStaleBalance === true && balanceRows.length) {
-        console.log(`Balance last update time: ${  balanceRows[0].last_edited}`);
-        if (Date.now() / 1000 - global.support.formatDateFromSQL(balanceRows[0].last_edited) < 12 * 60 * 60) {
+    if (opts.requireStaleBalance === true && balance) {
+        console.log(`Balance last update time: ${  balance.last_edited}`);
+        if (Date.now() / 1000 - global.support.formatDateFromSQL(balance.last_edited) < 12 * 60 * 60) {
             console.error("There was recent amount update. Refusing to continue!");
             process.exit(1);
         }
@@ -88,7 +98,9 @@ async function buildUserDeletePlan(user, options) {
     return { account, user, where, userRows, balanceRows, paymentRows, extraRows };
 }
 
+/** @param {DeletePlan} plan @returns {Promise<void>} */
 async function applyUserDeletePlan(plan) {
+    /** @param {string} table @returns {Promise<unknown>} */
     const deleteRows = function deleteRows(table) {
         return global.mysql.query(`DELETE FROM ${  table  } WHERE ${  plan.where.clause}`, plan.where.params);
     };
@@ -111,6 +123,7 @@ async function applyUserDeletePlan(plan) {
     console.log("Done.");
 }
 
+/** @param {string} user @param {DeleteOptions} [options] @returns {Promise<never>} */
 async function runUserDelete(user, options) {
     const opts = options || {};
     requireForceConfirmation(opts);
