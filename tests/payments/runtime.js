@@ -52,6 +52,17 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         }), false);
     });
 
+    test("invalid batch limits fail before querying balances or reserving payouts", async () => {
+        for (const limit of [0, -1, 1.5, NaN, Infinity, undefined, "2"]) {
+            const harness = createHarness();
+            harness.config.payout.maxPaymentTxns = limit;
+            harness.mysql.query = async function unexpectedQuery() {
+                assert.fail("invalid configuration must fail before SQL");
+            };
+            await assert.rejects(harness.runtime.planBatches(), /maxPaymentTxns must be a positive safe integer/);
+        }
+    });
+
     test("standard payouts use defaultPay when threshold rows are missing or zero and honor the exact boundary", async () => {
         const harness = createHarness({
             balances: [
