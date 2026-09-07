@@ -11,16 +11,6 @@ function requireExistingUser(user, errorMessage, options = {}) {
     });
 }
 
-function requireMissingUser(user, errorMessage, options = {}) {
-    return queryUsers(user).then(function (rows) {
-        if (rows.length === 1) {
-            console.error(errorMessage);
-            if (options.logRowsOnFailure === true) console.log(`Found rows in users table: ${  rows.length}`);
-            process.exit(1);
-        }
-    });
-}
-
 function runLoggedQuery(sql, params, logMessage) {
     return global.mysql.query(sql, params).then(function () {
         if (logMessage) console.log(logMessage);
@@ -34,8 +24,6 @@ function finish(message) {
 
 module.exports = {
     finish,
-    queryUsers,
     requireExistingUser,
-    requireMissingUser,
     runLoggedQuery
 };
