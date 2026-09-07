@@ -103,4 +103,15 @@ test.describe("remote share store validation", { concurrency: false }, function 
             }
         });
     });
+
+    test("storeShares ignores malformed entries and accepts an omitted payment ID", () => {
+        withGlobals(() => {
+            const putBinaryKeys = [];
+            const store = createShareStore({ database: makeFakeDatabase(putBinaryKeys) });
+            assert.doesNotThrow(() => {
+                store.storeShares([null, "not-a-share", share({ paymentID: null })]);
+            });
+            assert.deepEqual(putBinaryKeys, [100]);
+        });
+    });
 });
