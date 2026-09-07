@@ -1,35 +1,59 @@
 "use strict";
 const createPaymentsCommon = require("../lib/payments/common.js");
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
+/** @typedef {import("../types/runtime").SqlRow & {status: string, submit_started_at?: string | Date | null, submitted_at?: string | Date | null, tx_hash?: string | null, tx_key?: string | null, transaction_id?: number | null, finalized_at?: string | Date | null, released_at?: string | Date | null}} PaymentBatch */
+/** @typedef {import("../types/runtime").SqlRow & {payment_address: string}} PaymentItem */
+/** @typedef {{batch: PaymentBatch, items: PaymentItem[], reservedBalances: import("../types/runtime").SqlRows}} BatchState */
+/** @typedef {{support: import("../types/runtime").SupportRuntime, config: import("../types/runtime").PoolConfig}} WalletDeps */
+/** @typedef {{status: "no_match"} | {status: "match_found", txid: string} | {status: "wallet_unavailable", message: string}} WalletMatch */
+/** @typedef {(batch: PaymentBatch, items: PaymentItem[], deps: WalletDeps) => Promise<WalletMatch>} WalletMatchChecker */
+/** @typedef {{batchId?: unknown, force?: unknown, confirmWalletHistoryChecked?: unknown, nowMs?: number, mysql?: import("../types/runtime").SqlPool, support?: import("../types/runtime").SupportRuntime, config?: import("../types/runtime").PoolConfig, walletMatchChecker?: WalletMatchChecker, advisoryLockName?: string}} UnlockOptions */
+/** @typedef {{code: string, flags?: string[], items?: PaymentItem[], reservedBalances?: import("../types/runtime").SqlRows, connectionId?: unknown, txid?: string}} UnlockDetails */
+
 const ADVISORY_LOCK_NAME = "nodejs-pool:payments";
 const SAFE_BATCH_STATUSES = new Set(["reserved", "retrying"]);
 // Mirror the runtime reconcile lookback so the operator-side wallet check scans
 // the same recent-transfer window rather than the whole wallet history.
 const RECENT_TRANSFER_LOOKBACK_BLOCKS = 31 * 24 * 30;
 
+/** @param {unknown} value */
 function isBooleanOption(value) {
     return value === true || value === "true" || value === "1";
 }
 
-function createUnlockError(message, details) {
-    const error = new Error(message);
-    if (details && typeof details === "object") Object.assign(error, details);
-    return error;
+class UnlockError extends Error {
+    /** @param {string} message @param {UnlockDetails} details */
+    constructor(message, details) {
+        super(message);
+        this.code = details.code;
+        this.flags = details.flags ?? [];
+        this.items = details.items ?? [];
+        this.reservedBalances = details.reservedBalances ?? [];
+        this.connectionId = details.connectionId ?? null;
+        this.txid = details.txid ?? null;
+    }
 }
 
+/** @param {string} message @returns {never} */
 function exitWithError(message) {
     console.error(message);
     process.exit(1);
 }
 
+/** @param {unknown} value */
 function parseBatchId(value) {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed <= 0) exitWithError("Batch id must be a positive integer");
     return parsed;
 }
 
+/** @param {Pick<import("../types/runtime").SupportRuntime, "formatDate"> | null} support @param {number} timestampMs */
 function nowSqlTimestamp(support, timestampMs) {
     if (support && typeof support.formatDate === "function") return support.formatDate(timestampMs);
     const date = new Date(timestampMs);
+    /** @param {number} value */
     const pad = function pad(value) { return String(value).padStart(2, "0"); };
     return `${date.getUTCFullYear()  }-${ 
         pad(date.getUTCMonth() + 1)  }-${ 
@@ -39,10 +63,13 @@ function nowSqlTimestamp(support, timestampMs) {
         pad(date.getUTCSeconds())}`;
 }
 
+/** @param {PaymentItem} item */
 function describeItem(item) { return item.payment_address; }
 
+/** @param {unknown} value */
 function isPresent(value) { return value !== null && typeof value !== "undefined" && value !== ""; }
 
+/** @param {PaymentBatch} batch @param {boolean} confirmWalletHistoryChecked @returns {string[]} */
 function collectUnsafeUnlockFlags(batch, confirmWalletHistoryChecked) {
     const flags = [];
     if (!confirmWalletHistoryChecked && isPresent(batch.submit_started_at)) {
@@ -56,6 +83,7 @@ function collectUnsafeUnlockFlags(batch, confirmWalletHistoryChecked) {
     return flags;
 }
 
+/** @param {PaymentBatch} batch @param {PaymentItem[]} items @param {import("../types/runtime").SqlRows} reservedBalances @returns {string[]} */
 function collectRiskFlags(batch, items, reservedBalances) {
     const flags = [];
     if (!SAFE_BATCH_STATUSES.has(batch.status)) flags.push(`status is ${  batch.status}`);
@@ -66,15 +94,18 @@ function collectRiskFlags(batch, items, reservedBalances) {
     return flags;
 }
 
+/** @param {import("../types/runtime").SqlConnection} connection @param {string} sql @param {import("../types/runtime").SqlParam[]} params @param {string} key @returns {Promise<import("../types/runtime").Scalar>} */
 async function querySingleValue(connection, sql, params, key) {
     const rows = await connection.query(sql, params);
     const row = Array.isArray(rows) ? rows[0] : rows;
     if (!row || typeof row !== "object") return null;
-    if (key && Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+    if (key && Object.prototype.hasOwnProperty.call(row, key)) return row[key] ?? null;
     const keys = Object.keys(row);
-    return keys.length ? row[keys[0]] : null;
+    const firstKey = keys[0];
+    return firstKey === undefined ? null : row[firstKey] ?? null;
 }
 
+/** @template T @param {import("../types/runtime").SqlPool} mysql @param {(connection: import("../types/runtime").SqlConnection) => Promise<T>} work @param {string} [lockName] @returns {Promise<T>} */
 async function withPaymentsAdvisoryLock(mysql, work, lockName) {
     const advisoryLockName = lockName || ADVISORY_LOCK_NAME;
     const connection = await mysql.getConnection();
@@ -83,7 +114,7 @@ async function withPaymentsAdvisoryLock(mysql, work, lockName) {
         const connectionId = await querySingleValue(connection, "SELECT CONNECTION_ID() AS connection_id", [], "connection_id");
         const locked = await querySingleValue(connection, "SELECT GET_LOCK(?, 0) AS locked", [advisoryLockName], "locked");
         if (locked !== 1) {
-            throw createUnlockError(
+            throw new UnlockError(
                 `Payment advisory lock is busy for ${  advisoryLockName  }. Stop the payments runtime before unlocking batches.`,
                 { code: "lock_busy", connectionId }
             );
@@ -102,12 +133,15 @@ async function withPaymentsAdvisoryLock(mysql, work, lockName) {
     }
 }
 
+/** @param {import("../types/runtime").SqlConnection} connection @param {number} batchId @returns {Promise<BatchState>} */
 async function loadBatchState(connection, batchId) {
+    /** @type {PaymentBatch[]} */
     const batches = await connection.query("SELECT * FROM payment_batches WHERE id = ?", [batchId]);
-    if (!Array.isArray(batches) || batches.length === 0) {
-        throw createUnlockError(`Payment batch ${  batchId  } was not found`, { code: "missing_batch" });
+    if (!Array.isArray(batches) || batches.length === 0 || !batches[0]) {
+        throw new UnlockError(`Payment batch ${  batchId  } was not found`, { code: "missing_batch" });
     }
     const batch = batches[0];
+    /** @type {PaymentItem[]} */
     const items = await connection.query(
         "SELECT * FROM payment_batch_items WHERE batch_id = ? ORDER BY destination_order ASC",
         [batchId]
@@ -119,17 +153,18 @@ async function loadBatchState(connection, batchId) {
     return { batch, items, reservedBalances };
 }
 
+/** @param {number} batchId @param {PaymentBatch} batch @param {PaymentItem[]} items @param {import("../types/runtime").SqlRows} reservedBalances @param {boolean} force @param {boolean} confirmWalletHistoryChecked @returns {string[]} */
 function assertUnlockAllowed(batchId, batch, items, reservedBalances, force, confirmWalletHistoryChecked) {
     const unsafeFlags = collectUnsafeUnlockFlags(batch, confirmWalletHistoryChecked);
     if (unsafeFlags.length) {
-        throw createUnlockError(
+        throw new UnlockError(
             `Refusing to unlock payment batch ${  batchId  } because it may already have crossed the wallet submit boundary.`,
             { code: "unsafe_batch", flags: unsafeFlags, items, reservedBalances }
         );
     }
     const riskFlags = collectRiskFlags(batch, items, reservedBalances);
     if (riskFlags.length && !force) {
-        throw createUnlockError(
+        throw new UnlockError(
             `Refusing to unlock payment batch ${  batchId  } without --force.`,
             { code: "force_required", flags: riskFlags, items, reservedBalances }
         );
@@ -137,6 +172,7 @@ function assertUnlockAllowed(batchId, batch, items, reservedBalances, force, con
     return riskFlags;
 }
 
+/** @param {import("../types/runtime").SupportRuntime} support @param {string} method @param {Record<string, unknown>} params @returns {Promise<unknown>} */
 function rpcWalletCall(support, method, params) {
     return new Promise(function resolveCall(resolve) {
         support.rpcWallet(method, params, resolve, true);
@@ -151,6 +187,7 @@ function rpcWalletCall(support, method, params) {
 //   { status: "no_match" }            -> safe to unlock
 //   { status: "match_found", txid }   -> a real transfer matches; refuse
 //   { status: "wallet_unavailable" }  -> cannot prove safety; refuse
+/** @param {PaymentBatch} batch @param {PaymentItem[]} items @param {WalletDeps} deps @returns {Promise<WalletMatch>} */
 async function defaultWalletMatchChecker(batch, items, deps) {
     const support = deps && deps.support;
     const config = deps && deps.config;
@@ -159,7 +196,8 @@ async function defaultWalletMatchChecker(batch, items, deps) {
     }
     const common = createPaymentsCommon({ mysqlPool: global.mysql, support, config });
     const heightReply = await rpcWalletCall(support, "get_height", {});
-    const walletHeight = heightReply && heightReply.result ? Number(heightReply.result.height) : null;
+    const heightResult = isRecord(heightReply) && isRecord(heightReply["result"]) ? heightReply["result"] : null;
+    const walletHeight = heightResult ? Number(heightResult["height"]) : null;
     if (walletHeight === null || !Number.isFinite(walletHeight)) {
         return { status: "wallet_unavailable", message: "wallet height lookup failed" };
     }
@@ -171,37 +209,49 @@ async function defaultWalletMatchChecker(batch, items, deps) {
         min_height: Math.max(0, walletHeight - RECENT_TRANSFER_LOOKBACK_BLOCKS),
         max_height: walletHeight
     });
-    if (!reply || typeof reply !== "object" || !reply.result) {
+    if (!isRecord(reply) || !isRecord(reply["result"])) {
         return { status: "wallet_unavailable", message: "wallet get_transfers failed" };
     }
+    /** @type {Record<string, unknown>[]} */
     const transfers = [];
     for (const key of ["out", "pending", "pool"]) {
-        if (Array.isArray(reply.result[key])) transfers.push.apply(transfers, reply.result[key]);
+        const entries = reply["result"][key];
+        if (entries === undefined) continue;
+        if (!Array.isArray(entries) || entries.some((entry) => !isRecord(entry))) {
+            return { status: "wallet_unavailable", message: "wallet returned malformed transfer history" };
+        }
+        transfers.push(...entries.filter(isRecord));
     }
     const match = transfers.find(function matches(transfer) {
         return common.transferMatchesBatch(batch, items, transfer);
     });
-    return match ? { status: "match_found", txid: match.txid } : { status: "no_match" };
+    if (!match) return { status: "no_match" };
+    const txid = match["txid"];
+    return typeof txid === "string"
+        ? { status: "match_found", txid }
+        : { status: "wallet_unavailable", message: "matching transfer has no transaction ID" };
 }
 
+/** @param {number} batchId @param {BatchState} loaded @param {WalletMatchChecker} walletMatchChecker @param {WalletDeps} deps @returns {Promise<void>} */
 async function assertWalletHistoryClear(batchId, loaded, walletMatchChecker, deps) {
     const matchResult = await walletMatchChecker(loaded.batch, loaded.items, deps);
     if (matchResult && matchResult.status === "no_match") return;
     if (matchResult && matchResult.status === "match_found") {
-        throw createUnlockError(
+        throw new UnlockError(
             `Refusing to unlock payment batch ${  batchId  }: wallet history shows a matching transfer (${ 
                 matchResult.txid  }); the batch was already sent.`,
             { code: "wallet_tx_match", txid: matchResult.txid, items: loaded.items, reservedBalances: loaded.reservedBalances }
         );
     }
-    throw createUnlockError(
+    throw new UnlockError(
         `Refusing to unlock payment batch ${  batchId  }: could not verify wallet history (${ 
-            (matchResult && matchResult.message) || (matchResult && matchResult.status) || "no result" 
+            matchResult.status === "wallet_unavailable" ? matchResult.message : "no result" 
             }). Re-run once the wallet is reachable.`,
         { code: "wallet_unavailable", items: loaded.items, reservedBalances: loaded.reservedBalances }
     );
 }
 
+/** @param {UnlockOptions} [options] */
 async function unlockBatch(options) {
     const opts = options || {};
     const mysql = opts.mysql || global.mysql;
@@ -268,22 +318,19 @@ async function unlockBatch(options) {
     }, opts.advisoryLockName);
 }
 
+/** @param {unknown} error @param {number} batchId @returns {never} */
 function printUnlockError(error, batchId) {
-    if (!error || typeof error !== "object") {
-        exitWithError(`Failed to unlock payment batch ${  batchId  }: ${  String(error)}`);
-        return;
-    }
-    if (error.code === "force_required" || error.code === "unsafe_batch") {
+    if (error instanceof UnlockError && (error.code === "force_required" || error.code === "unsafe_batch")) {
         console.error(error.message);
         console.error(error.code === "unsafe_batch" ? "Unsafe flags:" : "Risk flags:");
-        (error.flags || []).forEach(function printFlag(flag) {
+        error.flags.forEach(function printFlag(flag) {
             console.error(` - ${  flag}`);
         });
-        const items = Array.isArray(error.items) ? error.items : [];
+        const items = error.items;
         console.error(`Destinations: ${  items.length ? items.map(describeItem).join(", ") : "(none)"}`);
         process.exit(1);
     }
-    exitWithError(`Failed to unlock payment batch ${  batchId  }: ${  error.message || String(error)}`);
+    exitWithError(`Failed to unlock payment batch ${  batchId  }: ${  (error instanceof Error ? error.message : String(error))}`);
 }
 
 function runCli() {
@@ -315,7 +362,7 @@ function runCli() {
                 printUnlockError(error, batchId);
             }
         })().catch(function onError(error) {
-            exitWithError(`Script failed: ${  error && error.message ? error.message : String(error)}`);
+            exitWithError(`Script failed: ${  error instanceof Error ? error.message : String(error)}`);
         });
     });
 }

@@ -512,6 +512,32 @@ test.describe("payment unlock batch helper", { concurrency: false }, () => {
         assert.equal(mysql.state.locks.size, 0);
     });
 
+    test("unlockBatch rejects malformed wallet history before releasing reservations", async () => {
+        for (const history of [{ out: "invalid" }, { out: [null] }]) {
+            const mysql = createMysql({
+                balances: [{ id: 1, payment_address: "wallet", amount: 100, pending_batch_id: 23 }],
+                paymentBatchItems: [{ batch_id: 23, payment_address: "wallet" }],
+                paymentBatches: [{ id: 23, status: "submitting", submit_started_at: "2026-04-18 11:59:50" }]
+            });
+            await assert.rejects(unlockBatch({
+                batchId: 23,
+                force: true,
+                confirmWalletHistoryChecked: true,
+                mysql,
+                config: {},
+                support: {
+                    ...createSupport(),
+                    rpcWallet(method, _params, callback) {
+                        callback({ result: method === "get_height" ? { height: 1000 } : history });
+                    }
+                }
+            }), { code: "wallet_unavailable" });
+            assert.equal(mysql.state.store.balances[0].pending_batch_id, 23);
+            assert.equal(mysql.state.state.beginCount, 0);
+            assert.equal(mysql.state.locks.size, 0);
+        }
+    });
+
     test("unlockBatch refuses post-submit batches even when force is requested", async () => {
         const mysql = createMysql({
             balances: [
