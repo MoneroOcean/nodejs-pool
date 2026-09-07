@@ -51,13 +51,23 @@ function createCli(options = {}) {
         return value;
     }
 
+    /** @param {string} name @param {string} errorMessage @param {number} [min] @param {number} [max] */
+    function numberArg(name, errorMessage, min = -Infinity, max = Infinity) {
+        const text = arg(name, errorMessage).trim();
+        if (!text) exitWithError(errorMessage);
+        const value = Number(text);
+        if (!Number.isFinite(value) || value < min || value > max) exitWithError(errorMessage);
+        return value;
+    }
+
     return {
         argv,
         arg,
+        numberArg,
         /** @param {string} name @param {string} errorMessage @param {number} [min] @param {number} [max] */
         integerArg(name, errorMessage, min = 0, max = Number.MAX_SAFE_INTEGER) {
-            const value = Number(arg(name, errorMessage));
-            if (!Number.isSafeInteger(value) || value < min || value > max) exitWithError(errorMessage);
+            const value = numberArg(name, errorMessage, min, max);
+            if (!Number.isSafeInteger(value)) exitWithError(errorMessage);
             return value;
         },
         init: initMini.init,

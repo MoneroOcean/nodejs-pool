@@ -178,6 +178,20 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("CLI numeric payment arguments accept decimals and reject invalid amounts", async function testNumericArgs() {
+        const cli = require("../script_utils.js")();
+        cli.argv.pay = "1.25";
+        assert.equal(cli.numberArg("pay", "Invalid pay", 0), 1.25);
+        cli.argv.pay = "0";
+        assert.equal(cli.numberArg("pay", "Invalid pay", 0), 0);
+        await withExitTrap(() => captureConsole("error", () => {
+            for (const value of [undefined, true, "  ", "-1", "Infinity", "not-a-number"]) {
+                cli.argv.pay = value;
+                assert.throws(() => cli.numberArg("pay", "Invalid pay", 0), { code: 1 });
+            }
+        }));
+    });
+
     test("user deletion revalidates balances and commits SQL before cache cleanup", async function testAtomicUserDelete() {
         const originalMysql = global.mysql;
         const originalDatabase = global.database;
