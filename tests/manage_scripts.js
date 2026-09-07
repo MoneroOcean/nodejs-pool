@@ -1,5 +1,6 @@
 "use strict";
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const Module = require("node:module");
 const os = require("node:os");
@@ -58,6 +59,54 @@ function withExitTrap(fn) {
     return Promise.resolve().then(fn).finally(function restoreExit() {
         process.exit = originalExit;
     });
+}
+
+function runFixDaemonForTest(args, response, waitResponse = response) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fix-daemon-test-"));
+    const bin = path.join(root, "bin");
+    const callsPath = path.join(root, "calls");
+    const curlCallsPath = path.join(root, "curl-calls");
+    fs.mkdirSync(bin);
+    const writeExecutable = (name, source) => {
+        const filePath = path.join(bin, name);
+        fs.writeFileSync(filePath, `${source}\n`, { mode: 0o755 });
+        return filePath;
+    };
+    writeExecutable("systemctl", `#!/bin/sh
+printf 'systemctl %s\\n' "$*" >> "$FIX_DAEMON_TEST_CALLS"
+case "\${1:-}" in
+  cat|is-enabled) exit 0 ;;
+  is-active) exit 1 ;;
+  *) exit 0 ;;
+esac`);
+    writeExecutable("sudo", `#!/bin/sh
+if [ "\${1:-}" = "-n" ]; then shift; fi
+exec "$@"`);
+    writeExecutable("curl", `#!/bin/sh
+count=0
+if [ -f "$FIX_DAEMON_TEST_CURL_CALLS" ]; then count="$(cat "$FIX_DAEMON_TEST_CURL_CALLS")"; fi
+count=$((count + 1))
+printf '%s\\n' "$count" > "$FIX_DAEMON_TEST_CURL_CALLS"
+case "$*" in
+  *18146*) printf '%s\\n' '{"result":{}}' ;;
+  *) if [ "$count" -eq 1 ]; then printf '%s\\n' "$FIX_DAEMON_TEST_RESPONSE"; else printf '%s\\n' "$FIX_DAEMON_TEST_WAIT_RESPONSE"; fi ;;
+esac`);
+    writeExecutable("logger", "#!/bin/sh\nexit 0");
+    const result = spawnSync(path.join(__dirname, "..", "fix_daemon.sh"), args, {
+        encoding: "utf8",
+        env: {
+            ...process.env,
+            FIX_DAEMON_LOCK: path.join(root, "lock"),
+            FIX_DAEMON_TEST_CALLS: callsPath,
+            FIX_DAEMON_TEST_CURL_CALLS: curlCallsPath,
+            FIX_DAEMON_TEST_RESPONSE: response,
+            FIX_DAEMON_TEST_WAIT_RESPONSE: waitResponse,
+            PATH: `${bin}:${process.env.PATH}`
+        }
+    });
+    const calls = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, "utf8") : "";
+    fs.rmSync(root, { recursive: true, force: true });
+    return { ...result, calls };
 }
 
 function installAccountGlobals(options) {
@@ -629,6 +678,47 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         assert.doesNotMatch(source, /systemctl(?:_cmd)? stop xtm_mm\.service/);
         assert.match(source, /restart_xtm_mm_service\(\) \{\s*run_optional_service restart xtm_mm\.service/);
         assert.equal(source.match(/^\s*restart_xtm_mm_service$/gm).length, 3);
+    });
+
+    test("daemon recovery preserves a healthy direct monerod", function testHealthyMonerodGuard() {
+        const healthy = JSON.stringify({
+            jsonrpc: "2.0",
+            result: { status: "OK", synchronized: true, busy_syncing: false, height: 123 }
+        });
+        for (const args of [
+            ["proxy-unhealthy", "--expected-xmr-height", "123"],
+            ["template-stuck", "--expected-xmr-height", "123"],
+            ["xmr-lag", "--expected-xmr-height", "123"]
+        ]) {
+            const result = runFixDaemonForTest(args, healthy);
+            assert.equal(result.status, 0, result.stderr);
+            assert.doesNotMatch(result.calls, /systemctl restart monero\.service/);
+        }
+
+        const missingExpected = runFixDaemonForTest(["xmr-lag"], healthy);
+        assert.equal(missingExpected.status, 0, missingExpected.stderr);
+        assert.match(missingExpected.calls, /systemctl restart monero\.service/);
+
+        const unhealthy = runFixDaemonForTest(
+            ["proxy-unhealthy", "--expected-xmr-height", "123"],
+            JSON.stringify({
+                jsonrpc: "2.0",
+                result: { status: "OK", synchronized: false, busy_syncing: true, height: 123 }
+            })
+        );
+        assert.equal(unhealthy.status, 0, unhealthy.stderr);
+        assert.match(unhealthy.calls, /systemctl restart monero\.service/);
+
+        const malformed = runFixDaemonForTest(
+            ["proxy-unhealthy", "--expected-xmr-height", "123"],
+            "not-json",
+            healthy
+        );
+        assert.equal(malformed.status, 0, malformed.stderr);
+        assert.match(malformed.calls, /systemctl restart monero\.service/);
+        const malformedWithoutHeight = runFixDaemonForTest(["proxy-unhealthy"], "not-json", healthy);
+        assert.equal(malformedWithoutHeight.status, 0, malformedWithoutHeight.stderr);
+        assert.match(malformedWithoutHeight.calls, /systemctl restart monero\.service/);
     });
 
     test("leaf deployment opens public pool ports as TCP only", function testLeafPoolProtocols() {

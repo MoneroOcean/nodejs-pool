@@ -9,6 +9,9 @@ expected_xmr_height=""
 xtm_height=""
 expected_xtm_height=""
 lock_file="${FIX_DAEMON_LOCK:-/tmp/fix_daemon.lock}"
+monerod_rpc_url="http://127.0.0.1:18083/json_rpc"
+monerod_get_info_payload='{"jsonrpc":"2.0","id":"0","method":"get_info"}'
+monerod_direct_height=""
 
 usage() {
   cat <<'EOF'
@@ -176,10 +179,87 @@ wait_json_rpc() {
 wait_monero_rpc() {
   wait_json_rpc \
     "monerod" \
-    "http://127.0.0.1:18083/json_rpc" \
-    '{"jsonrpc":"2.0","id":"0","method":"get_info"}' \
+    "$monerod_rpc_url" \
+    "$monerod_get_info_payload" \
     '"status"[[:space:]]*:[[:space:]]*"OK"' \
     30
+}
+
+# Probe the local Monero RPC before restarting it.  Keep this request short:
+# recovery runs from the pool health path and must not wait on a wedged daemon.
+monerod_direct_info() {
+  [ "$dry_run" -eq 1 ] && return 1
+  curl -m 2 --connect-timeout 1 -fsS \
+    "$monerod_rpc_url" \
+    -H "Content-Type: application/json" \
+    -d "$monerod_get_info_payload" \
+    2>/dev/null
+}
+
+monerod_direct_ready() {
+  local response="$1"
+  local require_expected_height="$2"
+  local actual_height=""
+
+  # Monero's JSON-RPC envelope is {"result":{...}}. Parse it as JSON so a
+  # malformed response or an unrelated field cannot make a recovery look safe.
+  actual_height="$(printf '%s' "$response" | python3 -c '
+import json
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except (json.JSONDecodeError, TypeError, ValueError):
+    sys.exit(1)
+if not isinstance(payload, dict):
+    sys.exit(1)
+result = payload.get("result")
+if not isinstance(result, dict):
+    sys.exit(1)
+if result.get("status") != "OK" or result.get("synchronized") is not True or result.get("busy_syncing") is not False:
+    sys.exit(1)
+height = result.get("height")
+if isinstance(height, bool) or not isinstance(height, (int, str)):
+    sys.exit(1)
+try:
+    height = int(height)
+except (TypeError, ValueError):
+    sys.exit(1)
+if height < 0:
+    sys.exit(1)
+print(height)
+' 2>/dev/null || true)"
+  monerod_direct_height="$actual_height"
+  [[ "$actual_height" =~ ^[0-9]+$ ]] || return 1
+
+  if [ "$require_expected_height" -eq 1 ] && [ -z "$expected_xmr_height" ]; then
+    return 1
+  fi
+  if [ -n "$expected_xmr_height" ]; then
+    [[ "$expected_xmr_height" =~ ^[0-9]+$ ]] || return 1
+    [[ "$actual_height" =~ ^[0-9]+$ ]] || return 1
+    [ "$actual_height" -ge "$expected_xmr_height" ] || return 1
+  fi
+  return 0
+}
+
+restart_monerod_if_needed() {
+  local require_expected_height="$1"
+  local response=""
+
+  if [ "$dry_run" -eq 0 ]; then
+    response="$(monerod_direct_info || true)"
+    if [ -n "$response" ] && monerod_direct_ready "$response" "$require_expected_height"; then
+      if [ -n "$monerod_direct_height" ]; then
+        log "skipping restart monero.service: direct monerod RPC is healthy (height=$monerod_direct_height)"
+      else
+        log "skipping restart monero.service: direct monerod RPC is healthy"
+      fi
+      return 0
+    fi
+  fi
+
+  run_service restart monero.service
 }
 
 wait_tari_rpc() {
@@ -248,7 +328,15 @@ log "starting $reason recovery$(describe_context)"
 
 case "$reason" in
   xmr-lag|proxy-unhealthy)
-    run_service restart monero.service
+    # Without the expected height we cannot distinguish a genuinely lagging
+    # node from a stale caller observation, so retain the conservative restart.
+    if [ "$reason" = "xmr-lag" ] && [ -z "$expected_xmr_height" ]; then
+      run_service restart monero.service
+    elif [ "$reason" = "xmr-lag" ]; then
+      restart_monerod_if_needed 1
+    else
+      restart_monerod_if_needed 0
+    fi
     restart_relay_pool
     wait_monero_rpc || true
     restart_xtm_mm_service
@@ -268,7 +356,7 @@ case "$reason" in
       log "deferred template recovery: active Tari node RPC is unavailable"
       exit 0
     fi
-    run_service restart monero.service
+    restart_monerod_if_needed 0
     restart_local_xtm
     restart_relay_pool
     wait_monero_rpc || true
