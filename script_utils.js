@@ -9,20 +9,23 @@ function exitWithError(message) {
 
 function forEachEntry(database, reader, iterator, reverse) {
     const txn = global.database.env.beginTxn({ readOnly: true });
-    const cursor = new global.database.lmdb.Cursor(txn, database);
+    let cursor;
     const startMethod = reverse === true ? "goToLast" : "goToFirst";
     const nextMethod = reverse === true ? "goToPrev" : "goToNext";
 
     try {
-        for (let found = cursor[startMethod](); found; found = cursor[nextMethod]()) {
-            cursor[reader](function onEntry(key, data) {
-                iterator(key, data);
-            }); // jshint ignore:line
+        cursor = new global.database.lmdb.Cursor(txn, database);
+        // Cursor navigation returns null at the end; integer key 0 is a valid entry.
+        for (let found = cursor[startMethod](); found !== null; found = cursor[nextMethod]()) {
+            cursor[reader](iterator);
         }
     } finally {
         // Release the cursor/read txn even if the iterator throws, so the slot is not held open.
-        cursor.close();
-        txn.commit();
+        try {
+            if (cursor) cursor.close();
+        } finally {
+            txn.abort();
+        }
     }
 }
 

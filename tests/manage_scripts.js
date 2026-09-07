@@ -178,6 +178,59 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("CLI iterators include key zero and release readers on failures", function testCliReaderCleanup() {
+        const cli = require("../script_utils.js")();
+        const originalDatabase = global.database;
+        for (const failure of [null, "construct", "iterate", "close"]) {
+            const events = [];
+            global.database = {
+                env: { beginTxn() { return { abort() { events.push("abort"); } }; } },
+                lmdb: { Cursor: class {
+                    constructor() { if (failure === "construct") throw new Error(failure); }
+                    goToFirst() { return 0; }
+                    goToNext() { return null; }
+                    getCurrentBinary(iterator) { iterator(0, "data"); }
+                    close() {
+                        events.push("close");
+                        if (failure === "close") throw new Error(failure);
+                    }
+                } }
+            };
+            try {
+                const run = () => cli.forEachBinaryEntry({}, (key, value) => {
+                    assert.equal(key, 0);
+                    assert.equal(value, "data");
+                    events.push("entry");
+                    if (failure === "iterate") throw new Error(failure);
+                });
+                if (failure) assert.throws(run, new RegExp(failure));
+                else run();
+                assert.deepEqual(events, failure === "construct" ? ["abort"] : ["entry", "close", "abort"]);
+            } finally {
+                global.database = originalDatabase;
+            }
+        }
+    });
+
+    test("cache deletion aborts its transaction on failure", function testCacheDeleteCleanup() {
+        const originalDatabase = global.database;
+        const events = [];
+        global.database = {
+            env: { beginTxn() { return {
+                del() { throw new Error("delete failed"); },
+                commit() { events.push("commit"); },
+                abort() { events.push("abort"); }
+            }; } },
+            getCache() { return {}; }
+        };
+        try {
+            assert.throws(() => accountUtils.deleteCacheKeys("user"), /delete failed/);
+            assert.deepEqual(events, ["abort"]);
+        } finally {
+            global.database = originalDatabase;
+        }
+    });
+
     test("altblock_exchange unblock catalog lists canonical commands", function testUnblockCatalog() {
         assert.equal(typeof unblockCatalog.main, "function");
         assert.ok(unblockCatalog.HELP.some(function hasDepositCommand(line) {

@@ -63,10 +63,16 @@ function logCacheKeys(user) {
 
 function deleteCacheKeys(user) {
     const txn = global.database.env.beginTxn();
-    forEachCacheKey(user, function (key) {
-        if (global.database.getCache(key) !== false) txn.del(global.database.cacheDB, key);
-    });
-    txn.commit();
+    try {
+        forEachCacheKey(user, function (key) {
+            if (global.database.getCache(key) !== false) txn.del(global.database.cacheDB, key);
+        });
+        txn.commit();
+    } catch (error) {
+        // A failed cache deletion must release the writer and roll back the batch.
+        txn.abort();
+        throw error;
+    }
 }
 
 module.exports = {
