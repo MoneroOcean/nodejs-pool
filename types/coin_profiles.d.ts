@@ -121,3 +121,21 @@ export interface CoinProfile extends CoinProfileSpec {
 }
 
 export type ProfileInput = Pick<CoinProfileSpec, "port" | "coin"> & Partial<CoinProfileSpec>;
+
+export interface BtcOutput {
+    value: number;
+    scriptPubKey?: {addresses?: string[], address?: string};
+}
+export interface BtcRewardBlock {
+    tx: [{vout: BtcOutput[]}, ...unknown[]];
+    difficulty: number;
+    reward?: number;
+}
+export type EthRewardBlock = import("../lib/coins/helpers").EthRewardBlock & {
+    number: string;
+    hash: string;
+    reward?: number | null;
+    height?: number;
+    confirmations?: number;
+}
+export type RawReplyCallback = (error: unknown, body: unknown) => void;

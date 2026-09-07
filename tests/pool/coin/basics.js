@@ -1232,3 +1232,26 @@ test("remote verifier failures release timers and route the next share to a heal
     assert.equal(timers.size, 0);
     assert.deepEqual(results[1], ["ab".repeat(32), undefined]);
 });
+
+
+test("ETH reward lookup requires one valid receipt per transaction", () => {
+    const { rpc } = require("../../../lib/coins/core/factories.js");
+    const validReceipt = { result: { gasUsed: "0x1", transactionHash: "tx-one" } };
+    for (const receipts of [[], [{}], [null], [{ result: { gasUsed: "", transactionHash: "tx-one" } }],
+        [{ result: { gasUsed: "0x1", transactionHash: "unknown" } }], [validReceipt, validReceipt], [validReceipt]]) {
+        let outcome = null;
+        rpc.eth().getBlockHeaderById({
+            port: 8645, blockId: 100,
+            runtime: { support: { rpcPortDaemon2(_port, _path, request, callback) {
+                if (Array.isArray(request)) return callback(receipts);
+                callback({ result: { number: "0x64", hash: "block", transactions: [{ hash: "tx-one", gasPrice: "0x2" }], uncles: [], gasUsed: "0x1" } });
+            } } },
+            callback(error, body) { outcome = { error, body }; }
+        });
+        assert.notEqual(outcome, null);
+        if (receipts.length === 1 && receipts[0] === validReceipt) {
+            assert.equal(outcome.error, null);
+            assert.equal(Number.isFinite(outcome.body.reward), true);
+        } else assert.equal(outcome.error, true);
+    }
+});
