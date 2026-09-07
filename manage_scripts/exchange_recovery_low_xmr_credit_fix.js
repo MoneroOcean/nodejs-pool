@@ -14,25 +14,28 @@ const {
     loadExchangeApiIfNeeded,
     parseBooleanOption,
     resolveActiveOrders,
-    runFixMain
+    runFixMain,
+    requireTradeContext
 } = require("./exchange_recovery_trade_common.js");
 
+/** @param {unknown} value */
 function normalizeCoinAmount(value) { return Number(asFiniteNumber(value, "Invalid coin amount").toFixed(8)); }
 
-function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
-    if (!tradeContext || typeof tradeContext !== "object") throw new Error("altblock_exchange_trade is not found");
+/** @param {unknown} input @param {unknown} currentXmrBalance @param {{activeOrders?: boolean | null, reviewedCredit?: boolean, manualWithdrawalConfirmed?: boolean}} [options] @returns {import("./exchange_recovery_preview_common.js").FixPlan} */
+function buildTradeContextFix(input, currentXmrBalance, options) {
+    const tradeContext = requireTradeContext(input);
     if (tradeContext.stage !== "Exchange XMR trade") {
         throw new Error(`altblock_exchange_trade is not at Exchange XMR trade stage: ${  formatJson(tradeContext)}`);
     }
 
     const currentOptions = options || {};
     const expectedIncrease = asFiniteNumber(
-        tradeContext.expectedIncreases && tradeContext.expectedIncreases.XMR,
+        tradeContext.expectedIncreases["XMR"],
         "altblock_exchange_trade is missing expected XMR increase"
     );
     if (expectedIncrease <= 0) throw new Error(`altblock_exchange_trade has invalid expected XMR increase: ${  formatJson(tradeContext)}`);
     const baseline = asFiniteNumber(
-        tradeContext.baselineBalances && tradeContext.baselineBalances.XMR,
+        tradeContext.baselineBalances["XMR"],
         "altblock_exchange_trade is missing XMR baseline"
     );
 
@@ -64,19 +67,17 @@ function buildTradeContextFix(tradeContext, currentXmrBalance, options) {
     }
 
     const nextTradeContext = clone(tradeContext);
-    if (!nextTradeContext.expectedIncreases || typeof nextTradeContext.expectedIncreases !== "object") {
-        nextTradeContext.expectedIncreases = {};
-    }
-    nextTradeContext.expectedIncreases.XMR = observedIncrease;
+    nextTradeContext.expectedIncreases["XMR"] = observedIncrease;
 
     return {
         cacheKey: "altblock_exchange_trade",
-        currentValue: clone(tradeContext),
+        currentValue: clone(input),
         nextValue: nextTradeContext,
         summary: `rewrote expected XMR increase from ${  expectedIncrease.toFixed(8)  } to ${  observedIncrease.toFixed(8)}`
     };
 }
 
+/** @param {import("../script_utils.js").Cli} cli @param {import("./exchange_recovery_trade_common.js").TradeContext} tradeContext @param {import("./exchange_recovery_trade_common.js").ExchangeApi | null} exchangeApi @returns {Promise<number>} */
 async function resolveCurrentXmrBalance(cli, tradeContext, exchangeApi) {
     const explicit = cli.get("current-balance", cli.get("current-xmr-balance"));
     if (explicit !== null) return asFiniteNumber(explicit, "Invalid --current-balance value");
@@ -85,9 +86,11 @@ async function resolveCurrentXmrBalance(cli, tradeContext, exchangeApi) {
     return await getExchangeBalance(exchangeApi, exchange, "XMR");
 }
 
+/** @param {import("../script_utils.js").Cli} cli @param {import("../types/runtime").DatabaseRuntime} database @returns {Promise<import("./exchange_recovery_preview_common.js").FixPlan>} */
 async function buildFixPlan(cli, database) {
-    const tradeContext = database.getCache("altblock_exchange_trade");
-    if (tradeContext !== false) {
+    const cachedContext = database.getCache("altblock_exchange_trade");
+    const tradeContext = requireTradeContext(cachedContext);
+    if (cachedContext !== false) {
         const exchangeApi = loadExchangeApiIfNeeded(cli, ["current-balance", "current-xmr-balance"]);
         const currentXmrBalance = await resolveCurrentXmrBalance(cli, tradeContext, exchangeApi);
         const activeOrders = await resolveActiveOrders(cli, tradeContext, exchangeApi);

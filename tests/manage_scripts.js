@@ -178,6 +178,17 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("recovery calculations reject missing and non-numeric balances", async function testRecoveryNumbers() {
+        const { asFiniteNumber, getExchangeBalance } = require("../manage_scripts/exchange_recovery_trade_common.js");
+        assert.equal(asFiniteNumber("1.25", "invalid"), 1.25);
+        assert.equal(asFiniteNumber(0, "invalid"), 0);
+        for (const value of [undefined, null, "", "  ", true, false, NaN, Infinity, {}, []]) {
+            assert.throws(() => asFiniteNumber(value, "invalid"), /invalid/);
+        }
+        await assert.rejects(getExchangeBalance({ get_balance: async () => NaN }, "test", "XMR"), /Invalid exchange balance/);
+        await assert.rejects(getExchangeBalance(null, "test", "XMR"), /exchange API unavailable/);
+    });
+
     test("balance moves commit atomically and reject stale or reserved balances", async function testAtomicBalanceMove() {
         const originalMysql = global.mysql;
         const originalSupport = global.support;

@@ -14,31 +14,36 @@ const {
     runPendingCacheCli
 } = require("./exchange_recovery_cache_common.js");
 
+/** @param {unknown} entry @param {string | number} port */
 function formatWalletBalance(entry, port) {
-    const balance = Number(entry && entry.walletBalance);
+    const balance = Number(normalizePendingCache(entry)["walletBalance"]);
     if (!Number.isFinite(balance)) return "unknown";
     const coinDef = coinDefs[String(port)];
     if (!coinDef || !coinDef.divisor) return String(balance);
     return (balance / coinDef.divisor).toFixed(8);
 }
 
+/** @param {string | number} port @param {unknown} entry @param {Map<number, import("../types/runtime").AltBlockMessage>} blockLookup */
 function summarizeEntry(port, entry, blockLookup) {
-    const ids = Array.isArray(entry && entry.blockIds) ? entry.blockIds.map(Number).filter(Number.isFinite) : [];
-    const blocks = ids.map(function mapId(id) { return blockLookup.get(id); }).filter(Boolean);
+    const pending = normalizePendingCache(entry);
+    const blockIds = pending["blockIds"];
+    const ids = Array.isArray(blockIds) ? blockIds.map(Number).filter(Number.isFinite) : [];
+    const blocks = ids.map(function mapId(id) { return blockLookup.get(id); }).filter((block) => block !== undefined);
     const heights = blocks.map(function mapBlock(block) { return Number(block.height); }).filter(Number.isFinite).sort(function sort(a, b) { return a - b; });
-    const firstHeight = heights.length ? heights[0] : null;
-    const lastHeight = heights.length ? heights[heights.length - 1] : null;
+    const firstHeight = heights[0] ?? null;
+    const lastHeight = heights.at(-1) ?? null;
     return {
         port: String(port),
         coin: formatCoin(port),
         blocks: ids.length,
-        created_at: Number(entry && entry.createdAt) ? new Date(Number(entry.createdAt)).toISOString() : "unknown",
+        created_at: Number(pending["createdAt"]) ? new Date(Number(pending["createdAt"])).toISOString() : "unknown",
         wallet_balance: formatWalletBalance(entry, port),
         first_height: firstHeight,
         last_height: lastHeight
     };
 }
 
+/** @param {ReturnType<typeof summarizeEntry>} summary */
 function printSummary(summary) {
     console.log(
         `coin=${  summary.coin 

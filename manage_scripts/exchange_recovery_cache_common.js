@@ -1,10 +1,12 @@
 "use strict";
 
+/** @param {unknown} value */
 function parseBooleanOption(value) {
     if (value === null || typeof value === "undefined") return false;
     return ["1", "true", "yes"].includes(String(value).toLowerCase());
 }
 
+/** @param {string | number} port */
 function formatCoin(port) {
     if (global.coinFuncs && typeof global.coinFuncs.PORT2COIN_FULL === "function") {
         return global.coinFuncs.PORT2COIN_FULL(Number(port));
@@ -12,12 +14,14 @@ function formatCoin(port) {
     return String(port);
 }
 
+/** @param {unknown} value @returns {Record<string, unknown>} */
 function normalizePendingCache(value) {
     return value && typeof value === "object"
         ? Object.assign(Object.create(null), value)
         : Object.create(null);
 }
 
+/** @param {import("../script_utils.js").Cli} cli @returns {Map<number, import("../types/runtime").AltBlockMessage>} */
 function buildBlockLookup(cli) {
     const lookup = new Map();
     cli.forEachBinaryEntry(global.database.altblockDB, function onEntry(_key, data) {
@@ -29,6 +33,11 @@ function buildBlockLookup(cli) {
 
 // Recovery cache scripts intentionally share one CLI flow so their safety
 // checks and list/clear behavior cannot drift apart.
+/**
+ * @template T
+ * @param {{cli: import("../script_utils.js").Cli, cacheKey: string, entryLabel: string, confirmOption: string, confirmInstruction: string, clearedHeading: string, emptyMessage: string, summarizeEntry: (port: string, entry: unknown, blocks: Map<number, import("../types/runtime").AltBlockMessage>) => T, printSummary: (summary: T) => void, afterClear?: string[]}} options
+ *
+ */
 function runPendingCacheCli(options) {
     const {
         cli,

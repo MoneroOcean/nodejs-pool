@@ -14,6 +14,7 @@ const {
     runPendingCacheCli
 } = require("./exchange_recovery_cache_common.js");
 
+/** @param {unknown} amount @param {string | number} port */
 function formatAmount(amount, port) {
     const parsed = Number(amount);
     if (!Number.isFinite(parsed)) return "unknown";
@@ -24,34 +25,33 @@ function formatAmount(amount, port) {
     return parsed.toFixed(8);
 }
 
+/** @typedef {{amount: number, blockIds: number[], createdAt: number, txHash: string}} DepositBatch */
+
+/** @param {unknown} entry @returns {DepositBatch[]} */
 function normalizeBatches(entry) {
-    return Array.isArray(entry && entry.batches)
-        ? entry.batches.map(function normalizeBatch(batch) {
-            return {
-                amount: Math.max(0, Number(batch && batch.amount) || 0),
-                blockIds: Array.isArray(batch && batch.blockIds)
-                    ? batch.blockIds.map(function normalizeId(blockId) { return Number(blockId); }).filter(Number.isFinite)
-                    : [],
-                createdAt: Number(batch && batch.createdAt) || 0,
-                txHash: typeof batch?.txHash === "string" ? batch.txHash : ""
-            };
-        }).filter(function keepBatch(batch) {
-            return batch.amount > 0;
-        })
-        : [];
+    const pending = normalizePendingCache(entry);
+    const batches = pending["batches"];
+    if (!Array.isArray(batches)) return [];
+    return batches.map(function normalizeBatch(value) {
+        const batch = normalizePendingCache(value);
+        const ids = batch["blockIds"];
+        const txHash = batch["txHash"];
+        return {
+            amount: Math.max(0, Number(batch["amount"]) || 0),
+            blockIds: Array.isArray(ids) ? ids.map(Number).filter(Number.isFinite) : [],
+            createdAt: Number(batch["createdAt"]) || 0,
+            txHash: typeof txHash === "string" ? txHash : ""
+        };
+    }).filter((batch) => batch.amount > 0);
 }
 
+/** @param {string | number} port @param {unknown} entry @param {Map<number, import("../types/runtime").AltBlockMessage>} blockLookup */
 function summarizeEntry(port, entry, blockLookup) {
     const batches = normalizeBatches(entry);
-    const blockIds = [];
-    batches.forEach(function addIds(batch) {
-        batch.blockIds.forEach(function addId(blockId) {
-            blockIds.push(blockId);
-        });
-    });
-    const blocks = blockIds.map(function mapId(id) { return blockLookup.get(id); }).filter(Boolean);
+    const blockIds = batches.flatMap((batch) => batch.blockIds);
+    const blocks = blockIds.map(function mapId(id) { return blockLookup.get(id); }).filter((block) => block !== undefined);
     const heights = blocks.map(function mapBlock(block) { return Number(block.height); }).filter(Number.isFinite).sort(function sort(a, b) { return a - b; });
-    const firstCreatedAt = batches.reduce(function oldest(current, batch) {
+    const firstCreatedAt = batches.reduce(/** @param {number | null} current @param {DepositBatch} batch */ function oldest(current, batch) {
         if (!batch.createdAt) return current;
         return current === null || batch.createdAt < current ? batch.createdAt : current;
     }, null);
@@ -67,14 +67,15 @@ function summarizeEntry(port, entry, blockLookup) {
         batches: batches.length,
         blocks: blockIds.length,
         amount: formatAmount(totalAmount, port),
-        baseline: formatAmount(Number(entry && entry.balanceBaseline) || 0, port),
+        baseline: formatAmount(Number(normalizePendingCache(entry)["balanceBaseline"]) || 0, port),
         created_at: firstCreatedAt ? new Date(firstCreatedAt).toISOString() : "unknown",
-        first_height: heights.length ? heights[0] : null,
-        last_height: heights.length ? heights[heights.length - 1] : null,
+        first_height: heights[0] ?? null,
+        last_height: heights.at(-1) ?? null,
         txs: txHashes.join(",")
     };
 }
 
+/** @param {ReturnType<typeof summarizeEntry>} summary */
 function printSummary(summary) {
     console.log(
         `coin=${  summary.coin 

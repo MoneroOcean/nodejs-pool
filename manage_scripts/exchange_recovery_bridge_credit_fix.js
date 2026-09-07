@@ -14,11 +14,13 @@ const {
     loadExchangeApiIfNeeded,
     parseBooleanOption,
     resolveActiveOrders,
-    runFixMain
+    runFixMain,
+    requireTradeContext
 } = require("./exchange_recovery_trade_common.js");
 
-function getBridgeSymbol(tradeContext) {
-    if (!tradeContext || typeof tradeContext !== "object") throw new Error("altblock_exchange_trade is not found");
+/** @param {unknown} input */
+function getBridgeSymbol(input) {
+    const tradeContext = requireTradeContext(input);
     if (tradeContext.stage === "Exchange BTC trade") return "BTC";
     if (tradeContext.stage === "Exchange USDT trade") return "USDT";
     if (tradeContext.stage === "Exchange BASE trade") {
@@ -32,18 +34,20 @@ function getBridgeSymbol(tradeContext) {
     throw new Error(`altblock_exchange_trade is not at an intermediate bridge-credit stage: ${  formatJson(tradeContext)}`);
 }
 
-function buildTradeContextFix(tradeContext, currentBridgeBalance, options) {
+/** @param {unknown} input @param {unknown} currentBridgeBalance @param {{activeOrders?: boolean | null, reviewedCredit?: boolean, manualWithdrawalConfirmed?: boolean}} [options] @returns {import("./exchange_recovery_preview_common.js").FixPlan} */
+function buildTradeContextFix(input, currentBridgeBalance, options) {
+    const tradeContext = requireTradeContext(input);
     const currentOptions = options || {};
     const bridgeSymbol = getBridgeSymbol(tradeContext);
     const expectedIncrease = asFiniteNumber(
-        tradeContext.expectedIncreases && tradeContext.expectedIncreases[bridgeSymbol],
+        tradeContext.expectedIncreases[bridgeSymbol],
         `altblock_exchange_trade is missing expected ${  bridgeSymbol  } increase`
     );
     if (expectedIncrease <= 0) {
         throw new Error(`altblock_exchange_trade has invalid expected ${  bridgeSymbol  } increase: ${  formatJson(tradeContext)}`);
     }
     const baseline = asFiniteNumber(
-        tradeContext.baselineBalances && tradeContext.baselineBalances[bridgeSymbol],
+        tradeContext.baselineBalances[bridgeSymbol],
         `altblock_exchange_trade is missing ${  bridgeSymbol  } baseline`
     );
     const currentBalance = asFiniteNumber(currentBridgeBalance, `Current exchange ${  bridgeSymbol  } balance is invalid`);
@@ -69,19 +73,17 @@ function buildTradeContextFix(tradeContext, currentBridgeBalance, options) {
     }
 
     const nextTradeContext = clone(tradeContext);
-    if (!nextTradeContext.expectedIncreases || typeof nextTradeContext.expectedIncreases !== "object") {
-        nextTradeContext.expectedIncreases = {};
-    }
     nextTradeContext.expectedIncreases[bridgeSymbol] = observedIncrease;
 
     return {
         cacheKey: "altblock_exchange_trade",
-        currentValue: clone(tradeContext),
+        currentValue: clone(input),
         nextValue: nextTradeContext,
         summary: `updated expected ${  bridgeSymbol  } bridge credit to ${  observedIncrease.toFixed(8)}`
     };
 }
 
+/** @param {import("../script_utils.js").Cli} cli @param {import("./exchange_recovery_trade_common.js").TradeContext} tradeContext @param {import("./exchange_recovery_trade_common.js").ExchangeApi | null} exchangeApi @param {string} bridgeSymbol @returns {Promise<number>} */
 async function resolveCurrentBalance(cli, tradeContext, exchangeApi, bridgeSymbol) {
     const explicit = cli.get("current-balance");
     if (explicit !== null) return asFiniteNumber(explicit, "Invalid --current-balance value");
@@ -90,9 +92,11 @@ async function resolveCurrentBalance(cli, tradeContext, exchangeApi, bridgeSymbo
     return await getExchangeBalance(exchangeApi, exchange, bridgeSymbol);
 }
 
+/** @param {import("../script_utils.js").Cli} cli @param {import("../types/runtime").DatabaseRuntime} database @returns {Promise<import("./exchange_recovery_preview_common.js").FixPlan>} */
 async function buildFixPlan(cli, database) {
-    const tradeContext = database.getCache("altblock_exchange_trade");
-    if (tradeContext === false) throw new Error("altblock_exchange_trade is not found; this script only supports the refactored runtime");
+    const cachedContext = database.getCache("altblock_exchange_trade");
+    const tradeContext = requireTradeContext(cachedContext);
+    if (cachedContext === false) throw new Error("altblock_exchange_trade is not found; this script only supports the refactored runtime");
     const bridgeSymbol = getBridgeSymbol(tradeContext);
     const exchangeApi = loadExchangeApiIfNeeded(cli, ["current-balance"]);
     const currentBalance = await resolveCurrentBalance(cli, tradeContext, exchangeApi, bridgeSymbol);
