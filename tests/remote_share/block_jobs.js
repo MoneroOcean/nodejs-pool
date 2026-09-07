@@ -1064,6 +1064,45 @@ test("lmdb pending job polling stops cursor after due job limit", () => {
     }
 });
 
+test("lmdb pending job polling removes malformed rows without invoking coin RPC", () => {
+    const restore = installRemoteShareGlobals();
+    const { database, stores } = createPendingJobDatabase();
+    let headerLookupCalls = 0;
+    global.coinFuncs = {
+        getBlockHeaderByHash() {
+            headerLookupCalls += 1;
+        },
+        PORT2COIN() {
+            return "XMR";
+        },
+        PORT2COIN_FULL() {
+            return "XMR";
+        }
+    };
+
+    const pendingJobs = createPendingJobs({
+        database,
+        logger: { log() {} }
+    });
+
+    try {
+        stores.namedDbs.get("pending_blocks").set("block:bad", JSON.stringify({
+            type: "block",
+            blockId: 1,
+            payload: "not-base64",
+            nextAttemptAt: 0
+        }));
+
+        pendingJobs.processDueJobs();
+
+        assert.equal(headerLookupCalls, 0);
+        assert.equal(stores.namedDbs.get("pending_blocks").has("block:bad"), false);
+    } finally {
+        pendingJobs.close();
+        restore();
+    }
+});
+
 test("pending block jobs back off retries and cap the delay", () => {
     const restore = installRemoteShareGlobals();
     const { database } = createPendingJobDatabase();
