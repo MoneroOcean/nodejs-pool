@@ -178,6 +178,67 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("balance moves commit atomically and reject stale or reserved balances", async function testAtomicBalanceMove() {
+        const originalMysql = global.mysql;
+        const originalSupport = global.support;
+        for (const scenario of ["success", "credit failure", "source changed", "destination reserved", "unsafe total"]) {
+            let balances = {
+                old: { amount: scenario === "source changed" ? 11 : 10, pending_batch_id: null },
+                new: { amount: scenario === "unsafe total" ? Number.MAX_SAFE_INTEGER : 20, pending_batch_id: scenario === "destination reserved" ? 1 : null }
+            };
+            const before = JSON.parse(JSON.stringify(balances));
+            const events = [];
+            let pending;
+            global.mysql = {
+                async getConnection() {
+                    return {
+                        async beginTransaction() { pending = JSON.parse(JSON.stringify(balances)); events.push("begin"); },
+                        async query(sql, params) {
+                            if (sql.startsWith("SELECT")) {
+                                assert.match(sql, /FOR UPDATE$/);
+                                return [{ ...pending[params[0]] }];
+                            }
+                            if (sql.includes("amount = 0")) pending.old.amount = 0;
+                            else {
+                                if (scenario === "credit failure") throw new Error("credit failed");
+                                pending.new.amount += params[0];
+                            }
+                            return { affectedRows: 1 };
+                        },
+                        async commit() { balances = pending; events.push("commit"); },
+                        async rollback() { events.push("rollback"); },
+                        release() { events.push("release"); }
+                    };
+                }
+            };
+            global.support = { coinToDecimal: Number };
+            const plan = {
+                oldWhere: { clause: "payment_address = ?", params: ["old"] },
+                newWhere: { clause: "payment_address = ?", params: ["new"] },
+                oldAmount: 10,
+                newRow: { amount: before.new.amount },
+                async selectBalance(where) { return [{ ...balances[where.params[0]] }]; }
+            };
+            try {
+                await withCapturedConsole(async () => {
+                    if (scenario === "success") await moveBalance.applyBalanceMovePlan(plan);
+                    else await assert.rejects(moveBalance.applyBalanceMovePlan(plan));
+                });
+                if (scenario === "success") {
+                    assert.equal(balances.old.amount, 0);
+                    assert.equal(balances.new.amount, 30);
+                    assert.deepEqual(events, ["begin", "commit", "release"]);
+                } else {
+                    assert.deepEqual(balances, before);
+                    assert.deepEqual(events, ["begin", "rollback", "release"]);
+                }
+            } finally {
+                global.mysql = originalMysql;
+                global.support = originalSupport;
+            }
+        }
+    });
+
     test("CLI integer arguments reject missing, fractional and out-of-range values", async function testIntegerArgs() {
         const cli = require("../script_utils.js")();
         cli.argv.port = "18081";

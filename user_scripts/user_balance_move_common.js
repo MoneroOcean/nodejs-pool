@@ -1,6 +1,7 @@
 "use strict";
 
 const accountUtils = require("../script_account_utils.js");
+const createTransactionRunner = require("../lib/common/mysql_transaction.js");
 
 /** @typedef {{force?: boolean, confirmForceMove?: boolean, requireStaleBalance?: boolean, delayMs?: number}} MoveOptions */
 /** @typedef {{amount: number | string, last_edited: string, pending_batch_id?: number | string | null}} BalanceRow */
@@ -60,7 +61,7 @@ async function buildBalanceMovePlan(oldUser, newUser, options) {
     }
     const oldRow = rows[0];
     const oldAmount = Number(oldRow.amount);
-    if (!Number.isFinite(oldAmount) || oldAmount < 0) {
+    if (!Number.isSafeInteger(oldAmount) || oldAmount < 0) {
         console.error("Source user has invalid balance amount");
         process.exit(1);
     }
@@ -86,10 +87,36 @@ async function buildBalanceMovePlan(oldUser, newUser, options) {
 
 /** @param {MovePlan} plan @returns {Promise<void>} */
 async function applyBalanceMovePlan(plan) {
-    await global.mysql.query(`UPDATE balance SET amount = 0 WHERE ${  plan.oldWhere.clause}`, plan.oldWhere.params);
-    console.log(`Executed SQL: UPDATE balance SET amount = 0 WHERE ${  plan.oldWhere.clause}`);
-    await global.mysql.query(`UPDATE balance SET amount = amount + ? WHERE ${  plan.newWhere.clause}`, [plan.oldAmount, ...plan.newWhere.params]);
-    console.log(`Executed SQL: UPDATE balance SET amount = amount + ? WHERE ${  plan.newWhere.clause}`);
+    const withTransaction = createTransactionRunner(global.mysql, "Balance moves require a transactional MySQL connection");
+    await withTransaction(async function moveLockedBalances(connection) {
+        /** @type {BalanceRow[]} */
+        const sourceRows = await connection.query(`SELECT * FROM balance WHERE ${plan.oldWhere.clause} FOR UPDATE`, plan.oldWhere.params);
+        /** @type {BalanceRow[]} */
+        const destinationRows = await connection.query(`SELECT * FROM balance WHERE ${plan.newWhere.clause} FOR UPDATE`, plan.newWhere.params);
+        const source = sourceRows[0];
+        const destination = destinationRows[0];
+        if (sourceRows.length !== 1 || destinationRows.length !== 1 || !source || !destination) {
+            throw new Error("Balance rows changed since preview; refusing to move funds");
+        }
+        if (source.pending_batch_id != null || destination.pending_batch_id != null) {
+            throw new Error("A balance is reserved by a pending payment batch; refusing to move funds");
+        }
+        const sourceAmount = Number(source.amount);
+        const destinationAmount = Number(destination.amount);
+        if (!Number.isSafeInteger(sourceAmount) || sourceAmount < 0 ||
+            !Number.isSafeInteger(destinationAmount) || destinationAmount < 0 ||
+            !Number.isSafeInteger(sourceAmount + destinationAmount) ||
+            sourceAmount !== plan.oldAmount || destinationAmount !== Number(plan.newRow.amount)) {
+            throw new Error("Balance amounts changed or are invalid; create a fresh move preview");
+        }
+        // Both updates use the same locked connection: a failed credit must never
+        // leave the source cleared, and a payout cannot reserve either row mid-move.
+        /** @type {{affectedRows: number}} */
+        const debit = await connection.query(`UPDATE balance SET amount = 0 WHERE ${plan.oldWhere.clause}`, plan.oldWhere.params);
+        /** @type {{affectedRows: number}} */
+        const credit = await connection.query(`UPDATE balance SET amount = amount + ? WHERE ${plan.newWhere.clause}`, [sourceAmount, ...plan.newWhere.params]);
+        if (debit.affectedRows !== 1 || credit.affectedRows !== 1) throw new Error("Balance update did not match exactly one account");
+    });
 
     const [sourceRow] = await plan.selectBalance(plan.oldWhere);
     const [destinationRow] = await plan.selectBalance(plan.newWhere);
