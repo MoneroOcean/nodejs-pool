@@ -14,6 +14,22 @@ function clearObject(target) {
 }
 
 test.describe("pool components: runtime", { concurrency: false }, () => {
+test("pool state preserves coin helper receiver when formatting a port", () => {
+    const originalCoinFuncs = global.coinFuncs;
+    try {
+        global.coinFuncs = {
+            coinName: "XMR",
+            PORT2COIN_FULL(port) {
+                return `${this.coinName}:${  port}`;
+            }
+        };
+        const stateTools = createPoolState();
+        assert.equal(stateTools.formatCoinPort("", 18081), "XMR:18081/18081");
+    } finally {
+        global.coinFuncs = originalCoinFuncs;
+    }
+});
+
 test("missing rpc id warnings are summarized instead of logged on every malformed request", () => {
     const originalConfig = global.config;
     const originalWarn = console.warn;
