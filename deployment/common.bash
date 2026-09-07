@@ -38,10 +38,17 @@ configure_journald_retention() {
   install -d -m 755 /etc/systemd/journald.conf.d
   cat >/etc/systemd/journald.conf.d/90-moneroocean-retention.conf <<'EOF'
 [Journal]
+MaxRetentionSec=30day
+MaxFileSec=1day
+RuntimeMaxUse=100M
+RuntimeMaxFileSize=10M
 SystemMaxUse=100M
 SystemKeepFree=1G
 SystemMaxFileSize=10M
 EOF
+  systemctl restart systemd-journald
+  timeout 30s journalctl --rotate || true
+  timeout 30s journalctl --vacuum-time=30d --vacuum-size=100M || true
 }
 
 configure_needrestart_pm2_guard() {

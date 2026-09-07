@@ -47,6 +47,7 @@ test("deployment entrypoints have valid shell syntax and production-safe shebang
         assert.equal(syntax.status, 0, `${entrypoint}: ${syntax.stderr}`);
         const source = fs.readFileSync(scriptPath, "utf8");
         assert.match(source, /COMMON_BASH_URL=/, `${entrypoint} should load the shared helper`);
+        assert.match(source, /configure_journald_retention/, `${entrypoint} should apply journald retention`);
         assert.doesNotMatch(source.split("\n", 1)[0], /bash.*-[^ ]*x/, `${entrypoint} shebang must not enable xtrace`);
     }
 });
@@ -60,6 +61,25 @@ test("common deployment helper exposes the versioned source-only API", () => {
     ].join(" && ");
     const result = runBash(["-c", command]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("common deployment helper bounds journald retention and applies it", () => {
+    const source = fs.readFileSync(COMMON_PATH, "utf8");
+    const start = source.indexOf("configure_journald_retention() {");
+    const end = source.indexOf("\n}\n", start);
+    assert.ok(start >= 0 && end > start, "journald helper should be present");
+    const helper = source.slice(start, end);
+    for (const directive of [
+        "MaxRetentionSec=30day", "MaxFileSec=1day", "RuntimeMaxUse=100M",
+        "RuntimeMaxFileSize=10M", "SystemMaxUse=100M", "SystemKeepFree=1G",
+        "SystemMaxFileSize=10M"
+    ]) assert.match(helper, new RegExp(`^${directive}$`, "m"));
+    assert.match(helper, /systemctl restart systemd-journald/);
+    assert.match(helper, /journalctl --rotate/);
+    assert.match(helper, /journalctl --vacuum-time=30d --vacuum-size=100M/);
+    for (const entrypoint of ENTRYPOINTS) {
+        assert.match(fs.readFileSync(path.join(DEPLOYMENT_DIR, entrypoint), "utf8"), /^configure_journald_retention$/m);
+    }
 });
 
 test("entrypoints can load the sibling helper without executing deployment", () => {
