@@ -1,6 +1,15 @@
 "use strict";
 const SAFE_SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** @typedef {{address: string, paymentId: string | null}} Account */
+/** @typedef {{clause: string, params: string[]}} PaymentWhere */
+
+/**
+ * Validate the CLI account once; internal accounts always have a definite
+ * address and use null for the absence of a payment ID.
+ * @param {unknown} user
+ * @returns {Account}
+ */
 function splitUser(user) {
     if (typeof user !== "string" || user.length === 0) throw new Error("User must be a non-empty string");
     const parts = user.split(".");
@@ -15,15 +24,17 @@ function splitUser(user) {
     };
 }
 
+/** @param {unknown} user @returns {Account} */
 function splitUserOrExit(user) {
     try {
         return splitUser(user);
     } catch (error) {
-        console.error(error.message || String(error));
+        console.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
     }
 }
 
+/** @param {Account} account @param {boolean} allowEmptyPaymentId @returns {PaymentWhere} */
 function paymentWhere(account, allowEmptyPaymentId) {
     if (account.paymentId !== null) {
         return {
@@ -39,28 +50,34 @@ function paymentWhere(account, allowEmptyPaymentId) {
     };
 }
 
+/** @param {string} name */
 function sqlTable(name) {
     if (!SAFE_SQL_NAME.test(name)) throw new Error(`Unsafe SQL table name: ${  name}`);
     return `\`${  name  }\``;
 }
 
+/** @param {string | null} paymentId */
 function formatPaymentId(paymentId) { return paymentId === null ? "(none)" : paymentId; }
 
+/** @param {string} label @param {Account} account */
 function logUser(label, account) {
     console.log(`${label  }Address: ${  account.address}`);
     console.log(`${label  }Payment ID: ${  formatPaymentId(account.paymentId)}`);
 }
 
+/** @param {string} user @param {(key: string) => void} iterator */
 function forEachCacheKey(user, iterator) {
     [user, `stats:${  user}`, `history:${  user}`, `identifiers:${  user}`].forEach(iterator);
 }
 
+/** @param {string} user */
 function logCacheKeys(user) {
     forEachCacheKey(user, function (key) {
         if (global.database.getCache(key) !== false) console.log(`Existing LMDB cache key: ${  key}`);
     });
 }
 
+/** @param {string} user */
 function deleteCacheKeys(user) {
     const txn = global.database.env.beginTxn();
     try {
