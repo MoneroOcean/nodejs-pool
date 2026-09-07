@@ -178,6 +178,15 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("CLI parser preserves positional arrays and rejects reserved option names", function testCliMetadata() {
+        const parseArgv = require("../parse_args.js");
+        assert.deepEqual(parseArgv(["--depth", "10", "--", "block"], { "--": true }), {
+            _: [], "--": ["block"], depth: "10"
+        });
+        assert.deepEqual(parseArgv(["--clear"]), { _: [], clear: true });
+        assert.throws(() => parseArgv(["--_=value"]), /Reserved option name/);
+    });
+
     test("share dumps release readers when decoding fails", function testShareDumpCleanup() {
         const dumpShares = require("../manage_scripts/share_dump_common.js");
         const originals = { database: global.database, coinFuncs: global.coinFuncs, protos: global.protos };
