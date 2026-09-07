@@ -45,7 +45,7 @@ WWW_DNS="${WWW_DNS:-moneroocean.stream}"
 API_DNS="${API_DNS:-api.moneroocean.stream}"
 CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN:-n/a}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-support@moneroocean.stream}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.7.0-pre.3}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v5.6.0}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
@@ -116,7 +116,7 @@ Unattended-Upgrade::Package-Blacklist {
 EOF
 }
 
-TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-$(default_tari_memory_high)}"
+TARI_MEMORY_HIGH="${TARI_MEMORY_HIGH:-10G}"
 TARI_MEMORY_SWAP_MAX="${TARI_MEMORY_SWAP_MAX:-768M}"
 TARI_MM_MEMORY_HIGH="${TARI_MM_MEMORY_HIGH:-1200M}"
 TARI_MM_MEMORY_SWAP_MAX="${TARI_MM_MEMORY_SWAP_MAX:-384M}"
