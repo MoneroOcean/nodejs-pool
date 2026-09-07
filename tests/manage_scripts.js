@@ -178,6 +178,42 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("altblock edits close the cursor before committing or aborting", function testAltblockEditCleanup() {
+        const updateAltBlocks = require("../manage_scripts/altblock_update_common.js");
+        const originalDatabase = global.database;
+        const originalProtos = global.protos;
+        for (const fail of [false, true]) {
+            const events = [];
+            global.database = {
+                env: { beginTxn() { return {
+                    putBinary() { events.push("write"); },
+                    commit() { events.push("commit"); },
+                    abort() { events.push("abort"); }
+                }; } },
+                lmdb: { Cursor: class {
+                    goToFirst() { return 0; }
+                    goToNext() { return null; }
+                    getCurrentBinary(iterator) { iterator(0, {}); }
+                    close() { events.push("close"); }
+                } }
+            };
+            global.protos = { AltBlock: { decode() { return { hash: "block" }; }, encode(block) { return block; } } };
+            try {
+                captureConsole("log", () => {
+                    const run = () => updateAltBlocks(["block"], () => {
+                        if (fail) throw new Error("mutation failed");
+                    });
+                    if (fail) assert.throws(run, /mutation failed/);
+                    else assert.equal(run(), 1);
+                });
+                assert.deepEqual(events, fail ? ["close", "abort"] : ["write", "close", "commit"]);
+            } finally {
+                global.database = originalDatabase;
+                global.protos = originalProtos;
+            }
+        }
+    });
+
     test("CLI iterators include key zero and release readers on failures", function testCliReaderCleanup() {
         const cli = require("../script_utils.js")();
         const originalDatabase = global.database;
