@@ -178,6 +178,60 @@ function installAccountGlobals(options) {
 }
 
 test.describe("manage_scripts", { concurrency: false }, function suite() {
+    test("user deletion revalidates balances and commits SQL before cache cleanup", async function testAtomicUserDelete() {
+        const originalMysql = global.mysql;
+        const originalDatabase = global.database;
+        for (const scenario of ["success", "delete failure", "changed", "reserved"]) {
+            const events = [];
+            let sqlDeleted = false;
+            global.mysql = {
+                async getConnection() {
+                    return {
+                        async beginTransaction() { events.push("begin"); },
+                        async query(sql) {
+                            if (sql.startsWith("SELECT")) {
+                                assert.match(sql, /FOR UPDATE$/);
+                                return [{ amount: scenario === "changed" ? 6 : 5, pending_batch_id: scenario === "reserved" ? 1 : null }];
+                            }
+                            if (scenario === "delete failure" && sql.startsWith("DELETE FROM payments")) throw new Error("delete failed");
+                            return { affectedRows: 1 };
+                        },
+                        async commit() { sqlDeleted = true; events.push("sql-commit"); },
+                        async rollback() { events.push("rollback"); },
+                        release() { events.push("release"); }
+                    };
+                }
+            };
+            global.database = {
+                getCache() { return {}; },
+                env: { beginTxn() {
+                    assert.equal(sqlDeleted, true);
+                    events.push("cache-begin");
+                    return { del() {}, commit() { events.push("cache-commit"); } };
+                } }
+            };
+            const plan = {
+                user: "wallet",
+                where: { clause: "payment_address = ?", params: ["wallet"] },
+                balanceRows: [{ amount: 5, pending_batch_id: null }],
+                extraRows: []
+            };
+            try {
+                await withCapturedConsole(async () => {
+                    if (scenario === "success") await runUserDelete.applyUserDeletePlan(plan);
+                    else await assert.rejects(runUserDelete.applyUserDeletePlan(plan));
+                });
+                assert.equal(sqlDeleted, scenario === "success");
+                assert.deepEqual(events, scenario === "success"
+                    ? ["begin", "sql-commit", "release", "cache-begin", "cache-commit"]
+                    : ["begin", "rollback", "release"]);
+            } finally {
+                global.mysql = originalMysql;
+                global.database = originalDatabase;
+            }
+        }
+    });
+
     test("recovery calculations reject missing and non-numeric balances", async function testRecoveryNumbers() {
         const { asFiniteNumber, getExchangeBalance } = require("../manage_scripts/exchange_recovery_trade_common.js");
         assert.equal(asFiniteNumber("1.25", "invalid"), 1.25);

@@ -1,5 +1,6 @@
 "use strict";
 const accountUtils = require("../script_account_utils.js");
+const createTransactionRunner = require("../lib/common/mysql_transaction.js");
 
 /** @typedef {{force?: boolean, confirmForceDelete?: boolean, requireStaleBalance?: boolean, delayMs?: number, extraTables?: string[]}} DeleteOptions */
 /** @typedef {Awaited<ReturnType<typeof buildUserDeletePlan>>} DeletePlan */
@@ -100,26 +101,29 @@ async function buildUserDeletePlan(user, options) {
 
 /** @param {DeletePlan} plan @returns {Promise<void>} */
 async function applyUserDeletePlan(plan) {
-    /** @param {string} table @returns {Promise<unknown>} */
-    const deleteRows = function deleteRows(table) {
-        return global.mysql.query(`DELETE FROM ${  table  } WHERE ${  plan.where.clause}`, plan.where.params);
-    };
+    const withTransaction = createTransactionRunner(global.mysql, "User deletion requires a transactional MySQL connection");
+    await withTransaction(async function deleteLockedAccount(connection) {
+        /** @type {import("../user_scripts/user_balance_move_common.js").BalanceRow[]} */
+        const balances = await connection.query(`SELECT * FROM balance WHERE ${plan.where.clause} FOR UPDATE`, plan.where.params);
+        const current = balances[0] ?? null;
+        const preview = plan.balanceRows[0] ?? null;
+        if (balances.length !== plan.balanceRows.length ||
+            (current && (current.pending_batch_id != null || !preview || Number(current.amount) !== Number(preview.amount)))) {
+            throw new Error("Balance changed or became reserved since preview; refusing to delete user");
+        }
+        await connection.query("DELETE FROM users WHERE username = ?", [plan.user]);
+        /** @type {{affectedRows: number}} */
+        const deletedBalance = await connection.query(`DELETE FROM balance WHERE ${plan.where.clause}`, plan.where.params);
+        if (deletedBalance.affectedRows !== balances.length) throw new Error("Balance rows changed during user deletion");
+        for (const table of ["payments", ...plan.extraRows.map((entry) => entry.sql)]) {
+            await connection.query(`DELETE FROM ${table} WHERE ${plan.where.clause}`, plan.where.params);
+        }
+    });
+    console.log(`Deleted SQL rows for ${plan.user}`);
 
-    const user = plan.user;
-    await global.mysql.query("DELETE FROM users WHERE username = ?", [user]);
-    console.log(`Executed SQL: DELETE FROM users WHERE username = ${  user}`);
-    await deleteRows("balance");
-    console.log(`Executed SQL: DELETE FROM balance WHERE ${  plan.where.clause}`);
-    await deleteRows("payments");
-    console.log(`Executed SQL: DELETE FROM payments WHERE ${  plan.where.clause}`);
-
-    for (const table of plan.extraRows) {
-        await deleteRows(table.sql);
-        console.log(`Executed SQL: DELETE FROM ${  table.name  } WHERE ${  plan.where.clause}`);
-    }
-
+    // LMDB is a separate store: clean its derived cache only after SQL commits.
     console.log("Deleting LMDB cache keys...");
-    accountUtils.deleteCacheKeys(user);
+    accountUtils.deleteCacheKeys(plan.user);
     console.log("Done.");
 }
 
