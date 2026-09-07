@@ -1153,3 +1153,19 @@ test("blob helpers preserve special nonce sizes, proof sizes, and wire names for
     assert.equal(coinFuncs.algoShortTypeStr(18146), "rx/0");
 });
 });
+
+
+test("Ergo reward validation rejects malformed outputs and unsafe totals", () => {
+    const { calcErgReward } = require("../../../lib/coins/helpers.js");
+    const height = 100;
+    const emission = { outputs: [{}, { creationHeight: height, value: 15e9, assets: [
+        { tokenId: "d9a2cc8a09abfaed87afacfbb7daee79a6b26f10c6613fc13d3f3953e5521d1a", amount: 12e9 }
+    ] }] };
+    assert.equal(calcErgReward(height, [emission]), 3e9);
+    for (const transactions of [undefined, [], [null], [{ outputs: [null, null] }], [emission, null],
+        [emission, { outputs: [null] }],
+        [emission, { outputs: [{ creationHeight: height, value: Number.MAX_SAFE_INTEGER }] }]]) {
+        assert.equal(calcErgReward(height, transactions), null);
+    }
+    assert.equal(calcErgReward(height, [emission, { outputs: [{ creationHeight: height, value: 100 }] }]), 3e9 + 100);
+});
