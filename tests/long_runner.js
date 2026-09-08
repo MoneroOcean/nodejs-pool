@@ -357,6 +357,30 @@ test("cleanCacheDB ignores MDB_NOTFOUND when a queued key disappears before dele
     assert.equal(state.cacheStore.has(`stats:${  worker}`), false);
 });
 
+test("cleanup aborts read transactions when cursor construction or close fails", () => {
+    for (const failure of ["construct", "close"]) {
+        createFakeEnvironment();
+        const events = [];
+        global.database.env.beginTxn = () => ({ abort() { events.push("abort"); } });
+        global.database.lmdb.Cursor = class {
+            constructor() { if (failure === "construct") throw new Error(failure); }
+            goToFirst() { return null; }
+            close() { events.push("close"); throw new Error(failure); }
+        };
+        assert.throws(() => loadLongRunner().cleanCacheDB(), new RegExp(failure));
+        assert.deepEqual(events, failure === "construct" ? ["abort"] : ["close", "abort"]);
+    }
+});
+
+test("altblock cleanup visits numeric key zero", () => {
+    const harness = createFakeEnvironment({
+        altblockEntries: [[0, { port: 18081, timestamp: 0, unlocked: true }]]
+    });
+    loadLongRunner().cleanAltBlockDB();
+    assert.equal(harness.altblockStore.size, 0);
+    assert.equal(harness.env.writeCommits, 1);
+});
+
 test("cleanCacheDB yields identical results when the scan spans multiple chunks", () => {
     const now = Date.now();
     const address = "4".repeat(95);
