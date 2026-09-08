@@ -286,6 +286,8 @@ test("template manager rotates templates and notifies miners through the right u
     };
     function TestBlockTemplate(template) {
         Object.assign(this, template);
+        this.nextBlobHex = () => "00";
+        this.nextBlobWithChildNonceHex = () => "00";
     }
 
     global.coinFuncs = {
@@ -448,6 +450,8 @@ test("template manager preserves identical templates and accepts time-only recov
 
     function TestBlockTemplate(template) {
         Object.assign(this, template);
+        this.nextBlobHex = () => "00";
+        this.nextBlobWithChildNonceHex = () => "00";
         this.extraNonce = 0;
         this.extraNonce2 = 0;
     }
