@@ -817,6 +817,26 @@ test("wallet reward selectors stay on the coin profiles for asset-aware chains",
     }), 7);
 });
 
+test("wallet reward lookup rejects absent and coercible non-numeric amounts", async () => {
+    const rpc = global.coinFuncs.__realCoinFuncs.getRpcSettings("");
+    for (const amount of [undefined, null, false, "", [], {}]) {
+        const result = await new Promise(resolve => rpc.getAnyBlockHeaderByHash({
+            blockHash: "hash", isOurBlock: true, port: MAIN_PORT,
+            callback: (error, header) => resolve({ error, header }),
+            runtime: { support: {
+                rpcPortDaemon(_port, _method, _params, callback) {
+                    callback({ result: { miner_tx_hash: "tx", block_header: { hash: "hash", height: 1, difficulty: 10, reward: 25 }, json: JSON.stringify({ miner_tx: { vout: [{ amount: 25 }] } }) } });
+                },
+                rpcPortWalletShort(_port, _method, _params, callback) {
+                    callback({ result: { transfer: { amount } } });
+                }
+            } }
+        }));
+        assert.equal(result.error, true);
+        assert.equal(result.header.errorSource, "wallet_reward_lookup");
+    }
+});
+
 test("cryptonote wallet reward lookup errors keep wallet source markers", async () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const rpc = coinFuncs.getRpcSettings("");
