@@ -26,13 +26,20 @@ export interface ProfileRuntime {
     blockTemplate: typeof import("node-blocktemplate");
     powHash: typeof import("node-powhash");
     support: SupportRuntime;
-    coinFuncs: Pick<CoinRuntime, "getPortAnyBlockHeaderByHash" | "getPortBlockHeaderByID" | "getPortBlockTemplate">;
+    coinFuncs: ProfileCoinFuncs;
     getPoolAddress(profile: CoinProfile): string;
     mmPortSet: Record<string, number>;
     mmNonceSize: number;
     poolNonceSize: number;
     toBuffer: typeof import("../lib/coins/helpers").toBuffer;
-    owner: {lastBlockCache?: Record<string, {hash: string, header: BlockHeader}>};
+    owner: {lastBlockCache?: Record<string, {hash: string, header: RawBlockHeader}>};
+}
+
+export type RawCoinCallback = (error: unknown, body?: RawBlockHeader) => void;
+export interface ProfileCoinFuncs {
+    getPortAnyBlockHeaderByHash(port: number, hash: string | Buffer, isOurBlock: boolean, callback: RpcCallback, noErrorReport?: boolean): void;
+    getPortBlockHeaderByID(port: number, blockId: number | string, callback: RpcCallback, noErrorReport?: boolean): void;
+    getPortBlockTemplate(port: number, callback: RpcCallback, noErrorReport?: boolean): void;
 }
 export interface BlobSettings {
     nonceSize: number;
@@ -66,6 +73,7 @@ export interface WalletTransfer {
     amounts?: number[];
 }
 export interface RpcSettings {
+    [method: string]: unknown;
     addressCoin?: string;
     headerRewardMode?: string;
     unlockConfirmationDepth?: number;
@@ -84,8 +92,62 @@ export interface RpcSettings {
     fixedUncleReward?: boolean;
     callbackTimeoutMs?: number;
     lastHeaderMmCoin?: string;
-    selectWalletTransferReward?(context: {transfer: WalletTransfer, transfers: WalletTransfer[]}): number | undefined;
+    selectWalletTransferReward?(context: {body: RpcRecord, rewardCheck: number, runtime: ProfileRuntime, transfer: WalletTransfer, transfers: WalletTransfer[]}): number | undefined;
     createBlockTemplate?(api: typeof import("node-blocktemplate"), result: Record<string, unknown>, poolAddress: string): BlockTemplateRecord;
+    getBlockHeaderById?(context: BlockHeaderRpcContext): unknown;
+    getAnyBlockHeaderByHash?(context: BlockHashRpcContext): unknown;
+    getLastBlockHeader?(context: RpcContext): unknown;
+    getBlockTemplate?(context: RpcContext): unknown;
+    enrichLastBlockHeader?(context: HeaderEnrichmentRpcContext): unknown;
+}
+
+export interface RpcRecord {
+    [key: string]: unknown;
+}
+
+export interface RawEthTransaction {
+    hash: string;
+    gasPrice: string;
+}
+
+export interface RawEthReceipt {
+    result: {gasUsed: string, transactionHash: string};
+}
+
+/** Raw daemon data is validated by each adapter before entering pool logic. */
+export interface RawBlockHeader extends RpcRecord {
+    hash?: string;
+    id?: string;
+    height?: number | string | null;
+    difficulty?: number | string | null;
+    reward?: number | string | null;
+    timestamp?: number | string | null;
+    time?: number | string | null;
+    mediantime?: number | string | null;
+    confirmations?: number | string | null;
+    uncles?: string[];
+    error?: unknown;
+}
+
+export type RpcCallback = (first: unknown, second?: unknown) => unknown;
+export type RawReplyCallback = RpcCallback;
+
+export interface RpcContext {
+    callback: RpcCallback;
+    noErrorReport?: boolean;
+    port: number;
+    profile: CoinProfile;
+    runtime: ProfileRuntime;
+}
+export interface BlockHeaderRpcContext extends RpcContext {
+    blockId: number | string;
+}
+export interface BlockHashRpcContext extends RpcContext {
+    blockHash: string;
+    isOurBlock: boolean;
+}
+export interface HeaderEnrichmentRpcContext extends RpcContext {
+    header: RawBlockHeader;
 }
 export interface CoinProfileSpec {
     port: number;
@@ -101,7 +163,7 @@ export interface CoinProfileSpec {
     rpc?: RpcSettings;
     template?: TemplateSettings;
     perf?: PerformanceSettings;
-    pool?: Record<string, unknown>;
+    pool?: Partial<import("./pool_profiles").PoolProfileSettings>;
     mergedMining?: {childPort: number};
     minerAlgoAliases?: Record<string, string[]>;
     network?: Record<string, {prefix: number, subPrefix: number, intPrefix: number}>;
@@ -118,7 +180,7 @@ export interface CoinProfile extends CoinProfileSpec {
     rpc: RpcSettings;
     template: TemplateSettings;
     perf: PerformanceSettings;
-    pool: Record<string, unknown>;
+    pool: Partial<import("./pool_profiles").PoolProfileSettings>;
 }
 
 export type ProfileInput = Pick<CoinProfileSpec, "port" | "coin"> & Partial<CoinProfileSpec>;
@@ -139,8 +201,6 @@ export type EthRewardBlock = import("../lib/coins/helpers").EthRewardBlock & {
     height?: number;
     confirmations?: number;
 }
-export type RawReplyCallback = (error: unknown, body: unknown) => void;
-
 export interface BlockTemplateInput extends Record<string, unknown> {
     port: number;
     height: number;
