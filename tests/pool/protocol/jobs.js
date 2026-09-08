@@ -742,6 +742,18 @@ test("login normalizes undefined options and rejects malformed field types witho
     }
 });
 
+test("inherited object names are rejected as unknown RPC methods", async () => {
+    const { runtime } = await startHarness();
+    try {
+        for (const method of ["constructor", "toString", "__proto__"]) {
+            const reply = invokePoolMethod({ socket: {}, method, params: {} });
+            assert.deepEqual(reply.finals, [{ error: "Unknown RPC method", timeout: undefined }]);
+        }
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("unauthenticated getjob, submit, and keepalive requests are rejected", async () => {
     const { runtime } = await startHarness();
 
