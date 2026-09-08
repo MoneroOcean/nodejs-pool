@@ -1231,6 +1231,15 @@ test("remote verifier failures release timers and route the next share to a heal
     sockets[1].emit("end");
     assert.equal(timers.size, 0);
     assert.deepEqual(results[1], ["ab".repeat(32), undefined]);
+    coin.slowHashAsync(Buffer.alloc(32), template, "miner", (...args) => results.push(args));
+    sockets[2].emit("data", Buffer.from(JSON.stringify({ result: ["ab", "cd"] })));
+    sockets[2].emit("end");
+    assert.deepEqual(Array.from(results[2][0]), ["ab", "cd"]);
+    coin.slowHashAsync(Buffer.alloc(32), template, "miner", (...args) => results.push(args));
+    sockets[3].emit("data", Buffer.from(JSON.stringify({ result: { invalid: true } })));
+    sockets[3].emit("end");
+    assert.deepEqual(results[3], [false, "verify-host-error"]);
+    assert.equal(timers.size, 0);
 });
 
 
@@ -1264,4 +1273,16 @@ test("auxiliary chain lookup handles absent and malformed boundary objects", () 
     }
     const chain = { height: "100", difficulty: "200" };
     assert.equal(coin.getAuxChainXTM({ _aux: { chains: [chain] } }), chain);
+});
+
+
+test("local multi-hash results retain each hexadecimal hash", () => {
+    const coin = global.coinFuncs.__realCoinFuncs;
+    const original = coin.slowHashBuff;
+    coin.slowHashBuff = () => [Buffer.from("ab", "hex"), Buffer.from("cd", "hex")];
+    try {
+        assert.deepEqual(coin.slowHash(Buffer.alloc(0), {}), ["ab", "cd"]);
+    } finally {
+        coin.slowHashBuff = original;
+    }
 });
