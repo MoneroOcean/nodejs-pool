@@ -757,4 +757,28 @@ test.describe("support", { concurrency: false }, () => {
             restore();
         }
     });
+
+    test("getCoinHashFactor normalizes nonfinite database values", async () => {
+        const restore = installSupportGlobals();
+        const originalMysql = global.mysql;
+        const support = supportFactory();
+
+        async function readFactor(itemValue) {
+            global.mysql = {
+                query() {
+                    return Promise.resolve([{ item_value: itemValue }]);
+                }
+            };
+            return await new Promise((resolve) => support.getCoinHashFactor("TEST", resolve));
+        }
+
+        try {
+            assert.equal(await readFactor("NaN"), null);
+            assert.equal(await readFactor("Infinity"), null);
+            assert.equal(await readFactor("2.75"), 2.75);
+        } finally {
+            global.mysql = originalMysql;
+            restore();
+        }
+    });
 });
