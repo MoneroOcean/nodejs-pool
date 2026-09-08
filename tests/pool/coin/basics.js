@@ -137,6 +137,33 @@ test("getPortLastBlockHeaderMM labels merged-mining header failures", () => {
     }
 });
 
+test("XTM-T tip headers accept protobuf byte-array block hashes", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const originalRpcPortDaemon = global.support.rpcPortDaemon;
+    const rawHash = Array.from({ length: 32 }, (_value, index) => index);
+    let outcome = null;
+
+    try {
+        global.support.rpcPortDaemon = function rpcPortDaemon(port, method, params, callback) {
+            assert.equal(port, 18146);
+            assert.equal(method, "GetTipInfo");
+            assert.equal(params, null);
+            callback({ result: { metadata: { best_block_height: "1234", best_block_hash: rawHash } } });
+        };
+
+        coinFuncs.getPortLastBlockHeader(18146, (error, body) => {
+            outcome = { error, body };
+        });
+
+        assert.equal(outcome.error, null);
+        assert.equal(outcome.body.height, 1234);
+        assert.equal(outcome.body.hash, Buffer.from(rawHash).toString("hex"));
+        assert.equal(outcome.body.best_block_hash, Buffer.from(rawHash).toString("hex"));
+    } finally {
+        global.support.rpcPortDaemon = originalRpcPortDaemon;
+    }
+});
+
 test("BlockTemplate keeps main-template nonce layout stable across nextBlobHex calls", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const template = createBaseTemplate({
@@ -439,6 +466,43 @@ test("BTC-style block rewards only credit coinbase outputs paid to the pool addr
         cases.forEach(function clearAddress(entry) {
             delete global.config.pool[entry.addressKey];
         });
+    }
+});
+
+test("BTC-style block headers retain identity metadata during reward normalization", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
+    const block = {
+        hash: "rvn-header-hash",
+        height: 456,
+        time: 1700000000,
+        difficulty: 2,
+        tx: [{
+            vout: [{ value: 12.5, scriptPubKey: { addresses: ["RVN_POOL_ADDRESS"] } }]
+        }]
+    };
+
+    try {
+        global.support.rpcPortDaemon2 = function rpcPortDaemon2(port, method, params, callback) {
+            assert.equal(port, 8766);
+            assert.equal(method, "");
+            assert.deepEqual(params, { method: "getblock", params: ["rvn-header-hash", 2] });
+            callback({ result: block });
+        };
+
+        const outcome = await new Promise((resolve) => {
+            coinFuncs.getPortAnyBlockHeaderByHash(8766, "rvn-header-hash", false, (error, body) => {
+                resolve({ error, body });
+            });
+        });
+
+        assert.equal(outcome.error, null);
+        assert.equal(outcome.body.hash, block.hash);
+        assert.equal(outcome.body.height, block.height);
+        assert.equal(outcome.body.time, block.time);
+        assert.equal(outcome.body.reward, 1250000000);
+    } finally {
+        global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
     }
 });
 
