@@ -27,3 +27,41 @@ test("worker startup rejects invalid database IDs and exhausted extranonce capac
     }
 });
 
+test("replacement workers retain their logical ID when cluster IDs differ", () => {
+    const saved = {config: global.config, support: global.support, setInterval, setTimeout, log: console.log, error: console.error};
+    const workers = [];
+    const listeners = {};
+    const forkEnvironments = [];
+    const cluster = {
+        fork(env) {
+            forkEnvironments.push(env);
+            const worker = {id: 10 + workers.length, process: {pid: 100 + workers.length}, on() {}};
+            workers.push(worker);
+            return worker;
+        },
+        on(event, listener) { listeners[event] = listener; }
+    };
+    try {
+        global.config = {ports: [], worker_num: 1, daemon: {}, general: {adminEmail: "ops@example.com"}, bind_ip: "127.0.0.1", hostname: "test"};
+        global.support = {sendEmail() {}, sendAdminFyi() {}};
+        global.setInterval = () => null;
+        global.setTimeout = () => null;
+        console.log = () => {};
+        console.error = () => {};
+        const lifecycle = createLifecycle({
+            cluster, os: {cpus: () => [{}]}, net: {createServer: () => ({listen() {}})},
+            state: {threadName: "", minerCount: [], workerMinerCounts: {}, newCoinHashFactor: {}, lastCoinHashFactor: {}, lastCoinHashFactorMM: {}},
+            minerRegistry: {registerPool() {}}, templateManager: {templateUpdate() {}}, messageHandler() {}
+        });
+        lifecycle.startMaster();
+        listeners.exit(workers[0], 1, "");
+        assert.deepEqual(forkEnvironments, [{WORKER_ID: 1}, {WORKER_ID: 1}]);
+    } finally {
+        global.config = saved.config;
+        global.support = saved.support;
+        global.setInterval = saved.setInterval;
+        global.setTimeout = saved.setTimeout;
+        console.log = saved.log;
+        console.error = saved.error;
+    }
+});
