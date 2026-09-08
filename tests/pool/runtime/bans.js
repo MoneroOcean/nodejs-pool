@@ -402,4 +402,27 @@ test("retargetMiners updates miner counts and pushes a new job when difficulty c
         await runtime.stop();
     }
 });
+
+test("templateUpdate2 publishes valid templates without expected_reward", async () => {
+    const { runtime } = await startHarness();
+    const originalTemplateRpc = global.coinFuncs.getPortBlockTemplate;
+    const originalHasTemplateBlob = global.coinFuncs.hasTemplateBlob;
+    const template = createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "main-no-expected-reward", height: 450 });
+
+    try {
+        global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) { callback(template); };
+        global.coinFuncs.hasTemplateBlob = function hasTemplateBlob() { return true; };
+
+        poolModule.templateUpdate2("", MAIN_PORT, true, false, 1, false, {
+            height: 450,
+            hash: "main-no-expected-reward-header"
+        });
+
+        assert.equal(runtime.getState().activeBlockTemplates[""].idHash, "main-no-expected-reward");
+    } finally {
+        global.coinFuncs.getPortBlockTemplate = originalTemplateRpc;
+        global.coinFuncs.hasTemplateBlob = originalHasTemplateBlob;
+        await runtime.stop();
+    }
+});
 });
