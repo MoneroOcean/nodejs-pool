@@ -1286,3 +1286,20 @@ test("local multi-hash results retain each hexadecimal hash", () => {
         coin.slowHashBuff = original;
     }
 });
+
+test("ETH block lookup rejects incomplete header replies without scanning uncles", () => {
+    const coin = global.coinFuncs.__realCoinFuncs;
+    const original = global.support.rpcPortDaemon2;
+    try {
+        for (const reply of [null, {}, { result: {} }, { result: { number: "invalid", uncles: [] } }, { result: { number: "0x64", uncles: null } }]) {
+            let requests = 0;
+            let result = null;
+            global.support.rpcPortDaemon2 = (_port, _path, _request, callback) => { requests++; callback(reply); };
+            coin.ethBlockCheck(8645, "miner", "nonce", "latest", (...args) => { result = args; });
+            assert.deepEqual(result, [null, null]);
+            assert.equal(requests, 1);
+        }
+    } finally {
+        global.support.rpcPortDaemon2 = original;
+    }
+});

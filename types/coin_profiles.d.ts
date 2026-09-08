@@ -141,7 +141,7 @@ export type EthRewardBlock = import("../lib/coins/helpers").EthRewardBlock & {
 }
 export type RawReplyCallback = (error: unknown, body: unknown) => void;
 
-export interface BlockTemplateInput {
+export interface BlockTemplateInput extends Record<string, unknown> {
     port: number;
     height: number;
     difficulty: number;
@@ -176,3 +176,5 @@ export interface HashTemplate {
 export interface VerifyContext {nonce?: string; mixhash?: string}
 export type HexHashResult = string | string[] | false | null;
 export type BufferHashResult = Buffer | (Buffer | false | null)[] | false | null;
+
+export type EthBlockCallback = (hash: string | null, height?: number | null, profile?: CoinProfile | null) => void;
