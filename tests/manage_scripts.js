@@ -501,6 +501,44 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
+    test("RPC altblock edits wait until readers close and refuse uncertain validation", () => {
+        const vm = require("node:vm");
+        const helperSource = fs.readFileSync(path.join(__dirname, "..", "manage_scripts", "altblock_rpc_update.js"), "utf8");
+        for (const script of ["altblock_revalidate_from_rpc", "altblock_pay_ready_reset"]) {
+            for (const failed of [true, false]) {
+                let readerClosed = false;
+                let rpcCallback;
+                let writes = 0;
+                const block = { hash: "hash", port: 1, valid: false, unlocked: true, pay_ready: true };
+                const globals = {
+                    database: { role: "local", altblockDB: {} },
+                    protos: { AltBlock: { decode: value => value } },
+                    coinFuncs: { getPortBlockHeaderByHash(_port, _hash, callback) {
+                        assert.equal(readerClosed, true);
+                        rpcCallback = callback;
+                    } }
+                };
+                const cli = { arg: () => "hash", init: callback => callback(), forEachBinaryEntry(_db, callback) {
+                    callback(0, block);
+                    readerClosed = true;
+                } };
+                const context = { module: { exports: {} }, global: globals, console: { log() {}, error() {} }, process: { exit: code => { throw new Error(`exit:${code}`); } }, require(name) {
+                    if (name.endsWith("database.js")) return require("../lib/common/database.js");
+                    return (_hashes, mutate) => { writes += 1; mutate(block); return 1; };
+                } };
+                vm.runInNewContext(helperSource, context);
+                const helper = context.module.exports;
+                context.require = name => name.endsWith("altblock_rpc_update.js") ? helper : () => cli;
+                vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "manage_scripts", `${script}.js`), "utf8"), { ...context });
+                assert.equal(writes, 0);
+                assert.throws(() => rpcCallback(failed ? new Error("offline") : null, failed ? undefined : { reward: 10 }), new RegExp(`exit:${failed ? 1 : 0}`));
+                assert.equal(writes, failed ? 0 : 1);
+                assert.equal(block.valid, !failed && script === "altblock_revalidate_from_rpc");
+                assert.equal(block.pay_ready, failed || script !== "altblock_pay_ready_reset");
+            }
+        }
+    });
+
     test("single altblock pay edits use the shared transaction helper and preserve exit status", () => {
         const vm = require("node:vm");
         const source = fs.readFileSync(path.join(__dirname, "..", "manage_scripts", "altblock_pay_set.js"), "utf8");
