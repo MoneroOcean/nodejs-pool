@@ -4,6 +4,7 @@ const path = require("path");
 
 require("./pool.js");
 require("./miner_registry.js");
+require("./pool_lifecycle.js");
 require("./block_manager.js");
 require("./long_runner.js");
 require("./stats.js");
