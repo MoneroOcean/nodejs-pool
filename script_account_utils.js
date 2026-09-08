@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("./lib/common/database.js");
 const SAFE_SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** @typedef {{address: string, paymentId: string | null}} Account */
@@ -73,16 +74,16 @@ function forEachCacheKey(user, iterator) {
 /** @param {string} user */
 function logCacheKeys(user) {
     forEachCacheKey(user, function (key) {
-        if (global.database.getCache(key) !== false) console.log(`Existing LMDB cache key: ${  key}`);
+        if (getLocalDatabase(global.database).getCache(key) !== false) console.log(`Existing LMDB cache key: ${  key}`);
     });
 }
 
 /** @param {string} user */
 function deleteCacheKeys(user) {
-    const txn = global.database.env.beginTxn();
+    const txn = getLocalDatabase(global.database).env.beginTxn();
     try {
         forEachCacheKey(user, function (key) {
-            if (global.database.getCache(key) !== false) txn.del(global.database.cacheDB, key);
+            if (getLocalDatabase(global.database).getCache(key) !== false) txn.del(getLocalDatabase(global.database).cacheDB, key);
         });
         txn.commit();
     } catch (error) {

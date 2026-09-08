@@ -134,6 +134,7 @@ function installAccountGlobals(options) {
         }
     };
     global.database = {
+        role: "local",
         cacheDB: {},
         env: {
             beginTxn() {
@@ -217,6 +218,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
                 }
             };
             global.database = {
+        role: "local",
                 getCache() { return {}; },
                 env: { beginTxn() {
                     assert.equal(sqlDeleted, true);
@@ -335,7 +337,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
                     abort() { events.push("abort"); }
                 };
                 const context = {
-                    require() { return () => ({ argv: {}, integerArg() { return 123; }, arg() { return "hash"; }, init(callback) { callback(); } }); },
+                    require(name) { if (name.endsWith("/database.js")) return require("../lib/common/database.js"); return () => ({ argv: {}, integerArg() { return 123; }, arg() { return "hash"; }, init(callback) { callback(); } }); },
                     console: { log() {}, error() {} },
                     process: { exit(code) { throw new Error(`exit:${code}`); } },
                     global: {
@@ -346,7 +348,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
                             getPortAnyBlockHeaderByHash(_port, _hash, _include, callback) { reply(callback); }
                         },
                         protos: { Block: codec, AltBlock: codec, POOLTYPE: { PPLNS: 0 } },
-                        database: { env: { beginTxn() { events.push("begin"); return txn; } } }
+                        database: { role: "local", env: { beginTxn() { events.push("begin"); return txn; } } }
                     }
                 };
                 const source = fs.readFileSync(path.join(__dirname, "..", "manage_scripts", `${script}.js`), "utf8");
@@ -365,6 +367,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         let current = { hash: "hash", value: 1, unlocked: false };
         const codec = { decode: value => ({ ...value }), encode: value => value };
         global.database = {
+        role: "local",
             blockDB: {},
             env: { beginTxn(options) {
                 const reader = Boolean(options?.readOnly);
@@ -444,6 +447,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         const events = [];
         global.coinFuncs = { getLastBlockHeader(callback) { callback(null, { height: 1 }); } };
         global.database = {
+        role: "local",
             env: { beginTxn() { return { abort() { events.push("abort"); } }; } },
             lmdb: { Cursor: class {
                 goToRange(key) { return key; }
@@ -467,6 +471,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         for (const fail of [false, true]) {
             const events = [];
             global.database = {
+        role: "local",
                 env: { beginTxn() { return {
                     putBinary() { events.push("write"); },
                     commit() { events.push("commit"); },
@@ -502,6 +507,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         for (const failure of [null, "construct", "iterate", "close"]) {
             const events = [];
             global.database = {
+        role: "local",
                 env: { beginTxn() { return { abort() { events.push("abort"); } }; } },
                 lmdb: { Cursor: class {
                     constructor() { if (failure === "construct") throw new Error(failure); }
@@ -534,6 +540,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         const originalDatabase = global.database;
         const events = [];
         global.database = {
+        role: "local",
             env: { beginTxn() { return {
                 del() { throw new Error("delete failed"); },
                 commit() { events.push("commit"); },
@@ -850,6 +857,7 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
     test("account utils logCacheKeys labels existing LMDB cache keys", function testLogCacheKeysFormatting() {
         const originalDatabase = global.database;
         global.database = {
+        role: "local",
             getCache(key) {
                 return key === "stats:wallet-address" ? { some: "value" } : false;
             }
@@ -1026,7 +1034,14 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
                     }
                     if (request === "./lib/common/local_comms") {
                         return function LocalComms() {
-                            this.initEnv = function initEnv() {};
+                            this.role = "local";
+                            this.initEnv = function initEnv() {
+                                this.env = {};
+                                this.shareDB = {};
+                                this.blockDB = {};
+                                this.altblockDB = {};
+                                this.cacheDB = {};
+                            };
                         };
                     }
                     if (request === "./fake_coin.js") {

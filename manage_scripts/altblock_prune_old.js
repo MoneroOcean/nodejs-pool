@@ -1,13 +1,15 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 const cli = require("../script_utils.js")();
 
 cli.init(function() {
+    const localDatabase = getLocalDatabase(global.database);
     console.log("Cleaning up the alt block DB. Searching for items to delete");
         /** @type {Array<string | number | Buffer>} */
         const deleted = [];
         /** @type {Record<number, number>} */
         const block_count = Object.create(null);
-    cli.forEachBinaryEntry(global.database.altblockDB, function (key, data) {
+    cli.forEachBinaryEntry(localDatabase.altblockDB, function (key, data) {
         const blockData = global.protos.AltBlock.decode(data);
                 const count = (block_count[blockData.port] ?? 0) + 1;
                 block_count[blockData.port] = count;
@@ -20,14 +22,14 @@ cli.init(function() {
     console.log(`Deleting altblock items: ${  deleted.length}`);
 
         let chunkSize = 0;
-        let txn = global.database.env.beginTxn();
+        let txn = localDatabase.env.beginTxn();
         try {
             deleted.forEach(function(key) {
                 ++ chunkSize;
-                txn.del(global.database.altblockDB, key);
+                txn.del(localDatabase.altblockDB, key);
                 if (chunkSize > 500) {
                     txn.commit();
-                    txn = global.database.env.beginTxn();
+                    txn = localDatabase.env.beginTxn();
                     chunkSize = 0;
                 }
             });

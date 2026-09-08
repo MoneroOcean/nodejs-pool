@@ -1,10 +1,12 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 const cli = require("../script_utils.js")();
 const argv = cli.argv;
 const port = cli.integerArg("port", "Please specify port", 1, 65535);
 const hash = cli.arg("hash", "Please specify hash");
 
 cli.init(function() {
+    const localDatabase = getLocalDatabase(global.database);
   global.coinFuncs.getLastBlockHeader(function (err, last_block_body) {
     if (err !== null || !last_block_body){
       console.error("Can't get last block info");
@@ -43,10 +45,10 @@ cli.init(function() {
         anchor_height: last_block_body.height,
         value:         reward
       });
-      const txn = global.database.env.beginTxn();
+      const txn = localDatabase.env.beginTxn();
       let committed = false;
       try {
-        txn.putBinary(global.database.altblockDB, timestamp, body);
+        txn.putBinary(localDatabase.altblockDB, timestamp, body);
         txn.commit();
         committed = true;
       } finally {

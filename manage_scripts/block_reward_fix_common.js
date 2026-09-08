@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 
 // The main-chain and alt-chain repair scripts differ only in storage and port
 // selection. Keeping the transaction lifecycle here prevents those copies from
@@ -18,15 +19,16 @@ function fixBlockRewardFromRpc(options) {
     } = options;
 
     cli.init(function onInit() {
-        const database = global.database[databaseName];
+        const localDatabase = getLocalDatabase(global.database);
+        const database = localDatabase[databaseName];
         const proto = getCodec();
-        const reader = global.database.env.beginTxn({ readOnly: true });
+        const reader = localDatabase.env.beginTxn({ readOnly: true });
         /** @type {import("node-lmdb").Cursor<number> | null} */
         let cursor = null;
         /** @type {{key: number, block: T} | null} */
         let match = null;
         try {
-            cursor = new global.database.lmdb.Cursor(reader, database);
+            cursor = new localDatabase.lmdb.Cursor(reader, database);
             for (let found = cursor.goToFirst(); found !== null && match === null; found = cursor.goToNext()) {
                 cursor.getCurrentBinary(function onBlock(key, data) {
                     const block = proto.decode(data);
@@ -55,7 +57,7 @@ function fixBlockRewardFromRpc(options) {
                 console.error("Can't get a valid block reward");
                 process.exit(1);
             }
-            const txn = global.database.env.beginTxn();
+            const txn = localDatabase.env.beginTxn();
             let committed = false;
             try {
                 // Re-read after RPC so a concurrent unlock or repair is preserved.

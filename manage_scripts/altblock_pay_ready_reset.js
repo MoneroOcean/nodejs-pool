@@ -1,10 +1,12 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 const cli = require("../script_utils.js")();
 const hash = cli.arg("hash", "Please specify altblock hash");
 
 cli.init(function() {
-    const txn = global.database.env.beginTxn();
-    const cursor = new global.database.lmdb.Cursor(txn, global.database.altblockDB);
+    const localDatabase = getLocalDatabase(global.database);
+    const txn = localDatabase.env.beginTxn();
+    const cursor = new localDatabase.lmdb.Cursor(txn, localDatabase.altblockDB);
     let is_found = false;
     for (let found = cursor.goToFirst(); found !== null; found = cursor.goToNext()) {
             cursor.getCurrentBinary(function(key, data){  // jshint ignore:line
@@ -20,7 +22,7 @@ cli.init(function() {
                     }
                                 console.log(`Changing alt-block pay_ready from ${  blockData.pay_ready  } to false`);
                     blockData.pay_ready = false;
-                    txn.putBinary(global.database.altblockDB, key, global.protos.AltBlock.encode(blockData));
+                    txn.putBinary(localDatabase.altblockDB, key, global.protos.AltBlock.encode(blockData));
                     cursor.close();
                     txn.commit();
                     console.log(`Altblock with ${  hash  } hash was validated! Exiting!`);

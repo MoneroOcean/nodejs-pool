@@ -74,7 +74,7 @@ async function resolveCurrentXmrBalance(cli, tradeContext, exchangeApi) {
     return await getExchangeBalance(exchangeApi, exchange, "XMR");
 }
 
-/** @param {import("../script_utils.js").Cli} cli @param {import("../types/runtime").DatabaseRuntime} database @returns {Promise<import("./exchange_recovery_preview_common.js").FixPlan>} */
+/** @param {import("../script_utils.js").Cli} cli @param {import("../types/runtime").LocalDatabaseRuntime} database @returns {Promise<import("./exchange_recovery_preview_common.js").FixPlan>} */
 async function buildFixPlan(cli, database) {
     const cachedContext = database.getCache("altblock_exchange_trade");
     const tradeContext = requireTradeContext(cachedContext);

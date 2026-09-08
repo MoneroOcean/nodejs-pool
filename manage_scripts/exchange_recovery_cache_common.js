@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 
 /** @param {unknown} value */
 function parseBooleanOption(value) {
@@ -24,7 +25,7 @@ function normalizePendingCache(value) {
 /** @param {import("../script_utils.js").Cli} cli @returns {Map<number, import("../types/runtime").AltBlockMessage>} */
 function buildBlockLookup(cli) {
     const lookup = new Map();
-    cli.forEachBinaryEntry(global.database.altblockDB, function onEntry(_key, data) {
+    cli.forEachBinaryEntry(getLocalDatabase(global.database).altblockDB, function onEntry(_key, data) {
         const block = global.protos.AltBlock.decode(data);
         lookup.set(Number(_key), block);
     });
@@ -55,7 +56,7 @@ function runPendingCacheCli(options) {
     const clear = cli.get("clear", false) === true;
 
     cli.init(function onInit() {
-        const pending = normalizePendingCache(global.database.getCache(cacheKey));
+        const pending = normalizePendingCache(getLocalDatabase(global.database).getCache(cacheKey));
         const blockLookup = buildBlockLookup(cli);
         const targetPort = portArg ? String(portArg) : null;
 
@@ -75,7 +76,7 @@ function runPendingCacheCli(options) {
             }
             const summary = summarizeEntry(targetPort, entry, blockLookup);
             delete pending[targetPort];
-            global.database.setCache(cacheKey, pending);
+            getLocalDatabase(global.database).setCache(cacheKey, pending);
             console.log(clearedHeading);
             printSummary(summary);
             afterClear.forEach(function printLine(line) { console.log(line); });

@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 const { formatFixPlanPreview } = require("./exchange_recovery_preview_common.js");
 
 /** @typedef {ReturnType<typeof import("../lib2/exchanges.js")>} ExchangeApi */
@@ -118,15 +119,15 @@ async function resolveActiveOrders(cli, tradeContext, exchangeApi) {
 
 // All trade recovery scripts preview the exact cache rewrite and retain the
 // deliberate ten-second operator cancellation window before applying it.
-/** @param {(cli: import("../script_utils.js").Cli, database: import("../types/runtime").DatabaseRuntime) => Promise<import("./exchange_recovery_preview_common.js").FixPlan>} buildFixPlan */
+/** @param {(cli: import("../script_utils.js").Cli, database: import("../types/runtime").LocalDatabaseRuntime) => Promise<import("./exchange_recovery_preview_common.js").FixPlan>} buildFixPlan */
 function runFixMain(buildFixPlan) {
     const cli = require("../script_utils.js")();
     cli.init(async function run() {
         try {
-            const fixPlan = await buildFixPlan(cli, global.database);
+            const fixPlan = await buildFixPlan(cli, getLocalDatabase(global.database));
             console.log(formatFixPlanPreview(fixPlan));
             setTimeout(function applyFix() {
-                global.database.setCache(fixPlan.cacheKey, fixPlan.nextValue);
+                getLocalDatabase(global.database).setCache(fixPlan.cacheKey, fixPlan.nextValue);
                 console.log("Done.");
                 process.exit(0);
             }, 10 * 1000);

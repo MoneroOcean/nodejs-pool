@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("./lib/common/database.js");
 const initMini = require("./init_mini.js");
 const parseArgv = require("./parse_args.js");
 
@@ -17,13 +18,14 @@ function exitWithError(message) {
  *
  */
 function forEachEntry(database, read, iterator, reverse) {
-    const txn = global.database.env.beginTxn({ readOnly: true });
+    const localDatabase = getLocalDatabase(global.database);
+    const txn = localDatabase.env.beginTxn({ readOnly: true });
     let cursor;
     const startMethod = reverse === true ? "goToLast" : "goToFirst";
     const nextMethod = reverse === true ? "goToPrev" : "goToNext";
 
     try {
-        cursor = new global.database.lmdb.Cursor(txn, database);
+        cursor = new localDatabase.lmdb.Cursor(txn, database);
         // Cursor navigation returns null at the end; integer key 0 is a valid entry.
         for (let found = cursor[startMethod](); found !== null; found = cursor[nextMethod]()) {
             read(cursor, iterator);

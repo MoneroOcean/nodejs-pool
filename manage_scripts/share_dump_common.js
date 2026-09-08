@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 /** @param {unknown} depth @param {(share: import("../types/runtime").Share) => boolean} shouldPrint */
 module.exports = function dumpShares(depth, shouldPrint) {
     const numericDepth = Number(depth);
@@ -13,12 +14,12 @@ module.exports = function dumpShares(depth, shouldPrint) {
         }
 
         const lastBlock = body.height + 1;
-        const txn = global.database.env.beginTxn({ readOnly: true });
+        const txn = getLocalDatabase(global.database).env.beginTxn({ readOnly: true });
         /** @type {import("node-lmdb").Cursor<number> | undefined} */
         let cursor;
 
         try {
-            cursor = new global.database.lmdb.Cursor(txn, global.database.shareDB);
+            cursor = new (getLocalDatabase(global.database).lmdb.Cursor)(txn, getLocalDatabase(global.database).shareDB);
             for (let blockID = lastBlock; blockID > lastBlock - numericDepth; --blockID) {
                 // shareDB keys are block heights with duplicate values; only walk dups when an exact key match exists.
                 for (let found = cursor.goToRange(blockID) === blockID; found; found = cursor.goToNextDup() !== null) {

@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 const lmdb = require('node-lmdb');
 const fs   = require('fs');
 const cli = require("../script_utils.js")();
@@ -12,6 +13,7 @@ if (fs.existsSync(`${dir  }/data.mdb`)) {
 }
 
 cli.init(function() {
+    const localDatabase = getLocalDatabase(global.database);
     // Each DB is copied under a single source read txn so the copy is a consistent snapshot.
     // That snapshot is held for the whole copy, which pins source pages and blocks reuse - run
     // this with the pool stopped, otherwise a large copy can drive a live source DB to map-full.
@@ -31,17 +33,17 @@ cli.init(function() {
         const databases = [
             {
                 label: "blocks",
-                source: global.database.blockDB,
+                source: localDatabase.blockDB,
                 target: env2.openDbi({ name: "blocks", create: true, keyIsUint32: true })
             },
             {
                 label: "altblocks",
-                source: global.database.altblockDB,
+                source: localDatabase.altblockDB,
                 target: env2.openDbi({ name: "altblocks", create: true, keyIsUint32: true })
             },
             {
                 label: "shares",
-                source: global.database.shareDB,
+                source: localDatabase.shareDB,
                 target: env2.openDbi({
                     name: "shares",
                     create: true,
@@ -53,15 +55,15 @@ cli.init(function() {
             },
             {
                 label: "cache",
-                source: global.database.cacheDB,
+                source: localDatabase.cacheDB,
                 target: env2.openDbi({ name: "cache", create: true })
             }
         ];
 
         databases.forEach(function copyDb(database) {
             console.log(`Copying ${  database.label}`);
-            const txn = global.database.env.beginTxn({ readOnly: true });
-            const cursor = new global.database.lmdb.Cursor(txn, database.source);
+            const txn = localDatabase.env.beginTxn({ readOnly: true });
+            const cursor = new localDatabase.lmdb.Cursor(txn, database.source);
             const txn2 = env2.beginTxn();
             try {
                 for (let found = cursor.goToFirst(); found !== null; found = cursor.goToNext()) {

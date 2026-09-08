@@ -1,4 +1,5 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 
 /** @type {import("../parse_args.js").ParsedArgs} */
 let argv = { _: [] };
@@ -45,7 +46,7 @@ function hasKey(txn, key) {
     if (!key) return false;
 
     try {
-        return txn.getString(global.database.cacheDB, key) !== null;
+        return txn.getString(getLocalDatabase(global.database).cacheDB, key) !== null;
     } catch (_error) {
         return false;
     }
@@ -116,11 +117,11 @@ function classifyReason(txn, key, minKeyLength) {
 function flushDeletes(keys) {
     if (keys.length === 0) return 0;
 
-    const txn = global.database.env.beginTxn();
+    const txn = getLocalDatabase(global.database).env.beginTxn();
     const count = keys.length;
     try {
         keys.forEach(function (key) {
-            txn.del(global.database.cacheDB, key);
+            txn.del(getLocalDatabase(global.database).cacheDB, key);
         });
         txn.commit();
         keys.length = 0;
@@ -135,8 +136,8 @@ function main() {
 process.chdir(__dirname);
 argv = require("../parse_args")(process.argv.slice(2));
 require("../init_mini.js").init(function () {
-    const txn = global.database.env.beginTxn({ readOnly: true });
-    const cursor = new global.database.lmdb.Cursor(txn, global.database.cacheDB);
+    const txn = getLocalDatabase(global.database).env.beginTxn({ readOnly: true });
+    const cursor = new (getLocalDatabase(global.database).lmdb.Cursor)(txn, getLocalDatabase(global.database).cacheDB);
     // Miner-keyed cache entries are at least as long as the pool wallet address; shorter keys are housekeeping.
     const minKeyLength = global.config.pool.address.length;
     /** @type {string[]} */

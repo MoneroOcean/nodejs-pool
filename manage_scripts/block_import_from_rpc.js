@@ -1,8 +1,10 @@
 "use strict";
+const { getLocalDatabase } = require("../lib/common/database.js");
 const cli = require("../script_utils.js")();
 const height = cli.integerArg("height", "Please specify block height", 0, 0xffffffff);
 
 cli.init(function() {
+    const localDatabase = getLocalDatabase(global.database);
         global.coinFuncs.getBlockHeaderByID(height, function (err, body) {
                 if (err || !body) {
                         console.error("Can't get block header");
@@ -33,12 +35,12 @@ cli.init(function() {
                         };
                         const body3 = global.protos.Block.encode(body2);
                         const blockHeight = height;
-                        const txn = global.database.env.beginTxn();
+                        const txn = localDatabase.env.beginTxn();
                         let committed = false;
                         try {
-                                const blockProto = txn.getBinary(global.database.blockDB, blockHeight);
+                                const blockProto = txn.getBinary(localDatabase.blockDB, blockHeight);
                                 if (blockProto === null) {
-                                        txn.putBinary(global.database.blockDB, blockHeight, body3);
+                                        txn.putBinary(localDatabase.blockDB, blockHeight, body3);
                                         console.log(`Block with ${height} height added! Exiting!`);
                                 } else {
                                         console.log(`Block with ${height} height already exists! Exiting!`);
