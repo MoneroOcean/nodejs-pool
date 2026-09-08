@@ -712,6 +712,7 @@ su -l user -s /bin/bash <<EOF
 set -e
 $(declare -f retry_command)
 $(declare -f install_node_dependencies)
+$(declare -f install_typecheck_dependencies)
 $(declare -f configure_user_npm_min_release_age)
 if [ ! -f /home/user/.nvm/nvm.sh ]; then
   retry_command bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/creationix/nvm/v0.33.0/install.sh | bash'
@@ -742,8 +743,9 @@ if [ ! -d /home/user/nodejs-pool/.git ]; then
 fi
 cd /home/user/nodejs-pool
 if [ ! -d node_modules ]; then
-  JOBS=$(nproc) install_node_dependencies
+  JOBS=$(nproc) install_node_dependencies --include=dev
 fi
+install_typecheck_dependencies
 command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2 --min-release-age=7
 retry_command pm2 install pm2-logrotate
 if [ ! -f cert.key ] || [ ! -f cert.pem ]; then

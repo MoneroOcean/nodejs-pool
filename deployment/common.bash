@@ -28,6 +28,24 @@ install_node_dependencies() {
   fi
 }
 
+# Existing deployments may omit dev dependencies; avoid reinstalling runtime modules.
+install_typecheck_dependencies() {
+  if node -e 'require.resolve("typescript/bin/tsc"); require.resolve("@types/node/package.json")' >/dev/null 2>&1; then
+    return 0
+  fi
+  local typecheck_prefix="${HOME}/.local/share/nodejs-pool-typecheck"
+  local repo_node_modules="${PWD}/node_modules"
+  local package_name
+  retry_command npm install --prefix "$typecheck_prefix" --ignore-scripts --no-package-lock --no-audit --no-fund --min-release-age=7 typescript@5.9.3 @types/node@22.19.0
+  install -d "$repo_node_modules/@types"
+  for package_name in typescript @types/node undici-types; do
+    if [ ! -e "$repo_node_modules/$package_name" ] && [ ! -L "$repo_node_modules/$package_name" ]; then
+      ln -s "$typecheck_prefix/node_modules/$package_name" "$repo_node_modules/$package_name"
+    fi
+  done
+  node -e 'require.resolve("typescript/bin/tsc"); require.resolve("@types/node/package.json")'
+}
+
 configure_user_npm_min_release_age() {
   local npm_user_config="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
   npm config set min-release-age 7 --location=user
