@@ -318,6 +318,7 @@ export interface CoinRuntime {
     is_miner_agent_no_haven_support(agent: string): boolean;
     getCoinMinDifficulty(key: string | number): number;
     getNiceHashMinimumDifficulty(key: string | number): number;
+    algoShortTypeStr(port: number): string;
     c29(header: Buffer, ring: number[], port: number): boolean;
     c29_packed_edges(ring: number[], blobTypeNum: number, hint?: number | string | ProtoMessage): string;
     c29_cycle_hash(packedEdges: string): Buffer;
@@ -444,6 +445,10 @@ export interface PoolSettings {
     address: string;
     minDifficulty: number;
     targetTime: number;
+    minerTimeout: number;
+    workerMax: number;
+    retargetTime: number;
+    proxyWorkerMax?: number;
     geoDNS?: string;
     trustedMiners?: string[];
     [key: string]: unknown;
@@ -509,6 +514,9 @@ declare global {
     var __longRunnerAutostart: boolean | undefined;
     var __longRunnerScanChunkSize: number | undefined;
     var __remoteShareAutostart: boolean | undefined;
+    var __workerAutostart: boolean | undefined;
+    var __poolStatsAutostart: boolean | undefined;
+    var __poolTestMode: boolean | undefined;
     var config: PoolConfig;
     var database: DatabaseRuntime;
     var mysql: SqlPool;
