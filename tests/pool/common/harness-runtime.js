@@ -288,6 +288,7 @@ function invokePoolMethod({
     id = 1,
     method,
     params,
+    result,
     ip = "127.0.0.2",
     portData = global.config.ports[0]
 }) {
@@ -295,6 +296,7 @@ function invokePoolMethod({
     const finals = [];
     const pushes = [];
 
+    const request = typeof result === "undefined" ? null : { result };
     poolModule.handleMinerData(
         socket,
         id,
@@ -302,15 +304,16 @@ function invokePoolMethod({
         params,
         ip,
         portData,
-        (error, result) => {
-            replies.push({ error, result });
+        (error, replyResult) => {
+            replies.push({ error, result: replyResult });
         },
         (error, timeout) => {
             finals.push({ error, timeout });
         },
         (body) => {
             pushes.push(body);
-        }
+        },
+        request
     );
 
     return { replies, finals, pushes, socket };

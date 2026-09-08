@@ -10,7 +10,6 @@ const {
     XMRIG_CPU_ALGOS,
     XMRIG_ALGO_PERF_SEED,
     SRBMINER_NICEHASH_STRATUM_ALGOS,
-    SRBMINER_ETH_PROXY_ALGOS,
     MOM_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     stripAnsi,
@@ -321,39 +320,6 @@ function buildSrbMiner(binaryPath) {
     };
 }
 
-function buildSrbMinerEthProxy(binaryPath) {
-    return {
-        name: "srbminer-multi-ethproxy",
-        binaryPath,
-        algorithms: new Set(SRBMINER_ETH_PROXY_ALGOS),
-        parser: createSrbMinerParser(),
-        style: "srbminer",
-        supplementalCoverage: true,
-        buildArgs(context) {
-            return [
-                "--algorithm", SRBMINER_INTEL_ALGORITHM_MAP[context.algorithm] || context.algorithm,
-                "--disable-cpu",
-                "--disable-gpu-amd",
-                "--disable-gpu-nvidia",
-                "--pool", `${context.host}:${context.port}`,
-                "--wallet", context.walletWithDifficulty,
-                "--password", context.password,
-                "--worker", context.worker,
-                "--tls", context.tls ? "true" : "false",
-                "--gpu-id", context.srbMinerGpuId,
-                "--enable-workers-ramp-up",
-                "--api-enable",
-                "--api-port", String(context.srbMinerApiPort),
-                "--api-rig-name", context.worker,
-                "--keepalive", "true",
-                "--max-no-share-sent", String(Math.ceil(context.timeoutMs / 1000)),
-                "--give-up-limit", "1",
-                "--esm", "0"
-            ];
-        }
-    };
-}
-
 function buildMoMinerNoBenchConfig(context) {
     return {
         pool_time: {
@@ -509,13 +475,6 @@ function hasMetSuccessCriterion(plan, metrics) {
     return metrics.acceptedShares >= metrics.targetAcceptedShares && metrics.rejectedShares === 0 && metrics.invalidShares === 0;
 }
 
-function getSuccessObserveMs(plan, config) {
-    const minerName = plan && plan.miner ? String(plan.miner.name || "") : "";
-    if (!/ethproxy/i.test(minerName)) return 0;
-    const configured = Number(config && config.ethProxySuccessObserveMs);
-    return Number.isFinite(configured) && configured > 0 ? configured : 0;
-}
-
 function determineFailureReason(plan, metrics) {
     if (hasMetSuccessCriterion(plan, metrics)) return "";
     if (!metrics.connected) return "connection-failure";
@@ -528,7 +487,6 @@ function determineFailureReason(plan, metrics) {
 module.exports = {
     buildXmrigMiner,
     buildSrbMiner,
-    buildSrbMinerEthProxy,
     buildMoMiner,
     writeXmrigSeedConfig,
     getActiveAlgorithms,
@@ -537,6 +495,5 @@ module.exports = {
     stopProcess,
     summarizeLatency,
     hasMetSuccessCriterion,
-    getSuccessObserveMs,
     determineFailureReason
 };

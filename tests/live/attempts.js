@@ -17,7 +17,6 @@ const {
     stopProcess,
     summarizeLatency,
     hasMetSuccessCriterion,
-    getSuccessObserveMs,
     determineFailureReason
 } = require("./miners.js");
 const {
@@ -497,7 +496,7 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         }));
     }
 
-    await waitForMinerAttempt(child, metrics, plan, config.timeoutMs, () => processError, getSuccessObserveMs(plan, config));
+    await waitForMinerAttempt(child, metrics, plan, config.timeoutMs, () => processError);
     await stopProcess(child);
 
     const exitState = await childClosed;

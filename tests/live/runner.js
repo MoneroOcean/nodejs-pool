@@ -13,7 +13,6 @@ const {
     DEFAULT_THREADS,
     DEFAULT_DIFFICULTY,
     DEFAULT_TARGET_ACCEPTED_SHARES,
-    DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS,
     DEFAULT_SRBMINER_GPU_ID,
     DEFAULT_SRBMINER_GPU_INTENSITY,
     DEFAULT_SRBMINER_CN_GPU_INTENSITY,
@@ -21,7 +20,6 @@ const {
     DEFAULT_MOM_C29_DEVICE,
     EMBEDDED_ACTIVE_ALGOS,
     SRBMINER_INTEL_ALGORITHM_MAP,
-    SRBMINER_ETH_PROXY_ALGOS,
     MOM_INTEL_ALGOS,
     GPU_PROTOCOL_PROBE_ALGOS,
     buildRunId,
@@ -44,7 +42,6 @@ const {
 const {
     buildXmrigMiner,
     buildSrbMiner,
-    buildSrbMinerEthProxy,
     buildMoMiner,
     getActiveAlgorithms,
     buildCoveragePlan
@@ -80,8 +77,7 @@ function buildSummary(run, coveredResults) {
             difficulty: run.config.difficulty,
             threads: run.config.threads,
             wallet: run.config.wallet,
-            timeoutMs: run.config.timeoutMs,
-            ethProxySuccessObserveMs: run.config.ethProxySuccessObserveMs
+            timeoutMs: run.config.timeoutMs
         },
         hardware: run.hardware || {},
         minerInventory: run.miners.map((miner) => ({
@@ -173,9 +169,6 @@ async function createLivePoolRun(input) {
         if (intelGpuDetected && usesAny(activeAlgorithmSet, Object.keys(SRBMINER_INTEL_ALGORITHM_MAP))) {
             const srbMiner = await ensureSrbMinerBinary(config, logger);
             miners.push(buildSrbMiner(srbMiner.binaryPath));
-            if (usesAny(activeAlgorithmSet, SRBMINER_ETH_PROXY_ALGOS)) {
-                miners.push(buildSrbMinerEthProxy(srbMiner.binaryPath));
-            }
         }
 
         if (intelGpuDetected && usesAny(activeAlgorithmSet, MOM_INTEL_ALGOS)) {
@@ -268,7 +261,6 @@ function buildConfig(input) {
         threads: DEFAULT_THREADS,
         timeoutMs: DEFAULT_TIMEOUT_MS,
         targetAcceptedShares: DEFAULT_TARGET_ACCEPTED_SHARES,
-        ethProxySuccessObserveMs: DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS,
         srbMinerGpuId: DEFAULT_SRBMINER_GPU_ID,
         srbMinerGpuIntensity: DEFAULT_SRBMINER_GPU_INTENSITY,
         srbMinerCnGpuIntensity: DEFAULT_SRBMINER_CN_GPU_INTENSITY,

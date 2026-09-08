@@ -153,6 +153,79 @@ test("password algo suffix overrides the initial algo set", async () => {
     });
 });
 
+test("native extensions are acknowledged while the legacy object login shape remains stable", async () => {
+    const { runtime } = await startHarness();
+    const nativeSocket = {};
+    const legacySocket = {};
+
+    try {
+        const nativeReply = invokePoolMethod({
+            socket: nativeSocket,
+            id: 68,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-native-extension",
+                extensions: ["unknown", "mo-native", "submit-result"],
+                algo: ["rx/0"],
+                "algo-perf": { "rx/0": 1 }
+            }
+        });
+        const nativeResult = nativeReply.replies[0].result;
+
+        assert.equal(nativeReply.replies[0].error, null);
+        assert.equal(nativeResult.status, "OK");
+        assert.equal(nativeResult.algo, "rx/0");
+        assert.equal(nativeResult.job.algo, "rx/0");
+        assert.deepEqual(nativeResult.extensions, ["mo-native", "submit-result"]);
+        assert.equal(nativeSocket.mo_native, true);
+        assert.equal(nativeSocket.submit_result, true);
+
+        const nativeGetjobReply = invokePoolMethod({
+            socket: nativeSocket,
+            id: 70,
+            method: "getjob",
+            params: { id: nativeSocket.miner_id }
+        });
+        assert.equal(nativeGetjobReply.replies[0].error, null);
+        assert.equal(nativeGetjobReply.replies[0].result.id, nativeResult.id);
+        assert.equal(nativeGetjobReply.replies[0].result.job_id, nativeResult.job.job_id);
+        assert.equal(nativeGetjobReply.replies[0].result.job, undefined);
+        assert.equal(nativeReply.pushes.length, 0);
+
+        const legacyReply = invokePoolMethod({
+            socket: legacySocket,
+            id: 69,
+            method: "login",
+            params: {
+                login: ALT_WALLET,
+                pass: "worker-legacy-object"
+            }
+        });
+
+        assert.deepEqual(Object.keys(legacyReply.replies[0].result).sort(), ["id", "job", "status"]);
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("removed miner-facing getWork methods are rejected while the session is unauthenticated", async () => {
+    const { runtime } = await startHarness();
+
+    try {
+        for (const method of ["eth_submitLogin", "eth_getWork", "eth_submitWork", "eth_submitHashrate", "eth_mining"]) {
+            const reply = invokePoolMethod({
+                method,
+                params: []
+            });
+            assert.deepEqual(reply.finals, [{ error: "Unknown RPC method", timeout: undefined }], method);
+            assert.equal(reply.replies.length, 0, method);
+        }
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("getjob without params is rejected", async () => {
     const { runtime } = await startHarness();
 

@@ -7,17 +7,13 @@ const test = require("node:test");
 
 const {
     DEFAULT_TIMEOUT_MS,
-    DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS,
     DEFAULT_SRBMINER_GPU_INTENSITY,
     DEFAULT_SRBMINER_CN_GPU_INTENSITY
 } = require("./live/shared.js");
 const { resolveXmrigAsset } = require("./live/downloads.js");
 const {
     buildSrbMiner,
-    buildSrbMinerEthProxy,
-    buildCoveragePlan,
-    getActiveAlgorithms,
-    getSuccessObserveMs
+    getActiveAlgorithms
 } = require("./live/miners.js");
 const {
     buildDefaultBlockSubmitPayload,
@@ -135,65 +131,6 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         assert.equal(args.includes("--enable-workers-ramp-up"), true);
         assert.equal(args.includes("--gpu-disable-interleaving"), false);
         assert.equal(args.includes("--disable-gpu-dual-kernels"), false);
-    });
-
-    test("SRBMiner eth-proxy args force getWork mode for etchash", () => {
-        const miner = buildSrbMinerEthProxy("/tmp/SRBMiner-MULTI");
-        const args = miner.buildArgs({
-            algorithm: "etchash",
-            host: "sg.moneroocean.stream",
-            port: 20001,
-            walletWithDifficulty: "wallet",
-            password: "x~etchash",
-            worker: "worker",
-            tls: true,
-            srbMinerGpuId: "0",
-            srbMinerApiPort: 21550,
-            timeoutMs: DEFAULT_TIMEOUT_MS
-        });
-
-        assert.equal(miner.supplementalCoverage, true);
-        assert.equal(args[args.indexOf("--esm") + 1], "0");
-        assert.equal(args[args.indexOf("--max-no-share-sent") + 1], String(DEFAULT_TIMEOUT_MS / 1000));
-        assert.equal(args.includes("--nicehash"), false);
-        assert.equal(args[args.indexOf("--algorithm") + 1], "etchash");
-    });
-
-    test("SRBMiner parser reads accepted shares from status table", () => {
-        const miner = buildSrbMinerEthProxy("/tmp/SRBMiner-MULTI");
-        const metrics = {
-            acceptedShares: 0,
-            rejectedShares: 0,
-            invalidShares: 0,
-            firstAcceptedAtMs: 0
-        };
-
-        miner.parser("[2026] Total: 21.10 MH/s        |       1|     0|    0|", metrics);
-
-        assert.equal(metrics.acceptedShares, 1);
-        assert.equal(metrics.rejectedShares, 0);
-        assert.equal(metrics.invalidShares, 0);
-        assert.ok(metrics.firstAcceptedAtMs > 0);
-    });
-
-    test("ETH-proxy live cases keep watching briefly after first accepted share", () => {
-        const ethProxy = buildSrbMinerEthProxy("/tmp/SRBMiner-MULTI");
-        const regular = buildSrbMiner("/tmp/SRBMiner-MULTI");
-
-        assert.equal(getSuccessObserveMs({ miner: ethProxy }, { ethProxySuccessObserveMs: DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS }), DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS);
-        assert.equal(getSuccessObserveMs({ miner: regular }, { ethProxySuccessObserveMs: DEFAULT_ETH_PROXY_SUCCESS_OBSERVE_MS }), 0);
-    });
-
-    test("live coverage keeps regular SRBMiner and adds eth-proxy etchash coverage", () => {
-        const regular = buildSrbMiner("/tmp/SRBMiner-MULTI");
-        const ethProxy = buildSrbMinerEthProxy("/tmp/SRBMiner-MULTI");
-        const plan = buildCoveragePlan([{ algorithm: "etchash" }, { algorithm: "kawpow" }], [regular, ethProxy]);
-
-        assert.deepEqual(plan.map((entry) => [entry.algorithm, entry.miner.name]), [
-            ["etchash", "srbminer-multi"],
-            ["etchash", "srbminer-multi-ethproxy"],
-            ["kawpow", "srbminer-multi"]
-        ]);
     });
 
     test("SRBMiner live default intensity is only conservative for cn/gpu", () => {

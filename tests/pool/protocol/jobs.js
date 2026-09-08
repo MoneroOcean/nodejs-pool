@@ -563,6 +563,7 @@ test("getjob can switch a miner from default jobs to kawpow-style jobs when algo
         assert.equal(Array.isArray(getjobReply.replies[0].result), true);
         assert.equal(getjobReply.replies[0].result.length, 7);
         assert.equal(runtime.getState().activeMiners.get(socket.miner_id).curr_coin, "ETH");
+        assert.equal(runtime.getState().activeMiners.get(socket.miner_id).eth_extranonce, undefined);
     } finally {
         await runtime.stop();
     }
