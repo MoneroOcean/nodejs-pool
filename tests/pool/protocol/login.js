@@ -189,9 +189,18 @@ test("native extensions are acknowledged while the legacy object login shape rem
         });
         assert.equal(nativeGetjobReply.replies[0].error, null);
         assert.equal(nativeGetjobReply.replies[0].result.id, nativeResult.id);
-        assert.equal(nativeGetjobReply.replies[0].result.job_id, nativeResult.job.job_id);
+        assert.notEqual(nativeGetjobReply.replies[0].result.job_id, nativeResult.job.job_id);
         assert.equal(nativeGetjobReply.replies[0].result.job, undefined);
         assert.equal(nativeReply.pushes.length, 0);
+
+        const nativeGetjobAgainReply = invokePoolMethod({
+            socket: nativeSocket,
+            id: 71,
+            method: "getjob",
+            params: { id: nativeSocket.miner_id }
+        });
+        assert.equal(nativeGetjobAgainReply.replies[0].error, null);
+        assert.notEqual(nativeGetjobAgainReply.replies[0].result.job_id, nativeGetjobReply.replies[0].result.job_id);
 
         const legacyReply = invokePoolMethod({
             socket: legacySocket,
