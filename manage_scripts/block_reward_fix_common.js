@@ -20,40 +20,60 @@ function fixBlockRewardFromRpc(options) {
     cli.init(function onInit() {
         const database = global.database[databaseName];
         const proto = getCodec();
-        const txn = global.database.env.beginTxn();
-        const cursor = new global.database.lmdb.Cursor(txn, database);
-        let foundBlock = false;
-
-        for (let found = cursor.goToFirst(); found !== null; found = cursor.goToNext()) {
-            cursor.getCurrentBinary(function onBlock(key, data) {
-                const block = proto.decode(data);
-                if (foundBlock || block.hash !== hash) return;
-                foundBlock = true;
-                console.log(`Found ${  label  } with ${  block.hash  } hash`);
-                global.coinFuncs.getPortAnyBlockHeaderByHash(getPort(block), hash, false, function onHeader(error, body) {
-                    if (error || !body) {
-                        cursor.close();
-                        txn.commit();
-                        console.error("Can't get block header");
-                        process.exit(1);
+        const reader = global.database.env.beginTxn({ readOnly: true });
+        /** @type {import("node-lmdb").Cursor<number> | null} */
+        let cursor = null;
+        /** @type {{key: number, block: T} | null} */
+        let match = null;
+        try {
+            cursor = new global.database.lmdb.Cursor(reader, database);
+            for (let found = cursor.goToFirst(); found !== null && match === null; found = cursor.goToNext()) {
+                cursor.getCurrentBinary(function onBlock(key, data) {
+                    const block = proto.decode(data);
+                    if (block.hash === hash) {
+                        if (typeof key !== "number") throw new Error("Invalid block database key");
+                        match = { key, block };
                     }
-                    console.log(`Changing raw block reward from ${  block.value  } to ${  body.reward}`);
-                    block.value = body.reward;
-                    txn.putBinary(database, key, proto.encode(block));
-                    cursor.close();
-                    txn.commit();
-                    console.log(`Changed ${  label}`);
-                    process.exit(0);
                 });
-            });
+            }
+        } finally {
+            try {
+                if (cursor) cursor.close();
+            } finally {
+                reader.abort();
+            }
         }
-
-        if (!foundBlock) {
-            cursor.close();
-            txn.commit();
-            console.log(`Not found ${  label  } with ${  hash  } hash`);
+        // RPC can take arbitrarily long. Never hold an LMDB transaction while waiting.
+        const selected = /** @type {{key: number, block: T} | null} */ (match);
+        if (!selected) {
+            console.log(`Not found ${label} with ${hash} hash`);
             process.exit(1);
         }
+        global.coinFuncs.getPortAnyBlockHeaderByHash(getPort(selected.block), hash, false, function onHeader(error, body) {
+            const reward = body && body.reward;
+            if (error || typeof reward !== "number" || !Number.isSafeInteger(reward) || reward < 0) {
+                console.error("Can't get a valid block reward");
+                process.exit(1);
+            }
+            const txn = global.database.env.beginTxn();
+            let committed = false;
+            try {
+                // Re-read after RPC so a concurrent unlock or repair is preserved.
+                const current = txn.getBinary(database, selected.key);
+                if (current === null) throw new Error("Block disappeared during reward lookup");
+                const block = proto.decode(current);
+                if (block.hash !== hash) throw new Error("Block changed during reward lookup");
+                console.log(`Changing raw block reward from ${block.value} to ${reward}`);
+                block.value = reward;
+                txn.putBinary(database, selected.key, proto.encode(block));
+                txn.commit();
+                committed = true;
+            } finally {
+                if (!committed) txn.abort();
+            }
+            console.log(`Changed ${label}`);
+            process.exit(0);
+        });
     });
 }
 

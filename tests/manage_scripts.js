@@ -356,6 +356,56 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
+    test("reward repairs release readers before RPC and preserve concurrent changes", function testRewardRepair() {
+        const fixReward = require("../manage_scripts/block_reward_fix_common.js");
+        const originals = { database: global.database, coinFuncs: global.coinFuncs };
+        const exit = process.exit;
+        const events = [];
+        let callback;
+        let current = { hash: "hash", value: 1, unlocked: false };
+        const codec = { decode: value => ({ ...value }), encode: value => value };
+        global.database = {
+            blockDB: {},
+            env: { beginTxn(options) {
+                const reader = Boolean(options?.readOnly);
+                events.push(reader ? "read" : "write");
+                return {
+                    getBinary() { return current; },
+                    putBinary(_db, _key, value) { current = value; },
+                    abort() { events.push("abort"); },
+                    commit() { events.push("commit"); }
+                };
+            } },
+            lmdb: { Cursor: class {
+                goToFirst() { return 0; }
+                goToNext() { return null; }
+                getCurrentBinary(visit) { visit(0, current); }
+                close() { events.push("close"); }
+            } }
+        };
+        global.coinFuncs = { getPortAnyBlockHeaderByHash(_port, _hash, _include, done) {
+            events.push("rpc"); callback = done;
+        } };
+        process.exit = code => { throw new Error(`exit:${code}`); };
+        try {
+            fixReward({ cli: { init: done => done() }, hash: "hash", databaseName: "blockDB", getCodec: () => codec, label: "block", getPort: () => 18081 });
+            assert.deepEqual(events, ["read", "close", "abort", "rpc"]);
+            assert.throws(() => callback(null, { reward: null }), /exit:1/);
+            assert.equal(events.length, 4);
+            current.unlocked = true;
+            assert.throws(() => callback(null, { reward: 10 }), /exit:0/);
+            assert.deepEqual(current, { hash: "hash", value: 10, unlocked: true });
+            assert.deepEqual(events.slice(4), ["write", "commit"]);
+            current.hash = "replacement";
+            assert.throws(() => callback(null, { reward: 12 }), /Block changed/);
+            assert.deepEqual(events.slice(-2), ["write", "abort"]);
+            assert.equal(current.value, 10);
+        } finally {
+            process.exit = exit;
+            Object.assign(global, originals);
+        }
+    });
+
     test("coin configuration resolves definite metadata and rejects incomplete boundaries", function testCoinConfig() {
         const resolveCoinConfig = require("../resolve_coin_config.js");
         const metadata = { funcFile: "./fake_coin.js", sigDigits: 1000, name: "Test", mixIn: 0, shortCode: "TEST" };
