@@ -1255,3 +1255,13 @@ test("ETH reward lookup requires one valid receipt per transaction", () => {
         } else assert.equal(outcome.error, true);
     }
 });
+
+test("auxiliary chain lookup handles absent and malformed boundary objects", () => {
+    const coin = global.coinFuncs.__realCoinFuncs;
+    for (const value of [null, undefined, {}, { _aux: null }, { _aux: { chains: [] } },
+        { _aux: { chains: [null] } }, { _aux: { chains: [[], {}] } }]) {
+        assert.equal(coin.getAuxChainXTM(value), null);
+    }
+    const chain = { height: "100", difficulty: "200" };
+    assert.equal(coin.getAuxChainXTM({ _aux: { chains: [chain] } }), chain);
+});
