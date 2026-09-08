@@ -19,8 +19,9 @@ function formatWalletBalance(entry, port) {
     const balance = Number(normalizePendingCache(entry)["walletBalance"]);
     if (!Number.isFinite(balance)) return "unknown";
     const coinDef = coinDefs[String(port)];
-    if (!coinDef || !coinDef.divisor) return String(balance);
-    return (balance / coinDef.divisor).toFixed(8);
+    const divisor = Number(coinDef?.divisor);
+    if (!Number.isFinite(divisor) || divisor <= 0) return String(balance);
+    return (balance / divisor).toFixed(8);
 }
 
 /** @param {string | number} port @param {unknown} entry @param {Map<number, import("../types/runtime").AltBlockMessage>} blockLookup */

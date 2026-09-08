@@ -515,6 +515,28 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         assert.equal(typeof unblockWallet.summarizeEntry, "function");
     });
 
+    test("wallet recovery summaries normalize coin divisors and missing cached balances", function testWalletRecoveryBalance(t) {
+        if (!HAS_LIB2_COINS) return t.skip("recovery helper requires lib2/coins.js");
+        const { summarizeEntry } = require("../manage_scripts/exchange_recovery_wallet_clear.js");
+        const coins = require("../lib2/coins.js")().COINS;
+        const port = "test-wallet-summary";
+        const previous = coins[port];
+        try {
+            for (const divisor of [100, "100"]) {
+                coins[port] = { symbol: "TEST", divisor };
+                assert.equal(summarizeEntry(port, { walletBalance: "125" }, new Map()).wallet_balance, "1.25000000");
+            }
+            for (const divisor of [undefined, null, 0, -1, "invalid", Infinity]) {
+                coins[port] = { symbol: "TEST", divisor };
+                assert.equal(summarizeEntry(port, { walletBalance: 125 }, new Map()).wallet_balance, "125");
+            }
+            assert.equal(summarizeEntry(port, {}, new Map()).wallet_balance, "unknown");
+        } finally {
+            if (previous === undefined) delete coins[port];
+            else coins[port] = previous;
+        }
+    });
+
     test("cache unused scanner keeps current altblock_exchange recovery keys", function testCurrentExchangeCacheKeys() {
         assert.equal(cacheFindUnused.EXACT_ACTIVE_KEYS.has("altblock_exchange_trade"), true);
         assert.equal(cacheFindUnused.EXACT_ACTIVE_KEYS.has("altblock_exchange_wallet"), true);
