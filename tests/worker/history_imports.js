@@ -230,6 +230,15 @@ test.describe("worker history imports", { concurrency: false }, () => {
         delete require.cache[WORKER_HISTORY_PATH];
     });
 
+    test("malformed persisted histories reset before appending a valid sample", () => {
+        const history = loadWorkerHistory();
+        const layout = history.buildTierLayout(9, 1);
+        for (const payload of [undefined, null, 1, "invalid", [], { v: 2, kind: history.HISTORY_KIND, encoding: history.HISTORY_ENCODING, capacities: [1], tiers: [null] }]) {
+            const stored = history.appendHistorySample(payload, layout, {ts: 1710000000000, hs: 12, hs2: 6});
+            assert.deepEqual(history.toHashHistory(stored), [{ts: 1710000000000, hs: 12, hs2: 6}]);
+        }
+    });
+
     test("v2 histories are reimported when the configured tier layout changes", () => {
         const workerHistory = loadWorkerHistory();
         const now = Date.now();
