@@ -45,7 +45,7 @@ export interface PoolBlockTemplate extends ProtoMessage {
     timeCreated?: number;
     timeoutTime?: number;
     nextBlobHex(): string;
-    nextBlobWithChildNonceHex(): string;
+    nextBlobWithChildNonceHex?(): string;
 }
 
 /** The tracked job metadata attached to a miner-facing payload. */

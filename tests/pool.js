@@ -57,6 +57,7 @@ test.describe("pool runtime", { concurrency: false }, function poolRuntimeSuite(
     require("./pool/protocol/jobs.js");
     require("./pool/protocol/eth-session.js");
     require("./pool/protocol/login.js");
+    require("./pool/protocol/native-login.js");
     require("./pool/protocol/routing.js");
     require("./pool/protocol/eth-direct.js");
     require("./pool/validation/core.js");
