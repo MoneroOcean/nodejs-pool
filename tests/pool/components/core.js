@@ -308,6 +308,9 @@ test("template manager rotates templates and notifies miners through the right u
         getAuxChainXTM() {
             return null;
         },
+        getPoolHashesPerDifficulty() {
+            return 1;
+        },
         algoShortTypeStr(port) {
             return port === 39001 ? "rx/0" : "kawpow";
         },
@@ -412,7 +415,7 @@ test("template manager rotates templates and notifies miners through the right u
     assert.deepEqual(sendToWorkersCalls, []);
 });
 
-test("template manager preserves identical templates and clears recovered unchanged headers", () => {
+test("template manager preserves identical templates and accepts time-only recovered headers", () => {
     const activeBlockTemplates = {};
     const pastBlockTemplates = {};
     const lastBlockHash = {};
@@ -469,9 +472,12 @@ test("template manager preserves identical templates and clears recovered unchan
         getAuxChainXTM() {
             return null;
         },
+        getPoolHashesPerDifficulty() {
+            return 1;
+        },
         getPortLastBlockHeaderMM(_port, callback) {
             if (++headerFetches === 1) return callback(new Error("temporary daemon failure"));
-            callback(null, { hash: "same-header", height: 102, timestamp: Math.floor(Date.now() / 1000) });
+            callback(null, { hash: "same-header", height: 102, time: Math.floor(Date.now() / 1000) });
         },
         algoShortTypeStr() {
             return "rx/0";
