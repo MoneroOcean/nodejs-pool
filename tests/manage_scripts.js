@@ -321,9 +321,11 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
     test("RPC block imports reject missing headers and abort failed writes", function testImportBoundaries() {
         const vm = require("node:vm");
         for (const script of ["block_import_from_rpc", "altblock_import_from_rpc"]) {
-            for (const scenario of ["missing", "write-failure", "success"]) {
+            for (const scenario of ["missing", "invalid-reward", "write-failure", "success"]) {
                 const events = [];
                 const header = { hash: "hash", height: 123, timestamp: 1700000000, difficulty: 100, reward: 10 };
+                if (scenario === "invalid-reward") header.reward = null;
+                const rejected = scenario === "missing" || scenario === "invalid-reward";
                 const reply = callback => callback(null, scenario === "missing" ? undefined : header);
                 const codec = { encode(value) { events.push("encode"); return value; } };
                 const txn = {
@@ -348,8 +350,8 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
                     }
                 };
                 const source = fs.readFileSync(path.join(__dirname, "..", "manage_scripts", `${script}.js`), "utf8");
-                assert.throws(() => vm.runInNewContext(source, context), scenario === "missing" ? /exit:1/ : scenario === "success" ? /exit:0/ : /write failed/);
-                assert.deepEqual(events, scenario === "missing" ? [] : ["encode", "begin", "write", scenario === "success" ? "commit" : "abort"]);
+                assert.throws(() => vm.runInNewContext(source, context), rejected ? /exit:1/ : scenario === "success" ? /exit:0/ : /write failed/);
+                assert.deepEqual(events, rejected ? [] : ["encode", "begin", "write", scenario === "success" ? "commit" : "abort"]);
             }
         }
     });

@@ -14,15 +14,22 @@ cli.init(function() {
                                 console.error("Can't get block header");
                                 process.exit(1);
                         }
+                        const { timestamp, difficulty, reward } = innerBody;
+                        if (typeof timestamp !== "number" || !Number.isSafeInteger(timestamp) || timestamp < 0 ||
+                            typeof difficulty !== "number" || !Number.isFinite(difficulty) || difficulty <= 0 ||
+                            typeof reward !== "number" || !Number.isSafeInteger(reward) || reward < 0) {
+                                console.error("Invalid block header values");
+                                process.exit(1);
+                        }
                         const body2 = {
                                 "hash":       innerBody.hash,
-                                "difficulty": innerBody.difficulty,
+                                difficulty,
                                 "shares":     0,
-                                "timestamp":  innerBody.timestamp * 1000,
+                                "timestamp":  timestamp * 1000,
                                 "poolType":   0,
                                 "unlocked":   false,
                                 "valid":      true,
-                                "value":      innerBody.reward
+                                "value":      reward
                         };
                         const body3 = global.protos.Block.encode(body2);
                         const blockHeight = height;
