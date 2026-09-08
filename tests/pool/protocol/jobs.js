@@ -569,6 +569,48 @@ test("getjob can switch a miner from default jobs to kawpow-style jobs when algo
     }
 });
 
+test("main coin remains selected during algo minimum time when a competing coin becomes profitable", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+    const ethHashesPerDifficulty = global.coinFuncs.getPoolHashesPerDifficulty(ETH_PORT);
+
+    try {
+        poolModule.setTestCoinHashFactor("ETH", 0.1 / ethHashesPerDifficulty);
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 49,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-main-min-time",
+                algo: ["rx/0", "kawpow"],
+                "algo-perf": {
+                    "rx/0": 1,
+                    kawpow: 2
+                },
+                "algo-min-time": 60
+            }
+        });
+
+        assert.equal(loginReply.replies[0].error, null);
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        assert.equal(miner.curr_coin, "");
+        const selectedAt = miner.curr_coin_time;
+
+        poolModule.setTestCoinHashFactor("ETH", 5 / ethHashesPerDifficulty);
+
+        assert.equal(miner.selectBestCoin(), "");
+        assert.equal(miner.curr_coin, "");
+        assert.equal(miner.curr_coin_time, selectedAt);
+
+        miner.curr_coin_time = Date.now() - (miner.algo_min_time * 1000 + 1);
+        assert.equal(miner.selectBestCoin(), "ETH");
+        assert.equal(miner.curr_coin, "ETH");
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("getjob rejects nested algo tuning without poisoning later factor updates", async () => {
     const { runtime } = await startHarness();
     const socket = {};
