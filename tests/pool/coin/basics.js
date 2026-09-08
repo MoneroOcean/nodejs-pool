@@ -493,6 +493,28 @@ test("BTC-style network tip rewards fall back to max coinbase output for history
     }
 });
 
+test("coin RPC adapters fail closed on malformed reward data", async () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const originalRpcPortDaemon2 = global.support.rpcPortDaemon2;
+    const malformedReply = { result: { difficulty: 2, tx: [{ vout: [{ value: "not-a-number" }] }] } };
+
+    try {
+        global.support.rpcPortDaemon2 = function rpcPortDaemon2(_port, _method, _params, callback) {
+            callback(malformedReply);
+        };
+        const outcome = await new Promise((resolve) => {
+            coinFuncs.getPortAnyBlockHeaderByHash(8766, "malformed-block", false, (error, header) => {
+                resolve({ error, header });
+            });
+        });
+
+        assert.equal(outcome.error, true);
+        assert.equal(outcome.header, malformedReply);
+    } finally {
+        global.support.rpcPortDaemon2 = originalRpcPortDaemon2;
+    }
+});
+
 test("BlockTemplate derives dual-main candidate difficulty from the lowest chain difficulty", () => {
     const coinFuncs = global.coinFuncs.__realCoinFuncs;
     const originalGetAuxChainXTM = global.coinFuncs.getAuxChainXTM;
