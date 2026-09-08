@@ -3,7 +3,7 @@ const createPaymentsCommon = require("../lib/payments/common.js");
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
-/** @typedef {import("../types/runtime").SqlRow & {status: string, submit_started_at?: string | Date | null, submitted_at?: string | Date | null, tx_hash?: string | null, tx_key?: string | null, transaction_id?: number | null, finalized_at?: string | Date | null, released_at?: string | Date | null}} PaymentBatch */
+/** @typedef {import("../types/runtime").SqlRow & {id: number|string, status: string, submit_started_at?: string | Date | null, submitted_at?: string | Date | null, tx_hash?: string | null, tx_key?: string | null, transaction_id?: number | null, finalized_at?: string | Date | null, released_at?: string | Date | null}} PaymentBatch */
 /** @typedef {import("../types/runtime").SqlRow & {payment_address: string}} PaymentItem */
 /** @typedef {{batch: PaymentBatch, items: PaymentItem[], reservedBalances: import("../types/runtime").SqlRows}} BatchState */
 /** @typedef {{support: import("../types/runtime").SupportRuntime, config: import("../types/runtime").PoolConfig}} WalletDeps */
@@ -194,7 +194,7 @@ async function defaultWalletMatchChecker(batch, items, deps) {
     if (!support || typeof support.rpcWallet !== "function") {
         return { status: "wallet_unavailable", message: "wallet RPC is not available" };
     }
-    const common = createPaymentsCommon({ mysqlPool: global.mysql, support, config });
+    const common = createPaymentsCommon({ mysqlPool: global.mysql, support, config, now: Date.now });
     const heightReply = await rpcWalletCall(support, "get_height", {});
     const heightResult = isRecord(heightReply) && isRecord(heightReply["result"]) ? heightReply["result"] : null;
     const walletHeight = heightResult ? Number(heightResult["height"]) : null;
