@@ -162,6 +162,7 @@ test("xmr submit failures are retried once before final success", async () => {
         pool: { trustedMiners: false, trustThreshold: 1, trustMin: 0 }
     };
     global.database = {
+        role: "remote",
         storeBlock(height, payload) {
             storedBlocks.push({ height, payload });
         }
@@ -376,6 +377,7 @@ test("dual-submit retries keep a Tari child failure labeled as Tari", () => {
         pool: { trustedMiners: false, trustThreshold: 1, trustMin: 0 }
     };
     global.database = {
+        role: "remote",
         storeBlock(height, payload) {
             storedBlocks.push({ height, payload });
         },
