@@ -30,6 +30,77 @@ test.describe("local_comms", { concurrency: false }, () => {
         }
     });
 
+    test("cleanup warning explains the retained payout safety window", async () => {
+        const original = {
+            coinFuncs: global.coinFuncs,
+            config: global.config,
+            support: global.support
+        };
+        const db = new Database();
+        db.getOldestLockedBlockHeight = () => 100;
+        db.env = {
+            beginTxn() {
+                return { abort() {} };
+            }
+        };
+        db.shareDB = {};
+        db.lmdb = {
+            Cursor: class EmptyCursor {
+                goToRange() { return null; }
+                close() {}
+            }
+        };
+        const emails = [];
+        const templates = [];
+        global.config = {
+            general: {
+                adminEmail: "ops@example.com",
+                blockCleanWarning: 10,
+                blockCleaner: false
+            },
+            pplns: { shareMulti: 2 }
+        };
+        global.support = {
+            renderEmailTemplate(item, values, fallback) {
+                templates.push({ item, values, fallback });
+                return String(fallback).replace(/%\(([^)]+)\)s/g, function replaceValue(_match, key) {
+                    return Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : "";
+                });
+            },
+            sendEmail(...args) {
+                emails.push(args);
+            }
+        };
+        global.coinFuncs = {
+            getBlockHeaderByID(_height, callback) {
+                callback(null, { difficulty: 5 });
+            },
+            getLastBlockHeader(callback) {
+                callback(null, { height: 125, difficulty: 5 });
+            }
+        };
+
+        try {
+            const result = await new Promise(resolve => db.cleanShareDB(resolve));
+            assert.equal(result, null);
+            assert.equal(emails.length, 1);
+            assert.equal(emails[0][1], "long_runner share history retention warning");
+            assert.match(emails[0][2], /retaining share history spanning 25 block heights/);
+            assert.match(emails[0][2], /Oldest locked height: 100/);
+            assert.match(emails[0][2], /current height: 125/);
+            const bodyTemplate = templates.find(template => template.item === "longRunnerCleanBody");
+            assert.deepEqual(bodyTemplate && bodyTemplate.values, {
+                blocks: 25,
+                oldest_locked_height: 100,
+                current_height: 125
+            });
+        } finally {
+            global.coinFuncs = original.coinFuncs;
+            global.config = original.config;
+            global.support = original.support;
+        }
+    });
+
     test("cleanShareDB falls back to daemon body when err cannot be stringified", async () => {
         const original = {
             coinFuncs: global.coinFuncs,
