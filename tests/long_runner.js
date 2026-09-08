@@ -381,6 +381,15 @@ test("altblock cleanup visits numeric key zero", () => {
     assert.equal(harness.env.writeCommits, 1);
 });
 
+test("cleanup normalizes invalid scan chunk sizes before scanning", () => {
+    for (const size of [-1, 0, 0.5, Infinity, NaN]) {
+        global.__longRunnerScanChunkSize = size;
+        const harness = createFakeEnvironment({ altblockEntries: [[1, {port: 18081, unlocked: true, timestamp: 0}]] });
+        loadLongRunner().cleanAltBlockDB();
+        assert.equal(harness.altblockStore.size, 0);
+    }
+});
+
 test("cleanCacheDB yields identical results when the scan spans multiple chunks", () => {
     const now = Date.now();
     const address = "4".repeat(95);
@@ -441,12 +450,12 @@ test("cleanBlockBalanceTable keeps locked and recent hashes and deletes stale ro
     });
     const deleteBatches = [];
     createFakeEnvironment({
-        lockedBlocks: [{ hash: "keep-locked" }],
+        lockedBlocks: [{ hash: "keep-locked" }, { hash: Buffer.from("aabb", "hex") }],
         lockedAltBlocks: [{ hash: "keep-alt" }],
         mysqlQuery(sql, params) {
             if (sql.indexOf("SELECT hex FROM paid_blocks") === 0) return [{ hex: "keep-recent" }];
             if (sql.indexOf("SELECT DISTINCT hex FROM block_balance") === 0) {
-                return ["keep-locked", "keep-alt", "keep-recent"].concat(staleHexes).map(function (hex) {
+                return ["keep-locked", "keep-alt", "keep-recent", "aabb"].concat(staleHexes).map(function (hex) {
                     return { hex };
                 });
             }
