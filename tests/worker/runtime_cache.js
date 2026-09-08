@@ -252,6 +252,22 @@ test.describe("worker runtime cache", { concurrency: false }, () => {
         delete require.cache[WORKER_HISTORY_PATH];
     });
 
+    test("worker rebuilds invalid pool caches and accepts a missing payment ID", async () => {
+        const address = "4".repeat(95);
+        for (const value of [null, [], "invalid", 42]) {
+            const environment = createFakeEnvironment({
+                cacheEntries: [["global_stats", JSON.stringify(value)], ["pplns_stats", JSON.stringify(value)]],
+                shares: [{height: 1, share: createShare({paymentAddress: address, paymentID: null, identifier: "cache", rawShares: 600, shares2: 600, timestamp: Date.now() - 1000})}]
+            });
+            await runUpdate(loadWorker(), 1);
+            for (const key of ["global_stats", "pplns_stats"]) {
+                const stats = JSON.parse(environment.cacheStore.get(key));
+                assert.equal(stats.hash, 1);
+                assert.equal(stats.minerCount, 1);
+            }
+        }
+    });
+
     test("worker ignores an existing cacheUpdate marker while flushing batches", async () => {
         const now = Date.now();
         const address = "4".repeat(95);
