@@ -238,6 +238,29 @@ test.describe("worker runtime rollups", { concurrency: false }, () => {
         delete require.cache[WORKER_HISTORY_PATH];
     });
 
+    test("worker releases read transactions when cursor construction or close fails", () => {
+        for (const failure of ["construct", "close"]) {
+            createFakeEnvironment();
+            const events = [];
+            global.database.env.beginTxn = () => ({ abort() { events.push("abort"); } });
+            global.database.lmdb.Cursor = class {
+                constructor() { if (failure === "construct") throw new Error(failure); }
+                goToRange() { return null; }
+                close() { events.push("close"); throw new Error(failure); }
+            };
+            assert.throws(() => loadWorker().updateShareStats2(0, () => {}), new RegExp(failure));
+            assert.deepEqual(events, failure === "construct" ? ["abort"] : ["close", "abort"]);
+        }
+    });
+
+    test("worker scans every duplicate share at height zero", async () => {
+        const share = createShare({paymentAddress: "4".repeat(95), identifier: "zero", rawShares: 600, shares2: 600, timestamp: Date.now() - 1000});
+        const harness = createFakeEnvironment({shares: [{height: 0, share}, {height: 0, share}]});
+        await runUpdate(loadWorker(), 0);
+        const stats = JSON.parse(harness.cacheStore.get("global_stats"));
+        assert.equal(stats.hash, 2);
+    });
+
     test("worker exact rescan includes older recent shares without bucket cache", async () => {
         const now = 1710002401234;
         Date.now = function () { return now; };
