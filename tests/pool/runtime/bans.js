@@ -367,7 +367,7 @@ test("messageHandler minerPortCount stores the reported per-port counts in maste
             }
         });
 
-        assert.deepEqual(runtime.getState().minerCount[7], { [MAIN_PORT]: 2, [ETH_PORT]: 1 });
+        assert.deepEqual(runtime.getState().workerMinerCounts[7], { [MAIN_PORT]: 2, [ETH_PORT]: 1 });
     } finally {
         cluster.isMaster = originalIsMaster;
         await runtime.stop();
