@@ -183,13 +183,16 @@ function decodePayload(type, payload) {
 }
 
 function createDatabaseStub() {
+    const sentFrames = [];
     return {
+        role: "remote",
         thread_id: "",
         shares: [],
         invalidShares: [],
         blocks: [],
         altBlocks: [],
-        sendQueue: [],
+        sentFrames,
+        sendQueue: { push: frame => sentFrames.push(frame), length: () => sentFrames.length, running: () => 0 },
         initEnv() {},
         storeShare(height, payload) {
             this.shares.push({ height, payload: decodePayload("Share", payload) });

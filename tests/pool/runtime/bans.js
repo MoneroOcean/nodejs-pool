@@ -209,8 +209,8 @@ test("messageHandler sendRemote queues the payload in master mode", async () => 
         cluster.isMaster = true;
         poolModule.messageHandler({ type: "sendRemote", body: "abcd" });
 
-        assert.equal(database.sendQueue.length, 1);
-        assert.equal(database.sendQueue[0].body.equals(Buffer.from("abcd", "hex")), true);
+        assert.equal(database.sendQueue.length(), 1);
+        assert.equal(database.sentFrames[0].body.equals(Buffer.from("abcd", "hex")), true);
     } finally {
         cluster.isMaster = originalIsMaster;
         await runtime.stop();
