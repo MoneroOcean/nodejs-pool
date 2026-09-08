@@ -25,9 +25,9 @@ export interface BlockTemplateRecord extends ProtoMessage {
 export interface BlockHeader extends ProtoMessage {
     hash: string;
     height: number;
-    difficulty: number;
-    reward: number;
-    timestamp: number;
+    difficulty?: number;
+    reward?: number | null;
+    timestamp?: number;
     time?: number;
     mediantime?: number;
     diff?: number;
@@ -41,14 +41,14 @@ export interface SqlRows extends Array<SqlRow> {
     insertId?: number;
 }
 export interface SqlConnection {
-    query<T extends SqlRows | SqlRow = SqlRows>(sql: string, params?: readonly SqlParam[]): Promise<T>;
+    query<T = SqlRows>(sql: string, params?: readonly SqlParam[]): Promise<T>;
     beginTransaction(): Promise<void>;
     commit(): Promise<void>;
     rollback(): Promise<void>;
     release(): void;
 }
 export interface SqlPool {
-    query<T extends SqlRows | SqlRow = SqlRows>(sql: string, params?: readonly SqlParam[]): Promise<T>;
+    query<T = SqlRows>(sql: string, params?: readonly SqlParam[]): Promise<T>;
     getConnection(): Promise<SqlConnection>;
     end(callback?: (error?: Error) => void): void;
 }
@@ -206,14 +206,22 @@ export interface FyiOptions {
     connectionClose?: boolean;
     suppressErrorLog?: boolean;
 }
+export interface RpcOptions {
+    connectionClose?: boolean;
+    suppressErrorLog?: boolean;
+    batchSubject?: string;
+    batchKey?: string;
+    now?: number;
+    cooldownMs?: number;
+}
 
 export interface SupportRuntime {
-    rpcPortDaemon(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean): void;
-    rpcPortDaemon2(port: number, path: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean): void;
-    rpcWallet(method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean): void;
-    rpcPortWallet(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean): void;
-    rpcPortWallet2(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean): void;
-    rpcPortWalletShort(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean): void;
+    rpcPortDaemon(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean | RpcOptions): void;
+    rpcPortDaemon2(port: number, path: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean | RpcOptions): void;
+    rpcWallet(method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean | RpcOptions): void;
+    rpcPortWallet(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean | RpcOptions): void;
+    rpcPortWallet2(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean | RpcOptions): void;
+    rpcPortWalletShort(port: number, method: string, params: unknown, callback: RpcResponseCallback, noErrorReport?: boolean | RpcOptions): void;
     sendEmail(to: string, subject: string, body: string, ...extra: unknown[]): void;
     sendAdminFyi(key: string, subject: string, body: string, options?: FyiOptions): boolean;
     sendFyi(to: string, key: string, subject: string, body: string, options?: FyiOptions): boolean;
@@ -497,6 +505,10 @@ export interface ExpressApp extends EventEmitter {
 
 declare global {
     var __apiAutostart: boolean | undefined;
+    var __paymentsAutostart: boolean | undefined;
+    var __longRunnerAutostart: boolean | undefined;
+    var __longRunnerScanChunkSize: number | undefined;
+    var __remoteShareAutostart: boolean | undefined;
     var config: PoolConfig;
     var database: DatabaseRuntime;
     var mysql: SqlPool;
