@@ -212,6 +212,7 @@ test("store methods frame remote messages with the configured auth key and messa
 
     try {
         process.send = function captureSend(message) {
+            assert.equal(this, process, "process.send must retain process as its receiver");
             sentMessages.push(message);
         };
         global.config = {
