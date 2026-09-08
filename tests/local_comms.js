@@ -6,6 +6,30 @@ const test = require("node:test");
 const Database = require("../lib/common/local_comms.js");
 
 test.describe("local_comms", { concurrency: false }, () => {
+    test("cleanup rejects missing difficulty before opening a database scan and can retry", async () => {
+        const original = { coinFuncs: global.coinFuncs, config: global.config, error: console.error };
+        const db = new Database();
+        db.getOldestLockedBlockHeight = () => null;
+        global.config = { general: {}, pplns: { shareMulti: 2 } };
+        console.error = () => {};
+        let calls = 0;
+        global.coinFuncs = { getLastBlockHeader(callback) {
+            calls += 1;
+            callback(null, { height: 42 });
+        } };
+        try {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const error = await new Promise(resolve => db.cleanShareDB(resolve));
+                assert.match(error.message, /Invalid current block difficulty/);
+            }
+            assert.equal(calls, 2);
+        } finally {
+            global.coinFuncs = original.coinFuncs;
+            global.config = original.config;
+            console.error = original.error;
+        }
+    });
+
     test("cleanShareDB falls back to daemon body when err cannot be stringified", async () => {
         const original = {
             coinFuncs: global.coinFuncs,
