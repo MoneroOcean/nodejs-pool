@@ -732,7 +732,7 @@ test("login normalizes undefined options and rejects malformed field types witho
     try {
         const accepted = invokePoolMethod({ socket: {}, method: "login", ip: "10.0.2.1", params: { login: MAIN_WALLET, pass: "x", agent: undefined } });
         assert.equal(accepted.replies[0].error, null);
-        for (const [index, fields] of [{ login: 12 }, { pass: {} }, { agent: [] }, { algo: [1] }, { "algo-perf": { "rx/0": "fast" } }].entries()) {
+        for (const [index, fields] of [{ login: 12 }, { pass: {} }, { agent: [] }, { algo: [1] }, { algo: ["rx/0"], "algo-perf": { "rx/0": "fast" } }].entries()) {
             const rejected = invokePoolMethod({ socket: {}, method: "login", ip: `10.0.3.${index + 1}`, params: { login: MAIN_WALLET, pass: "x", ...fields } });
             assert.equal(rejected.replies.length, 0);
             assert.equal(rejected.finals.length, 1);
