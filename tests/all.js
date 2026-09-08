@@ -17,6 +17,7 @@ if (process.env.NODEJS_POOL_RUN_LIVE_TESTS === "1") require("./live.js");
 require("./payments.js");
 require("./payment_batch_unlock.js");
 require("./manage_scripts.js");
+require("./deployment_units.js");
 require("./pool_health_guard.js");
 require("./security/lint-sensitive-data.js");
 

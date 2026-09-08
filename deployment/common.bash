@@ -326,11 +326,12 @@ EOF
 
 write_tari_merge_mining_service() {
   local dependencies="$1"
+  # Keep startup ordering without propagating daemon restarts: this process owns
+  # in-flight mining templates and its RPC clients reconnect after an outage.
   cat >/lib/systemd/system/xtm_mm.service <<EOF
 [Unit]
 Description=Tari Merge Mining Daemon
 After=network.target $dependencies
-PartOf=$dependencies
 
 [Service]
 ExecStart=/usr/local/src/tari/target/release/minotari_merge_mining_proxy --non-interactive-mode
