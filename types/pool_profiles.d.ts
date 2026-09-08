@@ -1,5 +1,6 @@
 import type { CoinProfile } from "./coin_profiles";
 import type { CoinRuntime, ProtoMessage, SupportRuntime } from "./runtime";
+import type { Socket } from "node:net";
 
 /** Values returned to a miner by a pool job builder. */
 export type PoolJobPayload = ProtoMessage | unknown[];
@@ -14,6 +15,10 @@ export interface XtmBlock extends ProtoMessage {
 /** A block template after the coin runtime has attached pool-facing helpers. */
 export interface PoolBlockTemplate extends ProtoMessage {
     idHash: string;
+    coinHashFactor: number;
+    isHashFactorChange: boolean;
+    templateSubmissions?: Set<string>;
+    templateSubmissionLimitLogged?: boolean;
     coin: string;
     port: number;
     height: number;
@@ -31,6 +36,7 @@ export interface PoolBlockTemplate extends ProtoMessage {
     clientNonceLocation?: number;
     reserved_offset?: number;
     blocktemplate_blob?: string;
+    parent_blocktemplate_blob?: string;
     buffer?: Buffer;
     xtm_height?: number;
     xtm_block?: XtmBlock;
@@ -43,7 +49,7 @@ export interface PoolBlockTemplate extends ProtoMessage {
 }
 
 /** The tracked job metadata attached to a miner-facing payload. */
-export interface PoolJob {
+export interface PoolJob extends ProtoMessage {
     id: string;
     coin: string;
     blob_type_num: number;
@@ -56,13 +62,19 @@ export interface PoolJob {
     coinHashFactor: number;
     hashesPerDifficulty: number;
     coinDifficultyFactor: number;
-    submissions: Map<string, unknown>;
+    submissions: Map<string, number>;
     usesProxyNonce?: boolean;
     clientPoolLocation?: number;
     clientNonceLocation?: number;
     c29_packed_edges?: number[];
     rewarded_difficulty?: number;
     rewarded_difficulty2?: number;
+}
+
+/** The bounded queue used to retain jobs for duplicate-submission checks. */
+export interface PoolJobBuffer {
+    enq(job: PoolJob): void;
+    toarray(): PoolJob[];
 }
 
 /** Fields of a miner that are consumed by executable pool handlers. */
@@ -79,12 +91,160 @@ export interface PoolMinerView {
     last_target?: string;
     trust?: {trust: number, check_height: number};
     trust_key?: string;
-    pushMessage(message: unknown): void;
+    pushMessage(message: Record<string, unknown>): void;
     ensureEthExtranonce?(): boolean;
     getCoinJob(coin: string, params: PoolJobParams): PoolJobPayload | null;
     sendCoinJob(coin: string, params: PoolJobParams, options?: {job?: PoolJobPayload | null}): void;
     rememberEthProxyWork?(job: PoolJobPayload): void;
     buildEthProxyWorkResult?(job: PoolJobPayload): unknown;
+}
+
+/**
+ * Complete miner state shared by protocol, verification, and retarget code.
+ * Optional fields represent values that are genuinely absent until a miner
+ * logs in, selects a coin, or receives its first job.
+ */
+export interface PoolMiner extends PoolMinerView {
+    id: string;
+    payout: string;
+    address: string;
+    paymentID: string | null;
+    identifier: string;
+    debugMiner: boolean;
+    whiteList: boolean;
+    email: string;
+    logString: string;
+    agent: string;
+    invalidLogKey?: string;
+    algos: Record<string, number>;
+    coin_perf: Record<string, number>;
+    algo_min_time: number;
+    payout_div: Record<string, number> | null;
+    fixed_diff: boolean;
+    difficulty: number;
+    error: string;
+    valid_miner: boolean;
+    delay_reply?: number;
+    removed_miner: boolean;
+    xmrig_proxy: boolean;
+    ipAddress: string;
+    connectTime: number;
+    lastSocketActivity: number;
+    lastProtocolActivity: number;
+    lastContact: number;
+    lastValidShareTimeMs: number;
+    hasSubmittedValidShare: boolean;
+    acceptedShareCount: number;
+    invalidJobIdCount: number;
+    lastShareTime: number;
+    validShares: number;
+    invalidShares: number;
+    hashes: number;
+    wallet_key: string;
+    poolTypeEnum: number;
+    port: number;
+    portType: string | number;
+    protocol: string;
+    login_extensions: string[];
+    submit_result: boolean;
+    validJobs: PoolJobBuffer;
+    cachedJob: PoolJobPayload | null;
+    curr_coin_min_diff: number;
+    curr_coin?: string | false;
+    curr_coin_time?: number;
+    jobLastBlockHash?: string;
+    newDiffToSet?: number | null;
+    newDiffRecommendation?: number | null;
+    invalidShareCount?: number;
+    lastInvalidShareTime?: number;
+    lastSlowHashAsyncDelay?: number;
+    trust?: {trust: number, check_height: number};
+    proxyMinerName?: string;
+    setAlgos(nextAlgos: string[], nextAlgosPerf?: Record<string, unknown>, nextAlgoMinTime?: unknown): string;
+    setNewDiff(difficulty: number): boolean;
+    calcNewDiff(): number;
+    selectBestCoin(): string | false;
+    sendSameCoinJob(): void;
+    sendBestCoinJob(): void;
+    getBestCoinJob(): PoolJobPayload | null | undefined;
+    touchSocketActivity(timeNow?: number): void;
+    touchProtocolActivity(timeNow?: number): void;
+    touchValidShare(timeNow?: number): void;
+    syncUserRecord(timeNow?: number): void;
+    heartbeat(): void;
+    storeInvalidShare(): void;
+    checkBan(validShare: boolean): boolean;
+    ensureEthExtranonce?(): boolean;
+}
+
+/** Socket state attached by the pool transport and protocol layers. */
+export interface PoolSocket extends Socket {
+    miner_id?: string;
+    firstShareTimer?: NodeJS.Timeout | null;
+    authTimer?: NodeJS.Timeout | null;
+    finalReplyTimer?: NodeJS.Timeout | null;
+    destroyReason?: string;
+    __poolClosedByRegistry?: boolean;
+    finalizing?: boolean;
+    debugMiner?: boolean;
+    eth_agent?: string;
+    eth_extranonce_id?: number;
+    eth_extranonce_preview_id?: number;
+    mo_native?: boolean;
+    submit_result?: boolean;
+    protocolErrorCount?: number;
+    lastSocketActivity?: number;
+    localAddress?: string;
+    localFamily?: string;
+    localPort?: number;
+    normalizedRemoteAddress?: string;
+    subnet24?: string | null;
+}
+
+/** Mutable hash-rate window shared by miners and wallet/proxy aggregates. */
+export interface PoolHashRateSource {
+    hashes: number;
+    connectTime: number;
+    connectTimeShift?: number;
+    hashesShift?: number;
+}
+
+/** State used by pool modules after startup has normalized all shared maps. */
+export interface PoolRuntimeState {
+    nonceCheck32: RegExp;
+    nonceCheck64: RegExp;
+    hashCheck32: RegExp;
+    hexMatch: RegExp;
+    localhostCheck: RegExp;
+    activeMiners: Map<string, PoolMiner>;
+    activeMinersByPayout: Map<string, Set<string>>;
+    activeMinerSockets: Map<string, PoolSocket>;
+    activeBlockTemplates: Record<string, PoolBlockTemplate>;
+    pastBlockTemplates: Record<string, {enq(template: PoolBlockTemplate): void, toarray(): PoolBlockTemplate[]} >;
+    bannedTmpIPs: Record<string, number>;
+    bannedTmpWallets: Record<string, number>;
+    bannedBigTmpWallets: Record<string, number>;
+    bannedAddresses: Record<string, string>;
+    notifyAddresses: Record<string, string>;
+    minerWallets: Record<string, {last_ver_shares: number, hashes: number, connectTime: number, count: number, submissionBudget: boolean} & PoolHashRateSource>;
+    proxyMiners: Record<string, {last_ver_shares?: number, hashes: number, connectTime: number, count: number, submissionBudget: boolean} & PoolHashRateSource>;
+    walletTrust: Record<string, number>;
+    walletLastSeeTime: Record<string, number>;
+    walletLastCheckTime: Record<string, number>;
+    minerAgents: Record<string, number>;
+    walletDebug: Record<string, unknown>;
+    ipWhitelist: Record<string, unknown>;
+    lastMinerLogTime: Record<string, number>;
+    lastMinerNotifyTime: Record<string, number>;
+    lastCoinHashFactorMM: Record<string, number>;
+    anchorState: {current: number | undefined, previous: number | undefined};
+    shareStats: {totalShares: number, trustedShares: number, normalShares: number, invalidShares: number, outdatedShares: number, throttledShares: number};
+    rpcRateBuckets: Map<string, {tokens: number, lastRefillAt: number}>;
+    threadName: string | undefined;
+    minerCount: Record<number, number>;
+    workerMinerCounts: Record<number, Record<number, number>>;
+    freeEthExtranonces: number[];
+    lastEthExtranonceOverflowNoticeAt: number;
 }
 
 export interface PoolJobParams {
@@ -133,8 +293,8 @@ export interface PoolLoginContext {
     jobParams: PoolJobParams;
     miner: PoolMinerView;
     minerId: string;
-    sendReply(error: string | null, result?: unknown): void;
-    sendReplyFinal(error: string): void;
+    sendReply(error: unknown, result?: unknown): void;
+    sendReplyFinal(error: unknown, delayReply?: number): void;
 }
 
 export interface PoolExtraNonceLoginContext extends PoolLoginContext {
@@ -235,7 +395,7 @@ export interface PoolRpcResult {
 }
 
 export interface PoolBlockHashContext {
-    blockData: Buffer | unknown[];
+    blockData: Buffer | unknown[] | string;
     blockTemplate: PoolBlockTemplate;
     coinFuncs: PoolBlockHashCoinRuntime;
     isDisplaySubmitPort: boolean;
@@ -265,6 +425,13 @@ export interface PoolSubmitBlockContext {
 }
 
 /** Executable settings shared by all pool protocol profiles. */
+/** Fields actually read by the common submission validator. */
+export interface PoolSubmitValidationSettings {
+    sharedTemplateNonces?: boolean;
+    requireFullNonceExtraNoncePrefix?: boolean;
+    validateExtraSubmitFields?(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
+}
+
 export interface PoolProfileSettings {
     minDifficulty: number | "config";
     niceHashDiffMultiplier?: number;
@@ -286,8 +453,8 @@ export interface PoolProfileSettings {
     buildProxyJobPayload(this: PoolProfileSettings, context: BuildJobContext): PoolJobPayload;
     pushJob(this: PoolProfileSettings, context: PushJobContext): void;
     parseMiningSubmitParams?(context: {params: PoolSubmitParams}): boolean;
-    validateSubmitParams(this: PoolProfileSettings, context: PoolSubmitContext): boolean;
-    validateExtraSubmitFields?(this: PoolProfileSettings, context: PoolSubmitContext): boolean;
+    validateSubmitParams(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
+    validateExtraSubmitFields?(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
     submissionKey(context: PoolSubmissionKeyContext): string;
     submitSuccess?: "boolean" | "status";
     authorizeAlgoState(context: PoolAuthorizeAlgoContext): PoolAuthorizeAlgoState;
