@@ -20,7 +20,7 @@ function makeFakeDatabase(putBinaryKeys) {
         commit() {},
         abort() {}
     };
-    return { env: { beginTxn() { return txn; } }, cacheDB: {}, shareDB: {} };
+    return { role: "local", env: { beginTxn() { return txn; } }, cacheDB: {}, shareDB: {} };
 }
 
 function withGlobals(run) {
@@ -45,6 +45,11 @@ function share(overrides) {
         paymentAddress: "44address",
         identifier: "rig01",
         poolType: 0,
+        foundBlock: false,
+        trustedShare: false,
+        poolID: 1,
+        blockDiff: 100,
+        timestamp: Date.now(),
         port: 18081,
         raw_shares: 10,
         blockHeight: 100
@@ -101,6 +106,16 @@ test.describe("remote share store validation", { concurrency: false }, function 
                     if (typeof value === "number") assert.equal(Number.isFinite(value), true, `non-finite stat written for ${write.key}`);
                 }
             }
+        });
+    });
+
+    test("malformed optional fields do not discard valid shares in the same batch", () => {
+        withGlobals(() => {
+            const keys = [];
+            const store = createShareStore({ database: makeFakeDatabase(keys) });
+            const invalid = [{ paymentID: {} }, { port: "18081" }, { shares: NaN }, { shares2: [] }, { share_num: 1.5 }, { poolType: 99 }, { poolID: 2 ** 40 }];
+            assert.equal(store.storeShares([...invalid.map(fields => share(fields)), share({ blockHeight: 101, blockDiff: 2 ** 60, paymentID: null })]), true);
+            assert.deepEqual(keys, [101]);
         });
     });
 
