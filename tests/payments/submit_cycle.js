@@ -12,6 +12,22 @@ const {
 } = require("./common/fixtures");
 
 test.describe("submit cycle", { concurrency: false }, function submitCycleSuite() {
+    test("malformed wallet balance replies hold the batch without submitting funds", async () => {
+        for (const result of [null, true, 10, "balance", []]) {
+            const harness = createHarness({
+                balances: [{ id: 1, payment_address: STANDARD_A, payment_id: null, pool_type: "pplns", amount: Math.round(0.2 * COIN) }],
+                walletScript: { getbalance: [{ result }] }
+            });
+            await captureConsole(() => harness.runtime.runCycle());
+            assert.equal(harness.wallet.calls.some(call => call.method === "transfer"), false);
+            const batch = harness.mysql.state.store.paymentBatches[0];
+            assert.equal(batch.status, "retrying");
+            assert.match(batch.last_error_text, /wallet getbalance failed/);
+            assert.equal(harness.mysql.state.store.transactions.length, 0);
+            assert.equal(harness.mysql.state.store.payments.length, 0);
+        }
+    });
+
     test("runCycle finalizes an integrated batch and logs the full intended and finalized batch details", async () => {
         const transferFee = 300000000;
         const longTxKey = "b".repeat(1088);
