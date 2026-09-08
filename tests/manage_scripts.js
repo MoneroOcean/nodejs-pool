@@ -501,6 +501,29 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }
     });
 
+    test("single altblock pay edits use the shared transaction helper and preserve exit status", () => {
+        const vm = require("node:vm");
+        const source = fs.readFileSync(path.join(__dirname, "..", "manage_scripts", "altblock_pay_set.js"), "utf8");
+        for (const found of [true, false]) {
+            const block = { pay_value: 0, unlocked: true };
+            const context = {
+                require(name) {
+                    if (name.endsWith("altblock_update_common.js")) return (hashes, mutate) => {
+                        assert.deepEqual(Array.from(hashes), ["hash"]);
+                        if (found) mutate(block);
+                        return found ? 1 : 0;
+                    };
+                    return () => ({ arg: () => "hash", numberArg: () => 2, init: callback => callback() });
+                },
+                global: { support: { decimalToCoin: value => value * 100 } },
+                console: { log() {} },
+                process: { exit: code => { throw new Error(`exit:${code}`); } }
+            };
+            assert.throws(() => vm.runInNewContext(source, context), new RegExp(`exit:${found ? 0 : 1}`));
+            assert.deepEqual(block, found ? { pay_value: 200, unlocked: false } : { pay_value: 0, unlocked: true });
+        }
+    });
+
     test("CLI iterators include key zero and release readers on failures", function testCliReaderCleanup() {
         const cli = require("../script_utils.js")();
         const originalDatabase = global.database;
