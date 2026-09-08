@@ -161,6 +161,7 @@ function installRemoteShareGlobals(overrides) {
         }
     };
     global.database = {
+        role: "local",
         storeInvalidShare(_payload, callback) {
             callback(true);
         },

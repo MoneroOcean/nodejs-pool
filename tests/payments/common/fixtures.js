@@ -243,6 +243,7 @@ function createHarness(options = {}) {
     support.rpcWallet = wallet.rpcWallet;
     const databaseCache = new Map();
     const database = {
+        role: "local",
         setCache(key, value) {
             databaseCache.set(key, value);
         },

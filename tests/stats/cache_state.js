@@ -100,6 +100,7 @@ function createTestEnvironment(options = {}) {
         }
     };
     global.database = {
+        role: "local",
         env: {
             beginTxn() {
                 return {

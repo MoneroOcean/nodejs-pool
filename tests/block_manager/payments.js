@@ -79,6 +79,7 @@ function createPaymentEnvironment(options = {}) {
 
     const cacheState = new Map();
     const database = {
+        role: "local",
         env: {
             beginTxn() {
                 lmdbState.openReaders += 1;

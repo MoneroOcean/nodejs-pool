@@ -252,8 +252,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
             transfer: [{ result: { fee: 100, tx_hash: "4".repeat(64), tx_key: "5".repeat(64) } }]
         });
         support.rpcWallet = wallet.rpcWallet;
-        const databaseA = { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
-        const databaseB = { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
+        const databaseA = { role: "local", cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
+        const databaseB = { role: "local", cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
         const payments = loadPaymentsModule();
         const runtimeA = payments.createPaymentsRuntime({
             clearTimeout,
@@ -360,8 +360,8 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         });
         support.rpcWallet = wallet.rpcWallet;
         const payments = loadPaymentsModule();
-        const databaseA = { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
-        const databaseB = { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
+        const databaseA = { role: "local", cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
+        const databaseB = { role: "local", cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
         const runtimeA = payments.createPaymentsRuntime({
             advisoryLockName: "nodejs-pool:payments:a",
             clearTimeout,
@@ -464,7 +464,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         const runtime = payments.createPaymentsRuntime({
             clearTimeout,
             config: createConfig(),
-            database: { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } },
+            database: { role: "local", cache: new Map(), setCache(key, value) { this.cache.set(key, value); } },
             mysql: sharedMysql,
             now: clock.now.bind(clock),
             setTimeout,
@@ -488,7 +488,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         const support = createSupport(clock, sentEmails);
         const wallet = createWallet();
         support.rpcWallet = wallet.rpcWallet;
-        const database = { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
+        const database = { role: "local", cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
         const payments = loadPaymentsModule();
         const runtime = payments.createPaymentsRuntime({
             clearTimeout,
@@ -530,7 +530,7 @@ test.describe("payments runtime", { concurrency: false }, function paymentsRunti
         const support = createSupport(clock, sentEmails);
         const wallet = createWallet();
         support.rpcWallet = wallet.rpcWallet;
-        const database = { cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
+        const database = { role: "local", cache: new Map(), setCache(key, value) { this.cache.set(key, value); } };
         const payments = loadPaymentsModule();
         const runtime = payments.createPaymentsRuntime({
             clearTimeout,

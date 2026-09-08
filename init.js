@@ -11,6 +11,7 @@ const resolveCoinConfig = require("./resolve_coin_config.js");
 const path = require('path');
 const applyConfigRows = require("./lib/common/config_rows.js");
 const isPrimaryProcess = require("./lib/common/is_primary_process.js");
+const { getInitializedLocalDatabase, getRemoteDatabase } = require("./lib/common/database.js");
 
 const moduleOption = argv["module"];
 const toolOption = argv["tool"];
@@ -26,7 +27,6 @@ global.config = startupConfig;
 global.mysql = mysql.createPool(global.config.mysql);
 global.protos = protobuf(fs.readFileSync('./lib/common/data.proto'));
 global.argv = argv;
-let comms;
 let coinInc;
 /** @type {unknown} */
 let activeModule = null;
@@ -78,7 +78,8 @@ function closeMysql() {
 /** @returns {Promise<void>} */
 function syncDatabaseEnv() {
     return new Promise(function onSync(resolve) {
-        const env = global.database && global.database.env;
+        const database = global.database;
+        const env = database && database.role === "local" ? database.env : null;
         if (!env || typeof env.sync !== "function") {
             resolve();
             return;
@@ -94,7 +95,17 @@ function syncDatabaseEnv() {
 let databaseEnvClosed = false;
 function closeDatabaseEnv() {
     if (databaseEnvClosed) return;
-    const env = global.database && global.database.env;
+    const database = global.database;
+    if (database && database.role === "remote") {
+        databaseEnvClosed = true;
+        try {
+            database.close();
+        } catch (error) {
+            console.error(`Remote database close failed: ${  shutdownErrorMessage(error)}`);
+        }
+        return;
+    }
+    const env = database && database.role === "local" ? database.env : null;
     if (!env || typeof env.close !== "function") return;
     // Mark closed before calling close() so a later exit handler never double-closes (which throws).
     databaseEnvClosed = true;
@@ -210,12 +221,16 @@ configRows.then(function (rows) {
     coinInc = require(resolvedCoinConfig.funcFile);
     global.coinFuncs = new coinInc();
     if (moduleName === 'pool'){
-        comms = require('./lib/pool/remote_uplink');
+        const RemoteDatabase = require('./lib/pool/remote_uplink');
+        const remoteDatabase = new RemoteDatabase();
+        remoteDatabase.initEnv();
+        global.database = getRemoteDatabase(remoteDatabase);
     } else {
-        comms = require('./lib/common/local_comms');
+        const LocalDatabase = require('./lib/common/local_comms');
+        const localDatabase = new LocalDatabase();
+        localDatabase.initEnv();
+        global.database = getInitializedLocalDatabase(localDatabase);
     }
-    global.database = new comms();
-    global.database.initEnv();
     installGracefulShutdown((moduleName !== null) ? moduleName : ((toolName !== null) ? toolName : 'process'));
     global.coinFuncs.blockedAddresses.push(global.config.pool.address);
     global.coinFuncs.blockedAddresses.push(global.config.payout.feeAddress);

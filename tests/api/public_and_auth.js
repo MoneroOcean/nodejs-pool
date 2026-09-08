@@ -143,6 +143,7 @@ function createDatabase(options) {
     };
 
     return {
+        role: "local",
         state,
         thread_id: "",
         getCache(key) {

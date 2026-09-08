@@ -149,6 +149,7 @@ function createFakeEnvironment(options = {}) {
         }
     };
     global.database = {
+        role: "local",
         env,
         lmdb: { Cursor },
         cacheDB,

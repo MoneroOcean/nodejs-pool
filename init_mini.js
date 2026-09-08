@@ -2,6 +2,7 @@
 const applyConfigRows = require("./lib/common/config_rows.js");
 const path = require("path");
 const resolveCoinConfig = require("./resolve_coin_config.js");
+const { getInitializedLocalDatabase } = require("./lib/common/database.js");
 
 const REPO_ROOT = __dirname;
 const CONFIG_PATH = path.join(REPO_ROOT, "config.json");
@@ -15,7 +16,8 @@ const DATA_PROTO_PATH = path.join(REPO_ROOT, "lib/common/data.proto");
 let envClosed = false;
 function closeEnv() {
     if (envClosed) return;
-    const env = global.database && global.database.env;
+    const database = global.database;
+    const env = database && database.role === "local" ? database.env : null;
     if (!env || typeof env.close !== "function") return;
     envClosed = true;
     try {
@@ -49,8 +51,9 @@ function init(callback) {
         const coinInc = require(resolvedCoinConfig.funcFile);
         global.coinFuncs = new coinInc();
         const comms = require("./lib/common/local_comms");
-        global.database = new comms();
-        global.database.initEnv();
+        const localDatabase = new comms();
+        localDatabase.initEnv();
+        global.database = getInitializedLocalDatabase(localDatabase);
         process.on("exit", closeEnv);
     }).then(callback);
 }

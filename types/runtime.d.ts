@@ -318,7 +318,7 @@ export interface CoinRuntime {
     is_miner_agent_no_haven_support(agent: string): boolean;
     getCoinMinDifficulty(key: string | number): number;
     getNiceHashMinimumDifficulty(key: string | number): number;
-    algoShortTypeStr(port: number): string;
+    algoShortTypeStr(port: number, version?: number): string;
     c29(header: Buffer, ring: number[], port: number): boolean;
     c29_packed_edges(ring: number[], blobTypeNum: number, hint?: number | string | ProtoMessage): string;
     c29_cycle_hash(packedEdges: string): Buffer;
@@ -329,15 +329,7 @@ export interface CoinRuntime {
     [method: string]: unknown;
 }
 
-export interface DatabaseRuntime {
-    env: LmdbEnv;
-    lmdb: LmdbApi;
-    shareDB: LmdbDbi;
-    blockDB: LmdbDbi;
-    altblockDB: LmdbDbi;
-    cacheDB: LmdbDbi;
-    thread_id: string | number;
-    sendQueue: Array<unknown>;
+export interface LocalDatabaseMethods {
     getCache(key: string): unknown;
     setCache(key: string, value: unknown): void;
     bulkSetCache?(entries: Record<string, unknown>): void;
@@ -346,9 +338,6 @@ export interface DatabaseRuntime {
     getAltBlockList(poolType: string | null, port?: number | null, minHeight?: number, maxHeight?: number): AltBlockListEntry[];
     getValidLockedBlocks(): BlockRecord[];
     getValidLockedAltBlocks(): AltBlock[];
-    storeBlock(height: number, data: Buffer): void;
-    storeAltBlock(timestamp: number, data: Buffer): void;
-    storeShare(height: number, data: Buffer): void;
     storeInvalidShare(data: Buffer, callback: (stored: boolean) => void): void;
     unlockBlock(hash: string | Buffer): void;
     unlockAltBlock(hash: string | Buffer): void;
@@ -356,12 +345,69 @@ export interface DatabaseRuntime {
     invalidateAltBlock(id: number | string): void;
     payReadyBlock(hash: string | Buffer): void;
     payReadyAltBlock(hash: string | Buffer): void;
-    changeAltBlockPayStageStatus(id: number | string, stage: number, status: number): void;
+    changeAltBlockPayStageStatus(id: number | string, stage: string, status: string): void;
     changeAltBlockPayValue(id: number | string, value: number): void;
     moveAltBlockReward(sourceId: number | string, targetId: number | string, amount: number): void;
-    cleanShareDB(callback: (error?: Error) => void): void;
+    getOldestLockedBlockHeight(): number | null;
+    cleanShareDB(callback: (error?: Error | null) => void): void;
     initEnv(): void;
 }
+
+export interface LocalDatabaseRuntime extends LocalDatabaseMethods {
+    readonly role: "local";
+    env: LmdbEnv;
+    lmdb: LmdbApi;
+    shareDB: LmdbDbi;
+    blockDB: LmdbDbi;
+    altblockDB: LmdbDbi;
+    cacheDB: LmdbDbi;
+    /** Set by modules that need a process label for log messages. */
+    thread_id?: string | number;
+}
+
+/** The constructor state before initEnv has opened the LMDB resources. */
+export interface LocalDatabasePending extends LocalDatabaseMethods {
+    readonly role: "local";
+    env: LmdbEnv | null;
+    lmdb: LmdbApi;
+    shareDB: LmdbDbi | null;
+    blockDB: LmdbDbi | null;
+    altblockDB: LmdbDbi | null;
+    cacheDB: LmdbDbi | null;
+    thread_id?: string | number;
+}
+
+export interface RemoteSendQueue {
+    push(task: { body: Buffer }, callback?: () => void): void;
+    length(): number;
+    running(): number;
+}
+
+export interface RemoteSendStats {
+    failed: number;
+    networkErrors: number;
+    success: number;
+    timeouts: number;
+    errorCounts: Record<string, number>;
+    statusCounts: Record<string, number>;
+}
+
+export interface RemoteDatabaseRuntime {
+    readonly role: "remote";
+    thread_id?: string | number;
+    sendQueue: RemoteSendQueue;
+    queueMonitor: NodeJS.Timeout | null;
+    storeBlock(height: number, data: Buffer): void;
+    storeAltBlock(timestamp: number, data: Buffer): void;
+    storeShare(height: number, data: Buffer): void;
+    storeInvalidShare(data: Buffer): void;
+    initEnv(): void;
+    close(): void;
+    logQueueState(queue: RemoteSendQueue, stats: RemoteSendStats): void;
+}
+
+export type DatabaseRuntime = LocalDatabaseRuntime | RemoteDatabaseRuntime;
+export type DatabaseCandidate = LocalDatabasePending | DatabaseRuntime;
 
 export interface PoolConfig {
     api: Record<string, unknown>;
@@ -448,6 +494,8 @@ export interface PoolSettings {
     minerTimeout: number;
     workerMax: number;
     retargetTime: number;
+    minerThrottleShareWindow: number;
+    minerThrottleSharePerSec: number;
     proxyWorkerMax?: number;
     geoDNS?: string;
     trustedMiners?: string[];

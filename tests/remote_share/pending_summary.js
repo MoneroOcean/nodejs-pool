@@ -46,6 +46,7 @@ function installRemoteShareGlobals(overrides) {
         }
     };
     global.database = {
+        role: "local",
         storeInvalidShare(_payload, callback) {
             callback(true);
         },
@@ -119,6 +120,7 @@ function createPendingJobDatabase() {
     }
 
     const database = {
+        role: "local",
         blockDB: { name: "blockDB" },
         altblockDB: { name: "altblockDB" },
         env: {
