@@ -5,6 +5,8 @@ module.exports = [
   {
     ignores: [
       "node_modules/**",
+      // Declaration files are checked by TypeScript, not the JavaScript parser.
+      "**/*.d.ts",
       // Downloaded third-party miner code pulled in by live tests (gitignored).
       ".cache/**",
       // Generated local test outputs (gitignored).

@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2023",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": [
+      "node"
+    ],
+    "moduleDetection": "force",
+    "noImplicitOverride": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "*.js",
+    "lib/**/*.js",
+    "manage_scripts/**/*.js",
+    "user_scripts/**/*.js",
+    "block_share_dumps/**/*.js",
+    "scripts/**/*.js",
+    "types/**/*.d.ts",
+    "tests/typecheck/**/*.js",
+    "lib2/types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "test-artifacts"
+  ]
+}

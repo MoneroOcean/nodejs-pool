@@ -142,10 +142,13 @@ Additional suites are defined in `package.json`:
 
 | Command | Scope |
 | --- | --- |
-| `npm test` | Full local suite (`tests/all.js`) |
+| `npm test` | Lint, strict JavaScript type checks, and full local suite (`tests/all.js`) |
+| `npm run typecheck` | Check production JavaScript and compile-only contract tests; also check `lib2` when installed |
 | `npm run test:deploy` | Deployment-oriented checks (`tests/deploy.js`) |
 | `npm run test:live` | Live integration checks against a running pool (`tests/live.js`) |
 | `npm run test:live:sg` | Live checks targeting `sg.moneroocean.stream` |
+
+Type checks use TypeScript with JSDoc and inference; there is no build step. Annotate public contracts and ambiguous boundaries, and let TypeScript infer ordinary local values. Validate optional input at the boundary before passing it into core functions. Compile-only tests in `tests/typecheck/` also verify that invalid inputs remain rejected.
 
 Caveats:
 

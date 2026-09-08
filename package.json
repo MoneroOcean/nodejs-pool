@@ -15,11 +15,12 @@
   "scripts": {
     "lint": "eslint . && npm run lint:sensitive",
     "lint:sensitive": "node scripts/lint-sensitive-data.js",
-    "pretest": "npm run lint",
+    "pretest": "npm run lint && npm run typecheck",
     "test": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/all.js",
     "test:deploy": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/deploy.js",
     "test:live": "node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/live.js",
-    "test:live:sg": "NODEJS_POOL_LIVE_TARGET_HOST=sg.moneroocean.stream node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/live.js"
+    "test:live:sg": "NODEJS_POOL_LIVE_TARGET_HOST=sg.moneroocean.stream node --require ./tests/common/test_output_buffer.js --test --test-reporter=./tests/common/spec_reporter.js --test-concurrency=1 tests/live.js",
+    "typecheck": "node scripts/typecheck.js"
   },
   "repository": {
     "type": "git",
@@ -53,6 +54,8 @@
   "devDependencies": {
     "crypto-js": "4.2.0",
     "eslint": "9.39.4",
-    "globals": "17.6.0"
+    "globals": "17.6.0",
+    "typescript": "5.9.3",
+    "@types/node": "22.19.0"
   }
 }
