@@ -197,7 +197,8 @@ function installRemoteShareGlobals(overrides) {
 }
 
 test.describe("remote share ingress", { concurrency: false }, () => {
-test("remote_share accepts valid share frames and flushes queued shares", async () => {
+for (const shareBatchSize of [undefined, -1, 0.5, NaN, Infinity]) {
+test(`remote_share flushes valid shares with batch size ${shareBatchSize}`, async () => {
     const restore = installRemoteShareGlobals();
     const shareStore = {
         batches: [],
@@ -221,6 +222,7 @@ test("remote_share accepts valid share frames and flushes queued shares", async 
         port: 0,
         pendingJobs,
         shareFlushIntervalMs: 10,
+        shareBatchSize,
         shareStore
     });
 
@@ -258,6 +260,8 @@ test("remote_share accepts valid share frames and flushes queued shares", async 
         restore();
     }
 });
+
+}
 
 test("remote_share rejects new frames after LMDB map full while flushing shares", async () => {
     const restore = installRemoteShareGlobals();
