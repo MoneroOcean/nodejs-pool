@@ -27,6 +27,7 @@ declare module "express" {
         limit?: string | number;
         type?: string | string[] | ((request: import("./runtime").ExpressRequest) => boolean);
         extended?: boolean;
+        parameterLimit?: number;
     }
     interface ExpressFactory {
         (): import("./runtime").ExpressApp;
@@ -79,12 +80,14 @@ declare module "node-powhash" {
         argon2(blob: Buffer, variant: number): Buffer;
         kawpow(blob: Buffer, nonce: Buffer, mixhash: Buffer): Buffer;
         kawpow_light(blob: Buffer, nonce: Buffer, height: number): [Buffer, Buffer];
-        ethash(blob: Buffer, nonce: Buffer, height: number): Buffer;
-        etchash(blob: Buffer, nonce: Buffer, height: number): Buffer;
+        ethash(blob: Buffer, nonce: Buffer, height: number): [Buffer, Buffer];
+        etchash(blob: Buffer, nonce: Buffer, height: number): [Buffer, Buffer];
         autolykos2_hashes(blob: Buffer, height: number): [Buffer, Buffer];
         astrobwt(blob: Buffer, variant: number): Buffer;
         c29(header: Buffer, ring: number[]): boolean;
         c29s(header: Buffer, ring: number[]): boolean;
+        c29v(header: Buffer, ring: number[]): boolean;
+        c29b(header: Buffer, ring: number[]): boolean;
         c29_packed_edges(ring: number[]): string;
         c29s_packed_edges(ring: number[]): string;
         c29b_packed_edges(ring: number[]): string;
