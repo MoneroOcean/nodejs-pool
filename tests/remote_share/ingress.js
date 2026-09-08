@@ -423,6 +423,33 @@ test("remote_share pauses (reject mode) and stops accepting after a non-map-full
     }
 });
 
+test("remote_share defaults to IPv4 loopback and accepts a malformed local HTTP request with 400", async () => {
+    const restore = installRemoteShareGlobals();
+    const runtime = createRemoteShareRuntime({
+        clusterEnabled: false,
+        port: 0,
+        pendingJobs: {
+            enqueueBlock() {},
+            enqueueAltBlock() {},
+            processDueJobs() {},
+            close() {}
+        },
+        shareStore: {
+            storeShares() {}
+        }
+    });
+
+    try {
+        runtime.start();
+        const address = await waitForListening(runtime);
+        assert.equal(address.address, "127.0.0.1");
+        assert.equal(await postFrame(address.port, Buffer.from("ordinary local request")), 400);
+    } finally {
+        await runtime.stop();
+        restore();
+    }
+});
+
 test("remote_share honors port zero even when the default port is unavailable", async () => {
     const restore = installRemoteShareGlobals();
     let blocker = null;

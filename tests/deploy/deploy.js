@@ -15,11 +15,7 @@ const DEFAULT_CASE_TIMEOUT_MS = 45 * 60 * 1000;
 const EXPECTED_DEPLOY_PROCESSES = [
     "api", "block_manager", "worker", "remote_share", "long_runner", "pool_stats"
 ];
-const REMOTE_SHARE_URLS = [
-    "http://127.0.0.1:8000/leafApi",
-    "http://[::1]:8000/leafApi",
-    "http://localhost:8000/leafApi"
-];
+const REMOTE_SHARE_URL = "http://127.0.0.1/leafApi";
 const XMR_POOL_ADDRESS = "46yzCCD3Mza9tRj7aqPSaxVbbePtuAeKzf8Ky2eRtcXGcEgCg1iTBio6N4sPmznfgGEUGDoBz5CLxZ2XPTyZu1yoCAG7zt6";
 const XMR_FEE_ADDRESS = "463tWEBn5XZJSxLU6uLQnQ2iY9xuNcDbjLSjkn3XAXHCbLrTTErJrBWYgHJQyrCwkNgYvyV3z8zctJLPCZy24jvb3NiTcTJ";
 const TARI_WALLET_PAYMENT_ADDRESS = "12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5";
@@ -258,20 +254,13 @@ req.end();`;
 }
 
 async function assertRemoteShareResponse(context) {
-    const probes = [];
-    let ok = false;
-    for (const url of REMOTE_SHARE_URLS) {
-        const probe = await httpRequest(context, { method: "POST", url }, { check: false });
-        probes.push({ error: probe.error || "", statusCode: probe.statusCode, url });
-        if (probe.statusCode !== 0 && probe.statusCode !== 404) {
-            ok = true;
-            break;
-        }
-    }
+    // Exercise nginx's real upstream; an empty frame must reach the backend and be rejected.
+    const probe = await httpRequest(context, { method: "POST", url: REMOTE_SHARE_URL }, { check: false });
     const probePath = artifactPath(context, "remote-share-status.txt");
-    await writeJson(probePath, probes);
-    if (ok) return appendCheckData(context, "remote_share probe", probes);
-    throw new Error(`remote_share did not answer on IPv4 or IPv6 loopback. See ${probePath}`);
+    await writeJson(probePath, probe);
+    assert.equal(probe.statusCode, 400, `remote_share must reject an empty frame through nginx. See ${probePath}`);
+    assert.equal(probe.body, "", `Expected the remote_share rejection, not a proxy error page. See ${probePath}`);
+    await appendCheckData(context, "remote_share nginx probe", probe);
 }
 
 async function runInstaller(context) {
