@@ -343,8 +343,14 @@ async function verifyDeployInstall(context) {
     await appendCheckLog(context, "verified unpatched Monero build");
     await execInContainer(context.containerName, "grep -q '^User=taridaemon$' /lib/systemd/system/xtm.service && grep -q '^User=taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm.service && grep -q '^Environment=HOME=/home/taridaemon$' /lib/systemd/system/xtm_mm.service && grep -q '^SupplementaryGroups=hugepages$' /lib/systemd/system/monero.service && grep -q '^LimitMEMLOCK=infinity$' /lib/systemd/system/monero.service && id -nG monerodaemon | grep -qw hugepages");
     await appendCheckLog(context, "verified separate Tari user and Monero hugepage access");
-    await execInContainer(context.containerName, "grep -q '^ExecStart=/usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen$' /lib/systemd/system/xtm.service && ! grep -q 'grpc-json-proxy.js' /lib/systemd/system/xtm.service");
-    await appendCheckLog(context, "verified pool Tari service avoids relay port conflicts");
+    await execInContainer(context.containerName, [
+        "grep -q '^ExecStart=/bin/bash -c ' /lib/systemd/system/xtm.service",
+        "grep -Fq -- 'base_node.proto 18144 18142 --max-body-bytes 16777216' /lib/systemd/system/xtm.service",
+        "grep -Fq -- 'base_node.proto 18146 18142 --max-body-bytes 16777216' /lib/systemd/system/xtm.service",
+        "grep -Fq -- 'base_node.proto 18148 18142 --max-body-bytes 16777216' /lib/systemd/system/xtm.service",
+        "grep -Fq -- '/usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen' /lib/systemd/system/xtm.service"
+    ].join(" && "));
+    await appendCheckLog(context, "verified local Tari JSON bridges for 18144, 18146, and 18148");
     await execInContainer(context.containerName, "grep -q '^After=network.target monero.service xtm.service$' /lib/systemd/system/xtm_mm.service && ! grep -q '^PartOf=' /lib/systemd/system/xtm_mm.service && ! grep -q '^Requires=' /lib/systemd/system/xtm_mm.service && ! grep -q '^ExecStartPre=' /lib/systemd/system/xtm_mm.service");
     await execInContainer(context.containerName, "test ! -e /usr/local/sbin/monerod-rpc-wait && test ! -e /usr/local/sbin/xtm-mm-healthcheck && test ! -e /lib/systemd/system/xtm-mm-healthcheck.service && test ! -e /lib/systemd/system/xtm-mm-healthcheck.timer");
     await execInContainer(context.containerName, "test -x /home/user/nodejs-pool/fix_daemon.sh && grep -q 'xmr-lag' /home/user/nodejs-pool/fix_daemon.sh && grep -q 'xtm-lag' /home/user/nodejs-pool/fix_daemon.sh && grep -q 'template-stuck' /home/user/nodejs-pool/fix_daemon.sh");

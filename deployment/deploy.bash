@@ -148,8 +148,8 @@ wait_for_tari_sync() {
   [ "$POOL_DEPLOY_PREPARE" = 1 ] && { echo "Skipping Tari sync wait in prepare mode"; return 0; }
   echo "Please wait until Tari daemon is fully synced"
   for _ in $(seq 1 360); do
-    # Ports 18146/18148 belong to the pool relay and can point at a remote
-    # daemon. Query the local base node's HTTP service directly instead.
+    # Query the local base node's HTTP service directly; the JSON bridges are
+    # only compatibility endpoints and are not needed for the sync check.
     if tari_http_synced http://127.0.0.1:9000/get_tip_info; then
       echo "Tari daemon is synced"
       return 0
@@ -429,7 +429,7 @@ install_tari_suite
 clone_repo_once https://github.com/MoneroOcean/grpc-json-proxy.git /usr/local/src/grpc-json-proxy
 patch_tari_config
 
-write_tari_service base-node-only
+write_tari_service with-json-bridges
 
 write_tari_merge_mining_service "monero.service xtm.service"
 

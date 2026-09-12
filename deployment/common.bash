@@ -305,13 +305,14 @@ write_tari_service() {
   local mode="${1:-with-json-bridges}"
   local exec_start
   if [ "$mode" = "base-node-only" ]; then
-    # The pool relay already owns 18146/18148. The merge-mining proxy talks to
-    # the local base-node gRPC listener directly on 18142.
+    # Keep this compatibility mode for hosts where a separately managed relay
+    # owns the JSON ports. The merge-mining proxy talks to the local base-node
+    # gRPC listener directly on 18142.
     exec_start='/usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen'
   elif [ "$mode" = "with-json-bridges" ]; then
     # Tari SubmitBlock JSON bodies can exceed grpc-json-proxy's 1 MiB default
     # when the block carries a large proof body.
-    exec_start='/bin/bash -c "(sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142 --max-body-bytes 16777216) & (sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142 --max-body-bytes 16777216) & /usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen"'
+    exec_start='/bin/bash -c "(sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18144 18142 --max-body-bytes 16777216) & (sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18146 18142 --max-body-bytes 16777216) & (sleep 2; /usr/bin/node /usr/local/src/grpc-json-proxy/grpc-json-proxy.js /usr/local/src/grpc-json-proxy/base_node.proto 18148 18142 --max-body-bytes 16777216) & /usr/local/src/tari/target/release/minotari_node --non-interactive-mode --watch status --disable-splash-screen"'
   else
     echo "Invalid Tari service mode: $mode" >&2
     return 1

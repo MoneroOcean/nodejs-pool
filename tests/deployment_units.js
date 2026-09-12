@@ -41,3 +41,32 @@ for (const dependencies of ["monero.service", "monero.service xtm.service"]) {
         }
     });
 }
+
+test("local Tari service exposes all XTM JSON compatibility ports", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pool-unit-test-local-"));
+    try {
+        const source = fs.readFileSync(path.join(__dirname, "../deployment/common.bash"), "utf8");
+        const script = path.join(directory, "common.bash");
+        fs.writeFileSync(script, source.replaceAll("/lib/systemd/system/", `${directory}/`));
+        const result = spawnSync("bash", ["-eu", "-c", 'source "$COMMON_SCRIPT"; write_tari_service with-json-bridges'], {
+            encoding: "utf8",
+            env: {
+                ...process.env,
+                COMMON_SCRIPT: script,
+                TARI_USER: "taridaemon",
+                TARI_HOME: "/home/taridaemon",
+                TARI_MEMORY_HIGH: "10G",
+                TARI_MEMORY_MAX: "12G",
+                TARI_MEMORY_SWAP_MAX: "0"
+            }
+        });
+        assert.equal(result.status, 0, result.stderr);
+        const node = fs.readFileSync(path.join(directory, "xtm.service"), "utf8");
+        for (const port of [18144, 18146, 18148]) {
+            assert.match(node, new RegExp(`base_node\\.proto ${port} 18142 --max-body-bytes 16777216`));
+        }
+        assert.match(node, /minotari_node --non-interactive-mode --watch status --disable-splash-screen/);
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
