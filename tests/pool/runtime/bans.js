@@ -325,6 +325,80 @@ test("template updates retain stale-header health until a fresh template succeed
     }
 });
 
+test("daemon RPC failures retain a positive factor for 60 seconds", async () => {
+    const { runtime } = await startHarness();
+    const originalTemplateRpc = global.coinFuncs.getPortBlockTemplate;
+    const originalSetTimeout = global.setTimeout;
+    const originalNow = Date.now;
+    const altPort = 16000;
+    let now = 20_000_000;
+
+    try {
+        poolModule.setTestCoinHashFactor("CCX", 2);
+        Date.now = function () { return now; };
+        global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
+            fn(...args);
+            return 0;
+        };
+        global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) {
+            callback(null, new Error("coin daemon restarting"));
+        };
+
+        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 1, hash: "alt-header" });
+        assert.equal(runtime.getState().newCoinHashFactor.CCX, 2);
+
+        now += 59_999;
+        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 1, hash: "alt-header" });
+        assert.equal(runtime.getState().newCoinHashFactor.CCX, 2);
+
+        now += 1;
+        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 1, hash: "alt-header" });
+        assert.equal(runtime.getState().newCoinHashFactor.CCX, 0);
+    } finally {
+        global.coinFuncs.getPortBlockTemplate = originalTemplateRpc;
+        global.setTimeout = originalSetTimeout;
+        Date.now = originalNow;
+        await runtime.stop();
+    }
+});
+
+test("successful template RPC clears daemon-error factor grace", async () => {
+    const { runtime } = await startHarness();
+    const originalTemplateRpc = global.coinFuncs.getPortBlockTemplate;
+    const originalHasTemplateBlob = global.coinFuncs.hasTemplateBlob;
+    const originalSetTimeout = global.setTimeout;
+    const originalNow = Date.now;
+    const altPort = 16000;
+    const now = 21_000_000;
+
+    try {
+        poolModule.setTestCoinHashFactor("CCX", 2);
+        Date.now = function () { return now; };
+        global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
+            fn(...args);
+            return 0;
+        };
+        global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) {
+            callback(null, new Error("coin daemon restarting"));
+        };
+        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 2, hash: "alt-header-1" });
+
+        global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) {
+            callback(createBaseTemplate({ coin: "CCX", port: altPort, idHash: "alt-template", height: 2 }), null);
+        };
+        global.coinFuncs.hasTemplateBlob = function hasTemplateBlob() { return true; };
+        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 2, hash: "alt-header-2" });
+
+        assert.equal(runtime.getState().newCoinHashFactor.CCX, 2);
+    } finally {
+        global.coinFuncs.getPortBlockTemplate = originalTemplateRpc;
+        global.coinFuncs.hasTemplateBlob = originalHasTemplateBlob;
+        global.setTimeout = originalSetTimeout;
+        Date.now = originalNow;
+        await runtime.stop();
+    }
+});
+
 test("setNewCoinHashFactor marks matching miners for extra verification on hash-factor changes", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;
