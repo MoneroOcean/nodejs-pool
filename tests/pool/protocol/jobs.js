@@ -688,7 +688,8 @@ test("main-coin jobs stay valid when only the kawpow template rotates", async ()
                 id: socket.miner_id,
                 job_id: jobId,
                 nonce: "00000010",
-                result: VALID_RESULT
+                result: VALID_RESULT,
+                algo: "rx/0"
             }
         });
 
