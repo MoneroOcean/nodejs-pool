@@ -1,5 +1,6 @@
 "use strict";
 const test = require("node:test");
+const createTemplateManager = require("../../../lib/pool/templates.js");
 
 const {
     assert,
@@ -12,6 +13,47 @@ const {
     createBaseTemplate,
     poolModule
 } = require("../common/runtime-helpers.js");
+
+function createTemplateHarness(factors) {
+    const state = {
+        activeBlockTemplates: {},
+        daemonFailureSince: {},
+        lastBlockHash: {},
+        lastBlockHeight: {},
+        lastBlockHashMM: {},
+        lastBlockHeightMM: {},
+        lastBlockTime: {},
+        lastBlockKeepTime: {},
+        lastBlockReward: {},
+        newCoinHashFactor: { ...factors },
+        lastCoinHashFactor: { ...factors },
+        lastCoinHashFactorMM: { ...factors }
+    };
+    const manager = createTemplateManager({
+        cluster: { isMaster: false },
+        debug() {},
+        daemonPollMs: 500,
+        activeMiners: new Map(),
+        activeBlockTemplates: state.activeBlockTemplates,
+        pastBlockTemplates: {},
+        lastBlockHash: state.lastBlockHash,
+        lastBlockHeight: state.lastBlockHeight,
+        lastBlockHashMM: state.lastBlockHashMM,
+        lastBlockHeightMM: state.lastBlockHeightMM,
+        lastBlockTime: state.lastBlockTime,
+        lastBlockKeepTime: state.lastBlockKeepTime,
+        lastBlockReward: state.lastBlockReward,
+        newCoinHashFactor: state.newCoinHashFactor,
+        lastCoinHashFactor: state.lastCoinHashFactor,
+        lastCoinHashFactorMM: state.lastCoinHashFactorMM,
+        daemonFailureSince: state.daemonFailureSince,
+        anchorState: {},
+        sendToWorkers() {},
+        getThreadName() { return ""; },
+        formatCoinPort(coin, port) { return `${coin  }/${  port}`; }
+    });
+    return { manager, state };
+}
 
 test.describe("pool runtime: bans and updates", { concurrency: false }, () => {
 test("ban threshold removes miners that cross the invalid share percentage", async () => {
@@ -288,77 +330,119 @@ test("templateUpdate2 rejects blobless CCX templates before they reach BlockTemp
     }
 });
 
-test("template updates retain stale-header health until a fresh template succeeds", async () => {
-    const { runtime } = await startHarness();
-    const originalTemplateRpc = global.coinFuncs.getPortBlockTemplate;
-    const originalHasTemplateBlob = global.coinFuncs.hasTemplateBlob;
-    const originalMaxAge = global.config.daemon.maxBlockAgeSeconds;
+test("header polling records stale health until a fresh header succeeds", async () => {
+    const originalConfig = global.config;
+    const originalCoinFuncs = global.coinFuncs;
     const originalNow = Date.now;
     const now = 20_000_000;
-    const template = createBaseTemplate({ coin: "", port: MAIN_PORT, idHash: "daemon-health", height: 400 });
+    let header = {
+        height: 400,
+        hash: "stale-header",
+        timestamp: now / 1000 - 10801
+    };
+    let templateManager;
 
     try {
-        global.config.daemon.maxBlockAgeSeconds = 10800;
+        global.config = { daemon: { port: MAIN_PORT, maxBlockAgeSeconds: 10800 } };
         Date.now = function () { return now; };
-        global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) { callback(template); };
-        global.coinFuncs.hasTemplateBlob = function hasTemplateBlob() { return true; };
+        global.coinFuncs = {
+            COIN2PORT() { return MAIN_PORT; },
+            getPortLastBlockHeaderMM(_port, callback) { callback(null, header); }
+        };
+        const harness = createTemplateHarness({ "": 1 });
+        templateManager = harness.manager;
+        harness.state.lastBlockHash[""] = header.hash;
+        harness.state.lastBlockTime[""] = now;
 
-        poolModule.templateUpdate2("", MAIN_PORT, true, false, 1, false, {
-            height: 400,
-            hash: "stale-header",
-            timestamp: now / 1000 - 10801
-        });
-        assert.equal(runtime.getState().daemonFailureSince[`xmr:${  MAIN_PORT}`], now);
+        templateManager.templateUpdate("", false);
+        assert.equal(harness.state.daemonFailureSince[`xmr:${  MAIN_PORT}`], now);
 
-        poolModule.templateUpdate2("", MAIN_PORT, true, false, 1, false, {
+        header = {
             height: 400,
             hash: "fresh-header",
             timestamp: now / 1000
-        });
-        assert.equal(runtime.getState().daemonFailureSince[`xmr:${  MAIN_PORT}`], undefined);
+        };
+        harness.state.lastBlockHash[""] = header.hash;
+        templateManager.templateUpdate("", false);
+        assert.equal(harness.state.daemonFailureSince[`xmr:${  MAIN_PORT}`], undefined);
     } finally {
-        global.coinFuncs.getPortBlockTemplate = originalTemplateRpc;
-        global.coinFuncs.hasTemplateBlob = originalHasTemplateBlob;
-        global.config.daemon.maxBlockAgeSeconds = originalMaxAge;
+        global.config = originalConfig;
+        global.coinFuncs = originalCoinFuncs;
         Date.now = originalNow;
-        await runtime.stop();
     }
 });
 
-test("daemon RPC failures retain a positive factor for 60 seconds", async () => {
-    const { runtime } = await startHarness();
-    const originalTemplateRpc = global.coinFuncs.getPortBlockTemplate;
+test("header and template RPC failure grace remain independent", async () => {
+    const originalConfig = global.config;
+    const originalCoinFuncs = global.coinFuncs;
     const originalSetTimeout = global.setTimeout;
-    const originalNow = Date.now;
-    const altPort = 16000;
-    let now = 20_000_000;
+    const originalClearTimeout = global.clearTimeout;
+    const altPort = ETH_PORT;
+    const altCoin = "ETH";
+    const graceTimers = [];
+    let headerError = null;
+    let header = { height: 1, hash: "alt-header" };
+    let templateResult = null;
+    let templateError = new Error("coin daemon restarting");
+    let templateManager;
 
     try {
-        poolModule.setTestCoinHashFactor("CCX", 2);
-        Date.now = function () { return now; };
-        global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
-            fn(...args);
-            return 0;
+        global.config = { daemon: { port: MAIN_PORT, pollInterval: 500 }, pool: { trustedMiners: false } };
+        global.setTimeout = function captureTimeout(fn, delay, ...args) {
+            if (delay === 500) {
+                fn(...args);
+                return { unref() {} };
+            }
+            const timer = { fn, delay, cleared: false, unref() {} };
+            graceTimers.push(timer);
+            return timer;
         };
-        global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) {
-            callback(null, new Error("coin daemon restarting"));
+        global.clearTimeout = function clearCapturedTimeout(timer) { timer.cleared = true; };
+        global.coinFuncs = {
+            COIN2PORT() { return altPort; },
+            getPoolProfile() { return {}; },
+            getPortLastBlockHeaderMM(_port, callback) { callback(headerError, header); },
+            getPortBlockTemplate(_port, callback) { callback(templateResult, templateError); },
+            getAuxChainXTM() { return null; },
+            hasTemplateBlob() { return true; },
+            getMM_PORTS() { return {}; }
         };
+        const harness = createTemplateHarness({ ETH: 2 });
+        templateManager = harness.manager;
+        const state = harness.state;
 
-        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 1, hash: "alt-header" });
-        assert.equal(runtime.getState().newCoinHashFactor.CCX, 2);
+        templateManager.templateUpdate(altCoin, false);
+        assert.equal(state.newCoinHashFactor[altCoin], 2);
+        assert.equal(state.daemonFailureSince[`factor:${  altCoin  }:${  altPort}`], undefined);
+        assert.equal(graceTimers.length, 1);
+        assert.equal(graceTimers[0].delay, 60 * 1000);
 
-        now += 59_999;
-        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 1, hash: "alt-header" });
-        assert.equal(runtime.getState().newCoinHashFactor.CCX, 2);
+        templateManager.templateUpdate(altCoin, false);
+        assert.equal(state.newCoinHashFactor[altCoin], 2);
+        assert.equal(graceTimers.length, 1);
 
-        now += 1;
-        poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 1, hash: "alt-header" });
-        assert.equal(runtime.getState().newCoinHashFactor.CCX, 0);
+        graceTimers[0].fn();
+        assert.equal(state.newCoinHashFactor[altCoin], 0);
+
+        state.newCoinHashFactor[altCoin] = state.lastCoinHashFactor[altCoin] = state.lastCoinHashFactorMM[altCoin] = 2;
+        headerError = new Error("header RPC unavailable");
+        header = undefined;
+        templateManager.templateUpdate(altCoin, false);
+        assert.equal(graceTimers.length, 2);
+
+        templateResult = { height: 2, difficulty: 100, blocktemplate_blob: "00" };
+        templateError = null;
+        state.lastBlockKeepTime[altCoin] = Date.now();
+        templateManager.templateUpdate2(altCoin, altPort, false, false, 2, false, { height: 2, hash: "new-header" });
+
+        assert.equal(graceTimers[1].cleared, false);
+        graceTimers[1].fn();
+        assert.equal(state.newCoinHashFactor[altCoin], 0);
     } finally {
-        global.coinFuncs.getPortBlockTemplate = originalTemplateRpc;
+        global.config = originalConfig;
+        global.coinFuncs = originalCoinFuncs;
         global.setTimeout = originalSetTimeout;
-        Date.now = originalNow;
-        await runtime.stop();
+        global.clearTimeout = originalClearTimeout;
     }
 });
 
@@ -367,21 +451,27 @@ test("successful template RPC clears daemon-error factor grace", async () => {
     const originalTemplateRpc = global.coinFuncs.getPortBlockTemplate;
     const originalHasTemplateBlob = global.coinFuncs.hasTemplateBlob;
     const originalSetTimeout = global.setTimeout;
-    const originalNow = Date.now;
+    const originalClearTimeout = global.clearTimeout;
     const altPort = 16000;
-    const now = 21_000_000;
+    const graceTimers = [];
 
     try {
         poolModule.setTestCoinHashFactor("CCX", 2);
-        Date.now = function () { return now; };
-        global.setTimeout = function immediateTimeout(fn, _delay, ...args) {
-            fn(...args);
-            return 0;
+        global.setTimeout = function captureTimeout(fn, delay, ...args) {
+            if (delay === 500) {
+                fn(...args);
+                return { unref() {} };
+            }
+            const timer = { fn, delay, cleared: false, unref() {} };
+            graceTimers.push(timer);
+            return timer;
         };
+        global.clearTimeout = function clearCapturedTimeout(timer) { timer.cleared = true; };
         global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) {
             callback(null, new Error("coin daemon restarting"));
         };
         poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 2, hash: "alt-header-1" });
+        assert.equal(graceTimers.length, 1);
 
         global.coinFuncs.getPortBlockTemplate = function getTemplate(_port, callback) {
             callback(createBaseTemplate({ coin: "CCX", port: altPort, idHash: "alt-template", height: 2 }), null);
@@ -389,12 +479,14 @@ test("successful template RPC clears daemon-error factor grace", async () => {
         global.coinFuncs.hasTemplateBlob = function hasTemplateBlob() { return true; };
         poolModule.templateUpdate2("CCX", altPort, true, false, 2, false, { height: 2, hash: "alt-header-2" });
 
+        assert.equal(graceTimers[0].cleared, true);
+        graceTimers[0].fn();
         assert.equal(runtime.getState().newCoinHashFactor.CCX, 2);
     } finally {
         global.coinFuncs.getPortBlockTemplate = originalTemplateRpc;
         global.coinFuncs.hasTemplateBlob = originalHasTemplateBlob;
         global.setTimeout = originalSetTimeout;
-        Date.now = originalNow;
+        global.clearTimeout = originalClearTimeout;
         await runtime.stop();
     }
 });
