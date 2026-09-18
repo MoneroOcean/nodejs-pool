@@ -55,6 +55,36 @@ function createTemplateHarness(factors) {
     return { manager, state };
 }
 
+function loginMainMiner(socket, id, pass, ip) {
+    const loginReply = invokePoolMethod({
+        socket,
+        id,
+        method: "login",
+        params: {
+            login: MAIN_WALLET,
+            pass
+        },
+        ip
+    });
+    assert.equal(loginReply.replies[0].error, null);
+    return loginReply.replies[0].result.job.job_id;
+}
+
+function submitMainShare(socket, id, jobId, nonce, ip) {
+    return invokePoolMethod({
+        socket,
+        id,
+        method: "submit",
+        params: {
+            id: socket.miner_id,
+            job_id: jobId,
+            nonce,
+            result: VALID_RESULT
+        },
+        ip
+    });
+}
+
 test.describe("pool runtime: bans and updates", { concurrency: false }, () => {
 test("ban threshold removes miners that cross the invalid share percentage", async () => {
     const { runtime } = await startHarness();
@@ -195,6 +225,101 @@ test("ban counters reset instead of banning when invalid share percentage stays 
         assert.equal(miner.validShares, 0);
         assert.equal(miner.invalidShares, 0);
     } finally {
+        global.config.pool.banThreshold = originalBanThreshold;
+        global.config.pool.banPercent = originalBanPercent;
+        await runtime.stop();
+    }
+});
+
+test("post-reset rejected shares stay established and later hit the percentage ban", async () => {
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+    const originalBanThreshold = global.config.pool.banThreshold;
+    const originalBanPercent = global.config.pool.banPercent;
+
+    try {
+        for (const [rejectionKind, ip] of [["malformed", "10.0.0.111"], ["duplicate", "10.0.0.112"]]) {
+            const { runtime } = await startHarness();
+            const socket = {};
+
+            try {
+                cluster.isMaster = false;
+                global.config.pool.banThreshold = 30;
+                global.config.pool.banPercent = 25;
+
+                const jobId = loginMainMiner(socket, 300, `reset-${  rejectionKind}`, ip);
+                const miner = runtime.getState().activeMiners.get(socket.miner_id);
+                for (let index = 1; index <= 30; ++index) {
+                    const accepted = submitMainShare(socket, 300 + index, jobId, index.toString(16).padStart(8, "0"), ip);
+                    assert.equal(accepted.replies[0].error, null);
+                }
+
+                assert.equal(miner.hasSubmittedValidShare, true);
+                assert.equal(miner.acceptedShareCount, 30);
+                assert.equal(miner.validShares, 0);
+                assert.equal(miner.invalidShares, 0);
+
+                const firstRejectedNonce = rejectionKind === "duplicate" ? "00000001" : "bad-reset-nonce";
+                const firstRejected = submitMainShare(socket, 331, jobId, firstRejectedNonce, ip);
+                assert.equal(firstRejected.replies[0].error, "Duplicate share");
+                assert.equal(runtime.getState().activeMiners.has(socket.miner_id), true);
+                assert.equal(runtime.getState().bannedTmpIPs[ip], undefined);
+                assert.equal(miner.validShares, 0);
+                assert.equal(miner.invalidShares, 1);
+
+                for (let index = 2; index <= 30; ++index) {
+                    const rejected = submitMainShare(socket, 330 + index, jobId, `bad-reset-${  index}`, ip);
+                    assert.equal(rejected.replies[0].error, "Duplicate share");
+                }
+                assert.equal(runtime.getState().activeMiners.has(socket.miner_id), false);
+                assert.equal(runtime.getState().bannedTmpIPs[ip], 1);
+                assert.equal(miner.validShares, 0);
+                assert.equal(miner.invalidShares, 30);
+            } finally {
+                await runtime.stop();
+            }
+        }
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        global.config.pool.banThreshold = originalBanThreshold;
+        global.config.pool.banPercent = originalBanPercent;
+    }
+});
+
+test("new sessions do not inherit an established wallet's first-share status", async () => {
+    const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+    const originalBanThreshold = global.config.pool.banThreshold;
+    const originalBanPercent = global.config.pool.banPercent;
+
+    try {
+        cluster.isMaster = false;
+        global.config.pool.banThreshold = 30;
+        global.config.pool.banPercent = 25;
+
+        const firstSocket = {};
+        const firstIp = "10.0.0.113";
+        const firstJobId = loginMainMiner(firstSocket, 340, "same-wallet-first-session", firstIp);
+        const firstMiner = runtime.getState().activeMiners.get(firstSocket.miner_id);
+        const firstAccepted = submitMainShare(firstSocket, 341, firstJobId, "00000001", firstIp);
+        assert.equal(firstAccepted.replies[0].error, null);
+        assert.equal(firstMiner.hasSubmittedValidShare, true);
+        assert.equal(firstMiner.acceptedShareCount, 1);
+
+        const secondSocket = {};
+        const secondIp = firstIp;
+        const secondJobId = loginMainMiner(secondSocket, 342, "same-wallet-reconnected", secondIp);
+        const secondMiner = runtime.getState().activeMiners.get(secondSocket.miner_id);
+        assert.equal(secondMiner.hasSubmittedValidShare, false);
+        assert.equal(secondMiner.acceptedShareCount, 0);
+
+        const firstRejected = submitMainShare(secondSocket, 343, secondJobId, "bad-reconnected-nonce", secondIp);
+        assert.equal(firstRejected.replies[0].error, "Duplicate share");
+        assert.equal(runtime.getState().activeMiners.has(secondSocket.miner_id), false);
+        assert.equal(runtime.getState().bannedTmpIPs[secondIp], 1);
+    } finally {
+        cluster.isMaster = originalIsMaster;
         global.config.pool.banThreshold = originalBanThreshold;
         global.config.pool.banPercent = originalBanPercent;
         await runtime.stop();
