@@ -92,10 +92,8 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         });
         assert.deepEqual(payload, {
             header: header.toString("hex"),
-            height: 123,
             job_id: "pearl-job",
             target: pearl.targetForDifficulty(2).targetHex,
-            difficulty: 2,
             cert_version: pearl.PEARL_CERT_VERSION
         });
         assert.equal(newJob.incomplete_header_bytes, headerBase64);
