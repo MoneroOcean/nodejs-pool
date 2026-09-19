@@ -26,6 +26,14 @@ export interface PoolBlockTemplate extends ProtoMessage {
     block_version?: number;
     hash?: string;
     hash2?: string;
+    header?: string;
+    cert_version?: number;
+    target?: string;
+    pearl_target?: string;
+    target_hex?: string;
+    target_compact?: number;
+    incomplete_header_bytes?: string;
+    gateway_target?: number;
     xmr_difficulty?: number;
     xtm_difficulty?: number;
     seed_hash?: string;
@@ -69,6 +77,13 @@ export interface PoolJob extends ProtoMessage {
     c29_packed_edges?: number[];
     rewarded_difficulty?: number;
     rewarded_difficulty2?: number;
+    target?: string;
+    targetHex?: string;
+    targetDecimal?: string;
+    gatewayTarget?: number;
+    incomplete_header_bytes?: string;
+    cert_version?: number;
+    pearl_proof_id?: string;
 }
 
 /** The bounded queue used to retain jobs for duplicate-submission checks. */
@@ -92,6 +107,7 @@ export interface PoolMinerView {
     trust?: {trust: number, check_height: number};
     trust_key?: string;
     pushMessage(message: Record<string, unknown>): void;
+    sendBestCoinJob(): void;
     ensureEthExtranonce?(): boolean;
     getCoinJob(coin: string, params: PoolJobParams): PoolJobPayload | null;
     sendCoinJob(coin: string, params: PoolJobParams, options?: {job?: PoolJobPayload | null}): void;
@@ -312,6 +328,8 @@ export interface PoolExtraNonceLoginContext extends PoolLoginContext {
 
 export interface PoolSubmitParams {
     job_id?: string | number;
+    plain_proof?: string;
+    proof_encoding?: "none";
     nonce?: string | number;
     result?: string;
     raw_params?: unknown[];
@@ -366,7 +384,7 @@ export interface PoolSpecialShareContext {
     startAsyncVerification?(): void;
     trustKey?: string;
     tryTrustedShare?(accept: () => void): boolean;
-    verifyShareCB(diff: number | bigint, result: Buffer | null, blockData: Buffer | unknown[] | string, trusted: boolean, parent: boolean): void;
+    verifyShareCB(diff: number | bigint, result: Buffer | null, blockData: Buffer | unknown[] | string | null, trusted: boolean, parent: boolean, forceBlockCandidate?: boolean): void;
     verifySlowHashWithRetry(blob: Buffer, context: {nonce?: string | undefined, mixhash?: string | undefined} | null, callback: (hash: string | null | false) => void): void;
 }
 
@@ -379,6 +397,7 @@ export interface PoolSpecialCoinRuntime {
     kawpowQuickHash(convertedBlob: Buffer, nonce: string, mixhash: string): Buffer;
     slowHashBuff(blob: Buffer, template: ProtoMessage, nonce?: string, mixhash?: string): Buffer | Buffer[] | false;
     slowHashBuffAsync?(blob: Buffer, template: ProtoMessage, minerAddress: string, callback: (result: Buffer | Buffer[] | null | false, errorKind?: string) => void, verifyContext?: ProtoMessage): void;
+    verifyPearlAsync?(header: string, proof: string, target: string, minerAddress: string, callback: (result: unknown, errorKind?: string) => void): void;
     isHashVerifierEnabled?(): boolean;
 }
 
@@ -453,6 +472,11 @@ export interface PoolProfileSettings {
     buildProxyJobPayload(this: PoolProfileSettings, context: BuildJobContext): PoolJobPayload;
     pushJob(this: PoolProfileSettings, context: PushJobContext): void;
     parseMiningSubmitParams?(context: {params: PoolSubmitParams}): boolean;
+    normalizeNamedAuthorizeParams?(context: {params: PoolSubmitParams, port: number, profile: CoinProfile}): boolean;
+    sendNamedLoginResult?(context: PoolLoginContext): void;
+    normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, request?: ProtoMessage}): boolean;
+    sanitizeSubmitParams?(context: {params: PoolSubmitParams}): Record<string, unknown>;
+    sensitiveSubmitData?: boolean;
     validateSubmitParams(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
     validateExtraSubmitFields?(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
     submissionKey(context: PoolSubmissionKeyContext): string;

@@ -25,6 +25,28 @@ async function captureConsole(run) {
 }
 
 test.describe("pool components: core", { concurrency: false }, () => {
+test("Pearl large-packet admission is narrow and proof logs are redacted", () => {
+    assert.equal(createServerFactory.isPearlSubmitPrefix(
+        '{"id":1,"method":"mining.submit","params":{"job_id":"j","plain_proof":"'
+    ), true);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(
+        '{"id":1,"method":"submit","params":{"plain_proof":"'
+    ), false);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(
+        `${'{"padding":"'}${"x".repeat(4096)}","method":"mining.submit","plain_proof":"`
+    ), false);
+
+    const request = {
+        id: 1,
+        method: "mining.submit",
+        params: { job_id: "j", plain_proof: "secret-proof", proof_encoding: "raw" }
+    };
+    const sanitized = createServerFactory.sanitizeRequestForLog(request);
+    assert.equal(sanitized.params.plain_proof, "<redacted:12 bytes>");
+    assert.equal(sanitized.params.proof_encoding, "raw");
+    assert.equal(request.params.plain_proof, "secret-proof");
+});
+
 test("xmr constants derive the expected coin and algo metadata", () => {
     const constants = createConstants({
         get_merged_mining_nonce_size() {

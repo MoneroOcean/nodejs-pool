@@ -208,6 +208,14 @@ export interface BlockTemplateInput extends Record<string, unknown> {
     coin?: string;
     hash?: string;
     hash2?: string;
+    header?: string;
+    cert_version?: number;
+    target?: string;
+    pearl_target?: string;
+    target_hex?: string;
+    target_compact?: number;
+    incomplete_header_bytes?: string;
+    gateway_target?: number;
     bits?: string;
     seed_hash?: string;
     mbl_difficulty?: number;
@@ -232,6 +240,13 @@ export interface HashTemplate {
     height: number;
     block_version?: number;
     seed_hash?: string;
+    header?: string;
+    cert_version?: number;
+    target?: string;
+    pearl_target?: string;
+    target_hex?: string;
+    target_compact?: number;
+    incomplete_header_bytes?: string;
 }
 export interface VerifyContext {nonce?: string; mixhash?: string}
 export type HexHashResult = string | string[] | false | null;
