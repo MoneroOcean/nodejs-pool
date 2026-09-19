@@ -78,7 +78,9 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                     runtime: { support: { rpcPortDaemon2(port, path, request, callback) {
                         assert.equal(port, pearl.PEARL_PORT);
                         assert.equal(path, "");
-                        assert.deepEqual(request, { method: "getblockheader", params: [previousHash, true] });
+                        assert.deepEqual(request, {
+                            id: "0", jsonrpc: "2.0", method: "getblockheader", params: [previousHash, true]
+                        });
                         callback({ result: { height: 99, hash: previousHash, difficulty: 1 } });
                     } } },
                     callback(error, result) { if (error) reject(error); else resolve(result); }
@@ -89,6 +91,41 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         } finally {
             pearl.gatewayRequest = originalGatewayRequest;
         }
+    });
+
+    test("uses complete JSON-RPC envelopes for pearld header lookups", async () => {
+        const blockHash = "34".repeat(32);
+        const calls = [];
+        const support = { rpcPortDaemon2(port, path, request, callback) {
+            assert.equal(port, pearl.PEARL_PORT);
+            assert.equal(path, "");
+            calls.push(request);
+            if (request.method === "getblockhash") return callback({ result: blockHash });
+            return callback({ result: { height: 7, hash: blockHash } });
+        } };
+        const context = {
+            port: pearl.PEARL_PORT,
+            profile: pearlProfile,
+            noErrorReport: true,
+            runtime: { support }
+        };
+        const byHeight = await new Promise((resolve, reject) => pearlProfile.rpc.getBlockHeaderById({
+            ...context,
+            blockId: 7,
+            callback(error, result) { if (error) reject(error); else resolve(result); }
+        }));
+        const byHash = await new Promise((resolve, reject) => pearlProfile.rpc.getAnyBlockHeaderByHash({
+            ...context,
+            blockHash,
+            callback(error, result) { if (error) reject(error); else resolve(result); }
+        }));
+        assert.equal(byHeight.height, 7);
+        assert.equal(byHash.height, 7);
+        assert.deepEqual(calls, [
+            { id: "0", jsonrpc: "2.0", method: "getblockhash", params: [7] },
+            { id: "0", jsonrpc: "2.0", method: "getblockheader", params: [blockHash, true] },
+            { id: "0", jsonrpc: "2.0", method: "getblockheader", params: [blockHash, true] }
+        ]);
     });
 
     test("rejects a valid proof that does not meet the assigned share target", () => {
