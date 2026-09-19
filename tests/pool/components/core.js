@@ -35,6 +35,9 @@ test("Pearl large-packet admission is narrow and proof logs are redacted", () =>
     assert.equal(createServerFactory.isPearlSubmitPrefix(
         `${'{"padding":"'}${"x".repeat(4096)}","method":"mining.submit","plain_proof":"`
     ), false);
+    assert.equal(createServerFactory.hasPearlJob(undefined), false);
+    assert.equal(createServerFactory.hasPearlJob({ validJobs: { toarray() { return [{ coin: "XMR" }]; } } }), false);
+    assert.equal(createServerFactory.hasPearlJob({ validJobs: { toarray() { return [{ coin: "PRL" }]; } } }), true);
 
     const request = {
         id: 1,
