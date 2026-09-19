@@ -40,6 +40,18 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         }
     });
 
+    test("normalizes the standard Pearl object authorize shape", () => {
+        const params = { wallet: "wallet", worker: "worker", pass: "x~pearl" };
+        assert.equal(pearlProfile.pool.normalizeNamedAuthorizeParams({
+            params,
+            port: pearl.PEARL_PORT,
+            profile: pearlProfile
+        }), true);
+        assert.equal(params.login, "wallet");
+        assert.equal(params.rigid, "worker");
+        assert.deepEqual(params.algo, ["pearlhash"]);
+    });
+
     test("derives exact little-endian share targets from normalized difficulty", () => {
         const result = pearl.targetForDifficulty(2);
         assert.ok(result);
@@ -69,7 +81,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             header: header.toString("hex"),
             height: 123,
             job_id: "pearl-job",
-            target: Buffer.from(pearl.targetForDifficulty(2).targetHex, "hex").toString("base64"),
+            target: pearl.targetForDifficulty(2).target.toString(16).padStart(64, "0"),
             difficulty: 2,
             cert_version: pearl.PEARL_CERT_VERSION
         });

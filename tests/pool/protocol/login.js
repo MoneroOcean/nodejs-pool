@@ -340,6 +340,31 @@ test("mining.authorize rejects non-array params", async () => {
     }
 });
 
+test("mining.authorize routes the standard Pearl object shape on a shared port", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const reply = invokePoolMethod({
+            socket,
+            id: 327,
+            method: "mining.authorize",
+            params: { wallet: MAIN_WALLET, worker: "pearl-worker", pass: "x~pearl" },
+            portData: global.config.ports[0]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: null, result: true }]);
+        assert.equal(reply.finals.length, 0);
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        assert.ok(miner);
+        assert.equal(miner.identifier, "pearl-worker");
+        assert.equal(miner.algos.pearlhash, 1);
+        assert.equal(miner.algos.pearl, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("mining.extranonce.subscribe acknowledges successfully", async () => {
     const { runtime } = await startHarness();
 
