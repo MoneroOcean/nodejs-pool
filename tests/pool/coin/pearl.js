@@ -48,6 +48,35 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(result.targetDecimal, result.target.toString(10));
     });
 
+    test("builds the established Pearl miner wire job from the gateway template", () => {
+        const networkTarget = pearl.targetForDifficulty(1);
+        assert.ok(networkTarget);
+        const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
+        header.writeUInt32LE(pearl.targetToCompact(networkTarget.target), 72);
+        const headerBase64 = header.toString("base64");
+        const newJob = { id: "pearl-job" };
+        const payload = pearlProfile.pool.buildJobPayload({
+            blockTemplate: {
+                header: headerBase64,
+                incomplete_header_bytes: headerBase64,
+                cert_version: pearl.PEARL_CERT_VERSION,
+                height: 123
+            },
+            coinDiff: 2,
+            newJob
+        });
+        assert.deepEqual(payload, {
+            header: header.toString("hex"),
+            height: 123,
+            job_id: "pearl-job",
+            target: Buffer.from(pearl.targetForDifficulty(2).targetHex, "hex").toString("base64"),
+            difficulty: 2,
+            cert_version: pearl.PEARL_CERT_VERSION
+        });
+        assert.equal(newJob.incomplete_header_bytes, headerBase64);
+        assert.equal(newJob.cert_version, pearl.PEARL_CERT_VERSION);
+    });
+
     test("fails closed when adjustment would overflow a 256-bit target", () => {
         assert.equal(pearl.adjustedNetworkTarget(pearl.UINT256_MAX.toString(10), 2), null);
         assert.equal(pearl.isPearlNetworkCandidate("00".repeat(32), pearl.UINT256_MAX.toString(10), 2), false);
