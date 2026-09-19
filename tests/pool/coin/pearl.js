@@ -12,6 +12,12 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(pearl.PEARL_GATEWAY_PORT, 44111);
     });
 
+    test("maps the established fixed-coin selector to canonical PearlHash accounting", () => {
+        assert.deepEqual(pearlProfile.minerAlgoAliases, { pearlhash: ["pearl"] });
+        assert.deepEqual(pearlProfile.perf.aliases, ["pearlhash", "pearl"]);
+        assert.equal(pearlProfile.pool.hashesPerDifficulty, 1_000_000);
+    });
+
     test("accepts bounded uncompressed proofs without magic-byte guessing", () => {
         const rawWithGzipMagic = Buffer.from([0x1f, 0x8b, 0, 0]);
         assert.deepEqual(pearl.decodePearlProof(rawWithGzipMagic.toString("base64")), rawWithGzipMagic);

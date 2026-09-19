@@ -753,6 +753,8 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
     });
     const rawPerf = coinFuncs.convertAlgosToCoinPerf({ kawpow1: 400 });
     const equivalentRawPerf = coinFuncs.convertAlgosToCoinPerf({ kawpow1: 400 * hashesPerDifficulty });
+    const pearlPerf = coinFuncs.convertAlgosToCoinPerf({ pearl: 1 });
+    const pearlHashesPerDifficulty = coinFuncs.getPoolHashesPerDifficulty(44109);
     const legacyFactor = 12345;
     const perHashFactor = legacyFactor / hashesPerDifficulty;
 
@@ -760,6 +762,8 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
     assert.equal(xtmCHashesPerDifficulty, 42);
     assert.equal(coinFuncs.getPoolWorkDifficulty(19001, 100), Math.round(100 * hashesPerDifficulty));
     assert.equal(coinFuncs.getPoolWorkDifficulty(18148, 100), 4200);
+    assert.equal(pearlHashesPerDifficulty, 1_000_000);
+    assert.equal(coinFuncs.getPoolWorkDifficulty(44109, 100), 100_000_000);
     assert.equal(coinFuncs.getPoolWorkDifficulty(18081, 100), 100);
     assert.equal(legacyPerf[""], 100);
     assert.equal(legacyPerf.TRTL, 200);
@@ -771,6 +775,7 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
     assert.equal(legacyPerf["ETC"], 500);
     assert.equal(rawPerf.RVN, 400);
     assert.equal(rawPerf.XNA, 400);
+    assert.equal(pearlPerf.PRL, 1);
     assert.equal(legacyPerf.RVN * perHashFactor, equivalentRawPerf.RVN * perHashFactor);
     assert.ok(Math.abs(2 * hashesPerDifficulty * perHashFactor - 2 * legacyFactor) < 1e-9);
     // Scaling the advertised c29 speed and inversely scaling its profit factor
@@ -778,6 +783,7 @@ test("convertAlgosToCoinPerf preserves the expected per-coin algo aliases", () =
     assert.equal(legacyPerf["XTM-C"] * (legacyFactor / xtmCHashesPerDifficulty), 300 * legacyFactor);
     assert.equal(2 * xtmCHashesPerDifficulty * (legacyFactor / xtmCHashesPerDifficulty), 2 * legacyFactor);
     assert.equal(coinFuncs.normalizeMinerAlgos({ kawpow1: 1 }).kawpow, 1);
+    assert.equal(coinFuncs.normalizeMinerAlgos({ pearl: 1 }).pearlhash, 1);
 });
 
 test("TRTL profile verifies shares with Argon2/Chukwa variant 2", () => {
