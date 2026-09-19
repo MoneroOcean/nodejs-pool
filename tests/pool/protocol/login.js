@@ -365,6 +365,35 @@ test("mining.authorize routes the standard Pearl object shape on a shared port",
     }
 });
 
+test("mining.authorize routes the SRBMiner Pearl object shape on a shared port", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+
+    try {
+        const reply = invokePoolMethod({
+            socket,
+            id: 328,
+            method: "mining.authorize",
+            params: {
+                wallet: MAIN_WALLET,
+                worker: "srb-pearl-worker",
+                agent: "SRBMiner-MULTI/3.6.7",
+                type: "pearlhash"
+            },
+            portData: global.config.ports[0]
+        });
+
+        assert.deepEqual(reply.replies, [{ error: null, result: true }]);
+        assert.equal(reply.finals.length, 0);
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        assert.ok(miner);
+        assert.equal(miner.identifier, "srb-pearl-worker");
+        assert.equal(miner.algos.pearlhash, 1);
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("mining.extranonce.subscribe acknowledges successfully", async () => {
     const { runtime } = await startHarness();
 

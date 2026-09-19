@@ -52,6 +52,19 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.deepEqual(params.algo, ["pearlhash"]);
     });
 
+    test("normalizes the SRBMiner Pearl authorize variant without a password", () => {
+        const params = { wallet: "wallet", worker: "worker", agent: "SRBMiner-MULTI/3.6.7", type: "pearlhash" };
+        assert.equal(pearlProfile.pool.normalizeNamedAuthorizeParams({
+            params,
+            port: pearl.PEARL_PORT,
+            profile: pearlProfile
+        }), true);
+        assert.equal(params.pass, "x");
+        assert.equal(params.login, "wallet");
+        assert.equal(params.rigid, "worker");
+        assert.equal(params.type, undefined);
+    });
+
     test("derives exact little-endian share targets from normalized difficulty", () => {
         const result = pearl.targetForDifficulty(2);
         assert.ok(result);
