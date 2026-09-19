@@ -94,7 +94,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             header: header.toString("hex"),
             height: 123,
             job_id: "pearl-job",
-            target: pearl.targetForDifficulty(2).target.toString(16).padStart(64, "0"),
+            target: pearl.targetForDifficulty(2).targetHex,
             difficulty: 2,
             cert_version: pearl.PEARL_CERT_VERSION
         });
