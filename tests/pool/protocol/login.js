@@ -1,6 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const pearlProfile = require("../../../lib/coins/pearl.js");
 
 const {
     MAIN_WALLET,
@@ -369,6 +370,34 @@ test("mining.submit rejects missing array params", async () => {
         assert.deepEqual(reply.replies, [{ error: "No array params specified", result: undefined }]);
         assert.equal(reply.finals.length, 0);
     } finally {
+        await runtime.stop();
+    }
+});
+
+test("named submits resolve the profile from the assigned job on a shared port", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+    const originalCoin2Port = global.coinFuncs.COIN2PORT;
+    const originalGetPoolProfile = global.coinFuncs.getPoolProfile;
+
+    try {
+        const login = invokePoolMethod({ socket, id: 360, method: "login", params: { login: MAIN_WALLET } });
+        assertLoginAccepted(login);
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+        miner.validJobs.enq({ id: "pearl-job", coin: "PRL" });
+        global.coinFuncs.COIN2PORT = coin => coin === "PRL" ? 44109 : originalCoin2Port.call(global.coinFuncs, coin);
+        global.coinFuncs.getPoolProfile = port => port === 44109 ? pearlProfile : originalGetPoolProfile.call(global.coinFuncs, port);
+
+        const reply = invokePoolMethod({
+            socket,
+            method: "mining.submit",
+            params: { job_id: "pearl-job", plain_proof: "cHJvb2Y=", proof_encoding: "gzip" },
+            portData: global.config.ports[0]
+        });
+        assert.deepEqual(reply.replies, [{ error: "Invalid job params", result: undefined }]);
+    } finally {
+        global.coinFuncs.COIN2PORT = originalCoin2Port;
+        global.coinFuncs.getPoolProfile = originalGetPoolProfile;
         await runtime.stop();
     }
 });
