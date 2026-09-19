@@ -90,12 +90,16 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             coinDiff: 2,
             newJob
         });
+        const shareTarget = pearl.targetForDifficulty(2);
+        assert.ok(shareTarget);
         assert.deepEqual(payload, {
             header: header.toString("hex"),
             job_id: "pearl-job",
-            target: pearl.targetForDifficulty(2).targetHex,
+            target: shareTarget.target.toString(16).padStart(64, "0"),
             cert_version: pearl.PEARL_CERT_VERSION
         });
+        assert.equal(newJob.targetHex, shareTarget.targetHex);
+        assert.equal(payload.target, Buffer.from(newJob.targetHex, "hex").reverse().toString("hex"));
         assert.equal(newJob.incomplete_header_bytes, headerBase64);
         assert.equal(newJob.cert_version, pearl.PEARL_CERT_VERSION);
     });
