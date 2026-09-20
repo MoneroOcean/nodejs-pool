@@ -45,9 +45,9 @@
   "dependencies": {
     "debug": "2.6.9",
     "express": "4.22.2",
-    "node-blocktemplate": "git+https://github.com/MoneroOcean/node-blocktemplate.git#v15.8.22",
+    "node-blocktemplate": "git+https://github.com/MoneroOcean/node-blocktemplate.git#v15.8.23",
     "node-lmdb": "0.10.1",
-    "node-powhash": "github:MoneroOcean/node-powhash#e47bed4c9061c8335a770f9ce6e610a5f58b3b33",
+    "node-powhash": "github:MoneroOcean/node-powhash#v29.2.9",
     "promise-mysql": "3.0.0",
     "protocol-buffers": "5.0.0"
   },

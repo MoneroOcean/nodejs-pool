@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const test = require("node:test");
+const blockTemplate = require("node-blocktemplate");
 
 const pearl = require("../../../lib/coins/core/pearl.js");
 const pearlProfile = require("../../../lib/coins/pearl.js");
@@ -14,9 +15,14 @@ function validPearlVerifierConfig(adjustment_factor) {
     };
 }
 
-const PEARL_SOLUTION_ID = "56".repeat(32);
+const PEARL_SOLUTION_DATA = Buffer.from([1, ...Buffer.alloc(32, 0x56)]);
+const PEARL_SOLUTION_ID = blockTemplate.pearlSolutionId(PEARL_SOLUTION_DATA).toString("hex");
 
-function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareDifficulty = 1, solutionId = PEARL_SOLUTION_ID, nativeAdjustmentFactor = 1 }) {
+function pearlSolutionIdFromData(solutionData) {
+    return blockTemplate.pearlSolutionId(solutionData).toString("hex");
+}
+
+function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareDifficulty = 1, nativeAdjustmentFactor = 1 }) {
     const networkTarget = pearl.targetForDifficulty(networkDifficulty);
     const shareTarget = pearl.targetForDifficulty(shareDifficulty);
     assert.ok(networkTarget);
@@ -27,7 +33,7 @@ function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareD
     const calls = { identity: [], invalid: [], trusted: 0, verifier: 0, verified: [] };
     const identityConfig = validPearlVerifierConfig(nativeAdjustmentFactor);
     const verifierResult = verifier && verifier.valid === true
-        ? { solution_id: solutionId, ...verifier }
+        ? { full: true, solution_data: PEARL_SOLUTION_DATA.toString("hex"), ...verifier }
         : verifier;
     const context = {
         blockTemplate: { header: header.toString("base64"), target: networkTarget.targetDecimal },
@@ -44,8 +50,9 @@ function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareD
             pearlSolutionId(wireHeader, wireProof) {
                 calls.identity.push({ wireHeader, wireProof });
                 assert.equal(Buffer.isBuffer(wireProof), true);
-                return { valid: true, solution_id: solutionId, config: identityConfig };
+                return { valid: true, solution_id: PEARL_SOLUTION_ID, config: identityConfig };
             },
+            pearlSolutionIdFromData,
             verifyPearlAsync(_header, _proof, _target, _miner, callback) {
                 calls.verifier += 1;
                 callback(verifierResult);
@@ -208,12 +215,32 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             }), null);
             assert.equal(pearl.parsePearlVerifierResult({
                 valid: true,
-                solution_id: PEARL_SOLUTION_ID,
+                full: true,
+                solution_data: PEARL_SOLUTION_DATA.toString("hex"),
                 candidate: true,
                 jackpot: "00".repeat(32),
                 config: validPearlVerifierConfig(adjustment_factor)
             }), null);
         }
+    });
+
+    test("accepts only full bounded versioned verifier solution data", () => {
+        const base = {
+            valid: true,
+            full: true,
+            solution_data: PEARL_SOLUTION_DATA.toString("hex"),
+            candidate: true,
+            jackpot: "00".repeat(32),
+            config: validPearlVerifierConfig(1)
+        };
+        assert.ok(pearl.parsePearlVerifierResult(base));
+        for (const solution_data of ["", "01f", "02", "01zz", "01".repeat(16 * 1024 + 1)]) {
+            assert.equal(pearl.parsePearlVerifierResult({ ...base, solution_data }), null);
+        }
+        assert.equal(pearl.parsePearlVerifierResult({ ...base, full: false }), null);
+        const withoutFull = { ...base };
+        delete withoutFull.full;
+        assert.equal(pearl.parsePearlVerifierResult(withoutFull), null);
     });
 
     test("does not call native identity work for an unknown job", () => {
@@ -455,7 +482,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             claim: { jackpot: "00".repeat(32), adjustment_factor: 1 },
             verifier: {
                 valid: true,
-                solution_id: "ab".repeat(32),
+                solution_data: Buffer.from([1, ...Buffer.alloc(32, 0xab)]).toString("hex"),
                 candidate: true,
                 jackpot: "00".repeat(32),
                 config: validPearlVerifierConfig(1)
@@ -537,11 +564,13 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                 pearlSolutionId() {
                     return { valid: true, solution_id: PEARL_SOLUTION_ID, config: validPearlVerifierConfig(128) };
                 },
+                pearlSolutionIdFromData,
                 verifyPearlAsync(wireHeader, _proof, wireTarget, _miner, callback) {
                     verifierWire = { wireHeader, wireTarget };
                     callback({
                         valid: true,
-                        solution_id: PEARL_SOLUTION_ID,
+                        full: true,
+                        solution_data: PEARL_SOLUTION_DATA.toString("hex"),
                         candidate: false,
                         jackpot: "ff".repeat(32),
                         config: {
@@ -578,10 +607,12 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                 pearlSolutionId() {
                     return { valid: true, solution_id: PEARL_SOLUTION_ID, config: validPearlVerifierConfig(128) };
                 },
+                pearlSolutionIdFromData,
                 verifyPearlAsync(_header, _proof, _target, _miner, callback) {
                     callback({
                         valid: true,
-                        solution_id: PEARL_SOLUTION_ID,
+                        full: true,
+                        solution_data: PEARL_SOLUTION_DATA.toString("hex"),
                         candidate: true,
                         jackpot: "00".repeat(32),
                         proof_id: "12".repeat(32),

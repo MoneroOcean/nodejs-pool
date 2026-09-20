@@ -404,6 +404,7 @@ export interface PoolSpecialCoinRuntime {
     slowHashBuffAsync?(blob: Buffer, template: ProtoMessage, minerAddress: string, callback: (result: Buffer | Buffer[] | null | false, errorKind?: string) => void, verifyContext?: ProtoMessage): void;
     verifyPearlAsync?(header: string, proof: string, target: string, minerAddress: string, callback: (result: unknown, errorKind?: string) => void): void;
     pearlSolutionId?(headerHex: string, proof: Buffer): unknown;
+    pearlSolutionIdFromData?(solutionData: Buffer): string;
     isHashVerifierEnabled?(): boolean;
 }
 

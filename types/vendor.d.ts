@@ -61,6 +61,7 @@ declare module "node-blocktemplate" {
         get_block_id(blob: Buffer, blobType?: number): Buffer;
         blockHashBuff(blob: Buffer): Buffer;
         blockHashBuff3(blob: Buffer): Buffer;
+        pearlSolutionId(solutionData: Buffer): Buffer;
         RavenBlockTemplate(result: Record<string, unknown>, poolAddress: string): import("./runtime").BlockTemplateRecord;
         RtmBlockTemplate(result: Record<string, unknown>, poolAddress: string): import("./runtime").BlockTemplateRecord;
         EthBlockTemplate(result: unknown): import("./runtime").BlockTemplateRecord;
@@ -92,7 +93,7 @@ declare module "node-powhash" {
         c29s_packed_edges(ring: number[]): string;
         c29b_packed_edges(ring: number[]): string;
         c29_cycle_hash(packedEdges: string): Buffer;
-        pearl_v3_solution_id(header: Buffer, proof: Buffer | string): unknown;
+        pearl_v3(header: Buffer, proof: Buffer | string, target: Buffer | false): unknown;
         setRandomxCacheSize(size: number): void;
         getRandomxCacheSize(): number;
     }
