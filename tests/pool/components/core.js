@@ -30,10 +30,19 @@ test("Pearl large-packet admission is narrow and proof logs are redacted", () =>
         '{"id":1,"method":"mining.submit","params":{"job_id":"j","plain_proof":"'
     ), true);
     assert.equal(createServerFactory.isPearlSubmitPrefix(
+        '{"jsonrpc":"2.0","id":3,"method":"mining.submit","params":{"job_id":"j","plain_proof":"'
+    ), true);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(
         '{"id":1,"method":"submit","params":{"plain_proof":"'
     ), false);
     assert.equal(createServerFactory.isPearlSubmitPrefix(
         `${'{"padding":"'}${"x".repeat(4096)}","method":"mining.submit","plain_proof":"`
+    ), false);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(
+        '{"id":1,"method":"other","params":{"job_id":"j","decoy":{"method":"mining.submit","plain_proof":"'
+    ), false);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(
+        '{"id":1,"params":{"job_id":"j","plain_proof":"'
     ), false);
     assert.equal(createServerFactory.hasPearlJob(undefined), false);
     assert.equal(createServerFactory.hasPearlJob({ validJobs: { toarray() { return [{ coin: "XMR" }]; } } }), false);
@@ -48,6 +57,76 @@ test("Pearl large-packet admission is narrow and proof logs are redacted", () =>
     assert.equal(sanitized.params.plain_proof, "<redacted:12 bytes>");
     assert.equal(sanitized.params.proof_encoding, "raw");
     assert.equal(request.params.plain_proof, "secret-proof");
+});
+
+test("Pearl large-packet buffers have a process-local aggregate byte limit", () => {
+    const originalConfig = global.config;
+    try {
+        global.config = {
+            pool: {
+                socketAuthTimeout: 15,
+                maxConnectionsPerIP: 256,
+                maxConnectionsPerSubnet: 1024,
+                protocolErrorLimit: 4
+            }
+        };
+        const state = {
+            threadName: "(Test) ",
+            activeConnectionsByIP: {},
+            activeConnectionsBySubnet: {},
+            activeMiners: new Map(),
+            activeMinerSockets: new Map(),
+            freeEthExtranonces: []
+        };
+        const serverFactory = createServerFactory({
+            debug() {},
+            fs: require("node:fs"),
+            net: require("node:net"),
+            tls: require("node:tls"),
+            state,
+            handleMinerData() { assert.fail("An incomplete proof must not be dispatched"); },
+            removeMiner() {}
+        });
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+        function createPearlSocket(index) {
+            const socket = new EventEmitter();
+            socket.remoteAddress = `127.0.0.${index + 1}`;
+            socket.writable = true;
+            socket.destroyed = false;
+            socket.miner_id = `pearl-${index}`;
+            socket.setKeepAlive = function setKeepAlive() {};
+            socket.setEncoding = function setEncoding() {};
+            socket.write = function write() { return true; };
+            socket.destroy = function destroy() {
+                if (socket.destroyed) return;
+                socket.destroyed = true;
+                socket.writable = false;
+                socket.emit("close");
+            };
+            state.activeMiners.set(socket.miner_id, {
+                validJobs: { toarray() { return [{ coin: "PRL" }]; } }
+            });
+            handleSocket(socket);
+            return socket;
+        }
+
+        const partialProof = `${JSON.stringify({ id: 1, method: "mining.submit", params: { job_id: "j" } }).slice(0, -2)},"plain_proof":"${"A".repeat(11 * 1024 * 1024)}`;
+        const sockets = [0, 1, 2].map(createPearlSocket);
+        for (const socket of sockets) socket.emit("data", partialProof);
+        assert.equal(sockets[0].destroyed, false);
+        assert.equal(sockets[1].destroyed, false);
+        assert.equal(sockets[2].destroyed, true);
+        assert.equal(sockets[2].destroyReason, "pearl-buffer-limit");
+
+        sockets[0].destroy();
+        const replacement = createPearlSocket(3);
+        replacement.emit("data", partialProof);
+        assert.equal(replacement.destroyed, false);
+        sockets[1].destroy();
+        replacement.destroy();
+    } finally {
+        global.config = originalConfig;
+    }
 });
 
 test("xmr constants derive the expected coin and algo metadata", () => {

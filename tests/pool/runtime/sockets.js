@@ -63,6 +63,30 @@ test("socket parser accepts JSON-RPC id zero", async () => {
     }
 });
 
+test("socket parser does not reflect oversized string RPC ids", async () => {
+    const { runtime } = await startHarness();
+    const socket = await openRawSocket(MAIN_PORT);
+
+    try {
+        socket.write(`${JSON.stringify({
+            id: "x".repeat(4096),
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "oversized-id" }
+        })}\n`);
+        await assertNoSocketData(socket);
+        const reply = await requestRawJson(socket, {
+            id: 1804,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "bounded-id" }
+        });
+        assert.equal(reply.id, 1804);
+        assert.equal(reply.error, null);
+    } finally {
+        socket.destroy();
+        await runtime.stop();
+    }
+});
+
 test("socket parser rejects non-scalar and deeply nested RPC ids and methods before dispatch", async () => {
     const { runtime } = await startHarness();
     const socket = await openRawSocket(MAIN_PORT);

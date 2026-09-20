@@ -243,6 +243,56 @@ test("reply serialization failures stay socket-local for asynchronous and delaye
     }
 });
 
+test("reply write backpressure closes only the slow socket", () => {
+    const originalConfig = global.config;
+    const debug = function noopDebug() {};
+    debug.enabled = false;
+
+    try {
+        global.config = { pool: {} };
+        const state = {
+            threadName: "(Test) ",
+            activeConnectionsByIP: {},
+            activeConnectionsBySubnet: {},
+            activeMiners: new Map(),
+            activeMinerSockets: new Map(),
+            freeEthExtranonces: []
+        };
+        const serverFactory = createServerFactory({
+            debug,
+            fs: require("node:fs"),
+            net: require("node:net"),
+            tls: require("node:tls"),
+            state,
+            handleMinerData(_socket, _id, _method, _params, _ip, _port, sendReply) {
+                sendReply(null, { ok: true });
+            },
+            removeMiner() {}
+        });
+        const socket = new EventEmitter();
+        socket.remoteAddress = "127.0.0.2";
+        socket.writable = true;
+        socket.destroyed = false;
+        socket.setKeepAlive = function setKeepAlive() {};
+        socket.setEncoding = function setEncoding() {};
+        socket.write = function write() { return false; };
+        socket.destroy = function destroy() {
+            socket.destroyed = true;
+            socket.writable = false;
+        };
+
+        serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" })(socket);
+        socket.emit("data", `${JSON.stringify({ id: 1, method: "test", params: {} })}\n`);
+
+        assert.equal(socket.destroyed, true);
+        assert.equal(socket.finalizing, true);
+        assert.equal(socket.destroyReason, "write-backpressure");
+        socket.emit("close");
+    } finally {
+        global.config = originalConfig;
+    }
+});
+
 test("eth-style nonces are deduped across miners on the same block template", () => {
     const originalConfig = global.config;
     const originalCoinFuncs = global.coinFuncs;

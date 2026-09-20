@@ -476,7 +476,7 @@ export interface PoolProfileSettings {
     parseMiningSubmitParams?(context: {params: PoolSubmitParams}): boolean;
     normalizeNamedAuthorizeParams?(context: {params: PoolSubmitParams, port: number, profile: CoinProfile}): boolean;
     sendNamedLoginResult?(context: PoolLoginContext): void;
-    normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, request?: ProtoMessage}): boolean;
+    normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, job?: PoolJob, request?: ProtoMessage}): boolean;
     sanitizeSubmitParams?(context: {params: PoolSubmitParams}): Record<string, unknown>;
     sensitiveSubmitData?: boolean;
     validateSubmitParams(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;

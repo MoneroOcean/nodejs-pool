@@ -1354,6 +1354,52 @@ test("remote verifier failures release timers and route the next share to a heal
     assert.equal(timers.size, 0);
 });
 
+test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
+    const vm = require("node:vm");
+    const { createRequire } = require("node:module");
+    const { EventEmitter } = require("node:events");
+    const filename = require.resolve("../../../lib/coins/index.js");
+    const nativeRequire = createRequire(filename);
+    const sockets = [];
+    const timers = new Set();
+    class Socket extends EventEmitter {
+        constructor() { super(); sockets.push(this); }
+        connect(_port, host, callback) { this.host = host; this.connectCallback = callback; }
+        write() {}
+        destroy() {}
+    }
+    const sandbox = {
+        Buffer, process, console: { log() {}, error() {} }, module: { exports: {} },
+        require(name) { return name === "net" ? { Socket } : nativeRequire(name); },
+        setInterval() {},
+        setTimeout(callback) { timers.add(callback); return callback; },
+        clearTimeout(timer) { timers.delete(timer); },
+        global: {
+            config: { ...global.config, daemon: { ...global.config.daemon, port: 18081 }, verify_shares_host: ["host-a"] },
+            support: { sendAdminFyi() {} }, database: {}
+        }
+    };
+    vm.runInNewContext(fs.readFileSync(filename, "utf8"), sandbox, { filename });
+    const coin = new sandbox.module.exports({});
+    const proof = Buffer.alloc(8 * 1024 * 1024).toString("base64");
+    const results = [];
+    const submit = miner => coin.verifyPearlAsync("00".repeat(76), proof, "ff".repeat(32), miner,
+        (...args) => results.push({ miner, args }));
+
+    submit("miner-a");
+    submit("miner-b");
+    submit("miner-c");
+    assert.equal(sockets.length, 2);
+    assert.deepEqual(results, [{ miner: "miner-c", args: [null, "verify-host-overload"] }]);
+
+    sockets[0].emit("error", new Error("connection failed"));
+    submit("miner-d");
+    assert.equal(sockets.length, 3);
+    sockets[1].emit("error", new Error("connection failed"));
+    sockets[2].emit("error", new Error("connection failed"));
+    assert.equal(timers.size, 0);
+});
+
 
 test("ETH reward lookup requires one valid receipt per transaction", () => {
     const { rpc } = require("../../../lib/coins/core/factories.js");

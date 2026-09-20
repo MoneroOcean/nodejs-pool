@@ -67,6 +67,15 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(pearl.decodePearlProof("not-base64"), null);
     });
 
+    test("validates a maximum-size proof linearly without accepting non-canonical padding", () => {
+        const encoded = Buffer.alloc(pearl.PEARL_MAX_PROOF_BYTES).toString("base64");
+        assert.equal(encoded.length, pearl.PEARL_MAX_PROOF_BASE64_CHARS);
+        assert.equal(pearl.isCanonicalBase64(encoded), true);
+        assert.equal(pearl.decodePearlProof(encoded)?.length, pearl.PEARL_MAX_PROOF_BYTES);
+        assert.equal(pearl.isCanonicalBase64("AB=="), false);
+        assert.equal(pearl.isCanonicalBase64("AAB="), false);
+    });
+
     test("accepts omitted or none encoding and rejects compression labels", () => {
         const proof = Buffer.from("pearl-proof").toString("base64");
         for (const proof_encoding of [undefined, "none"]) {
@@ -101,6 +110,21 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                 params: { job_id: "7", plain_proof: proof, ...claim }, wireParams: {}
             }), false);
         }
+    });
+
+    test("deduplicates the same Pearl work across job ids and dense proof encodings", () => {
+        const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES, 7).toString("base64");
+        const canonical = Buffer.concat([Buffer.from("dense-proof"), Buffer.from([0])]);
+        const legacy = canonical.subarray(0, canonical.length - 1);
+        const key = (jobId, proof, workHeader = header) => pearlProfile.pool.submissionKey({
+            miner: {},
+            job: { id: jobId, incomplete_header_bytes: workHeader, blockHash: "template" },
+            params: { plain_proof: proof.toString("base64") }
+        });
+
+        assert.equal(key("job-a", canonical), key("job-b", legacy));
+        assert.notEqual(key("job-a", canonical), key("job-c", Buffer.from("other-proof")));
+        assert.notEqual(key("job-a", canonical), key("job-d", canonical, Buffer.alloc(pearl.PEARL_HEADER_BYTES, 8).toString("base64")));
     });
 
     test("normalizes the standard Pearl object authorize shape", () => {
