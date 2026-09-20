@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const test = require("node:test");
 
 const pearl = require("../../../lib/coins/core/pearl.js");
@@ -406,5 +407,92 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(pearlProfile.pool.verifySpecialShare(context), true);
         assert.deepEqual(verifiedArgs, [1, null, proof.toString("base64"), false, true, true]);
         assert.equal(context.params.pearl_proof_id, "12".repeat(32));
+    });
+
+    test("preserves bounded Pearl gateway rejection diagnostics without logging the proof", () => {
+        const proof = Buffer.from("winning-proof");
+        const proofBase64 = proof.toString("base64");
+        const originalGatewayRequest = pearl.gatewayRequest;
+        let request;
+        let response;
+        pearl.gatewayRequest = function mockGatewayRequest(method, params, callback) {
+            request = { method, params };
+            callback(null, { error: { code: 17, message: "target mismatch", detail: "x".repeat(5000) } });
+        };
+        try {
+            pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, {
+                blockData: proofBase64,
+                job: {
+                    id: "pearl-job",
+                    incomplete_header_bytes: Buffer.alloc(pearl.PEARL_HEADER_BYTES, 7).toString("base64"),
+                    gatewayTarget: Number.MAX_VALUE,
+                    targetDecimal: "123456789012345678901234567890",
+                    cert_version: pearl.PEARL_CERT_VERSION
+                },
+                params: {
+                    jackpot: "ab".repeat(32),
+                    adjustment_factor: 7,
+                    pearl_proof_id: "12".repeat(32),
+                    plain_proof: proofBase64
+                },
+                replyFn(result, status) { response = { result, status }; }
+            });
+        } finally {
+            pearl.gatewayRequest = originalGatewayRequest;
+        }
+        assert.equal(request.method, "submitPlainProof");
+        assert.equal(request.params.plain_proof, proofBase64);
+        assert.equal(response.status, 200);
+        const data = response.result.error.data;
+        assert.equal(data.pearl.job_id, "pearl-job");
+        assert.equal(data.pearl.proof_id, "12".repeat(32));
+        assert.equal(data.pearl.proof_sha256, crypto.createHash("sha256").update(proof).digest("hex"));
+        assert.equal(data.pearl.proof_base64_chars, proofBase64.length);
+        assert.equal(data.pearl.target_decimal, "123456789012345678901234567890");
+        assert.equal(data.pearl.target_is_safe_integer, false);
+        assert.equal(data.pearl.jackpot, "ab".repeat(32));
+        assert.equal(data.pearl.adjustment_factor, 7);
+        assert.equal(data.gateway_response.truncated, true);
+        assert.ok(data.gateway_response.bytes > 4096);
+        assert.ok(data.gateway_response.preview.length <= 4096);
+        const logged = JSON.stringify(response.result);
+        assert.equal(logged.includes(proofBase64), false);
+        assert.equal(logged.includes("plain_proof"), false);
+    });
+
+    test("adds Pearl diagnostics to accepted and transport-failed gateway results", () => {
+        const proof = Buffer.from("winning-proof").toString("base64");
+        const originalGatewayRequest = pearl.gatewayRequest;
+        const replies = [];
+        const context = {
+            blockData: proof,
+            job: {
+                id: "pearl-job",
+                incomplete_header_bytes: Buffer.alloc(pearl.PEARL_HEADER_BYTES).toString("base64"),
+                gatewayTarget: 123,
+                targetDecimal: "123",
+                cert_version: pearl.PEARL_CERT_VERSION
+            },
+            params: { pearl_proof_id: "34".repeat(32) },
+            replyFn(result, status) { replies.push({ result, status }); }
+        };
+        try {
+            pearl.gatewayRequest = function accepted(_method, _params, callback) {
+                callback(null, { result: { status: "accepted", block_hash: "ab".repeat(32) } });
+            };
+            pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, context);
+            const transportError = new Error("connection reset\nwith control text");
+            transportError.code = "ECONNRESET";
+            pearl.gatewayRequest = function failed(_method, _params, callback) { callback(transportError); };
+            pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, context);
+        } finally {
+            pearl.gatewayRequest = originalGatewayRequest;
+        }
+        assert.equal(replies[0].status, 200);
+        assert.equal(replies[0].result.pearl_diagnostic.proof_id, "34".repeat(32));
+        assert.equal(replies[1].status, 0);
+        assert.equal(replies[1].result.error.data.transport.code, "ECONNRESET");
+        assert.equal(replies[1].result.error.data.pearl.proof_id, "34".repeat(32));
+        assert.equal(JSON.stringify(replies).includes(proof), false);
     });
 });
