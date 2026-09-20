@@ -330,6 +330,8 @@ export interface PoolSubmitParams {
     job_id?: string | number;
     plain_proof?: string;
     proof_encoding?: "none";
+    jackpot?: string;
+    adjustment_factor?: number;
     nonce?: string | number;
     result?: string;
     raw_params?: unknown[];

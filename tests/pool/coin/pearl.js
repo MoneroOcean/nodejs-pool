@@ -6,6 +6,45 @@ const test = require("node:test");
 const pearl = require("../../../lib/coins/core/pearl.js");
 const pearlProfile = require("../../../lib/coins/pearl.js");
 
+function validPearlVerifierConfig(adjustment_factor) {
+    return {
+        m: 1, n: 1, k: 128, rank: 128, experts: 0, top_k: 0,
+        expert_index: 0, t_rows: 1, t_cols: 1, adjustment_factor, moe: false
+    };
+}
+
+function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareDifficulty = 1 }) {
+    const networkTarget = pearl.targetForDifficulty(networkDifficulty);
+    const shareTarget = pearl.targetForDifficulty(shareDifficulty);
+    assert.ok(networkTarget);
+    assert.ok(shareTarget);
+    const proof = Buffer.from("pearl-proof");
+    const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
+    header.writeUInt32LE(pearl.targetToCompact(networkTarget.target), 72);
+    const calls = { invalid: [], trusted: 0, verifier: 0, verified: [] };
+    const context = {
+        blockTemplate: { header: header.toString("base64"), target: networkTarget.targetDecimal },
+        params: { plain_proof: proof.toString("base64"), ...claim },
+        job: {
+            target: Buffer.from(shareTarget.targetHex, "hex").toString("base64"),
+            targetHex: shareTarget.targetHex,
+            targetDecimal: shareTarget.targetDecimal,
+            difficulty: shareDifficulty
+        },
+        miner: { payout: "miner" },
+        coinFuncs: {
+            verifyPearlAsync(_header, _proof, _target, _miner, callback) {
+                calls.verifier += 1;
+                callback(verifier);
+            }
+        },
+        invalidShare() { return "invalid"; },
+        processShareCB(result) { calls.invalid.push(result); },
+        verifyShareCB(...args) { calls.verified.push(args); }
+    };
+    return { calls, context, networkTarget, proof, shareTarget };
+}
+
 test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
     test("uses the contiguous daemon RPC and mining gateway ports", () => {
         assert.equal(pearl.PEARL_PORT, 44109);
@@ -37,6 +76,29 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         for (const proof_encoding of ["raw", "gzip", "zlib"]) {
             const params = { job_id: "7", plain_proof: proof, proof_encoding };
             assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {} }), false);
+        }
+    });
+
+    test("normalizes and validates optional Pearl claim fields", () => {
+        const proof = Buffer.from("pearl-proof").toString("base64");
+        const jackpot = "ab".repeat(32).toUpperCase();
+        const params = { job_id: 7, plain_proof: proof, jackpot, adjustment_factor: 7 };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {} }), true);
+        assert.equal(params.jackpot, jackpot.toLowerCase());
+        assert.equal(params.adjustment_factor, 7);
+
+        const invalidClaims = [
+            { jackpot },
+            { adjustment_factor: 1 },
+            { jackpot: "a".repeat(63), adjustment_factor: 1 },
+            { jackpot: "gg".repeat(32), adjustment_factor: 1 },
+            { jackpot: "00".repeat(32), adjustment_factor: 0 },
+            { jackpot: "00".repeat(32), adjustment_factor: 0x1_0000_0000 }
+        ];
+        for (const claim of invalidClaims) {
+            assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+                params: { job_id: "7", plain_proof: proof, ...claim }, wireParams: {}
+            }), false);
         }
     });
 
@@ -188,6 +250,89 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             { id: "0", jsonrpc: "2.0", method: "getblockheader", params: [blockHash, true] },
             { id: "0", jsonrpc: "2.0", method: "getblockheader", params: [blockHash, true] }
         ]);
+    });
+
+    test("accepts a claimed ordinary share through the trusted-share path", () => {
+        const fixture = pearlShareFixture({
+            claim: { jackpot: pearl.targetForDifficulty(1).targetHex, adjustment_factor: 1 },
+            verifier: { valid: true, candidate: true, jackpot: "00".repeat(32), config: validPearlVerifierConfig(1) }
+        });
+        fixture.context.tryTrustedShare = onTrustedShare => {
+            fixture.calls.trusted += 1;
+            onTrustedShare();
+            return true;
+        };
+
+        assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
+        assert.equal(fixture.calls.trusted, 1);
+        assert.equal(fixture.calls.verifier, 0);
+        assert.deepEqual(fixture.calls.verified, [[1, null, null, true, false, false]]);
+        assert.deepEqual(fixture.calls.invalid, []);
+    });
+
+    test("fully verifies a claimed network candidate without trying trusted shares", () => {
+        const fixture = pearlShareFixture({
+            claim: { jackpot: "00".repeat(32), adjustment_factor: 1 },
+            verifier: {
+                valid: true,
+                candidate: true,
+                jackpot: "00".repeat(32),
+                config: validPearlVerifierConfig(1)
+            }
+        });
+        fixture.context.tryTrustedShare = () => {
+            fixture.calls.trusted += 1;
+            assert.fail("network candidates must be fully verified");
+        };
+
+        assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
+        assert.equal(fixture.calls.trusted, 0);
+        assert.equal(fixture.calls.verifier, 1);
+        assert.deepEqual(fixture.calls.verified, [[1, null, fixture.proof.toString("base64"), false, true, true]]);
+        assert.deepEqual(fixture.calls.invalid, []);
+    });
+
+    test("rejects claims outside the assigned share target before verification", () => {
+        const fixture = pearlShareFixture({
+            claim: { jackpot: "ff".repeat(32), adjustment_factor: 1 },
+            verifier: { valid: true, candidate: true, jackpot: "ff".repeat(32), config: validPearlVerifierConfig(1) }
+        });
+
+        assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
+        assert.equal(fixture.calls.verifier, 0);
+        assert.deepEqual(fixture.calls.invalid, ["invalid"]);
+        assert.deepEqual(fixture.calls.verified, []);
+    });
+
+    test("invalidates verifier results whose jackpot or factor differs from the claim", () => {
+        const networkTarget = pearl.targetForDifficulty(2);
+        assert.ok(networkTarget);
+        const cases = [
+            {
+                claim: { jackpot: networkTarget.targetHex, adjustment_factor: 1 },
+                verifier: {
+                    valid: true, candidate: true, jackpot: "00".repeat(32), config: validPearlVerifierConfig(1)
+                }
+            },
+            {
+                claim: { jackpot: networkTarget.targetHex, adjustment_factor: 2 },
+                verifier: {
+                    valid: true, candidate: true, jackpot: networkTarget.targetHex, config: validPearlVerifierConfig(1)
+                }
+            }
+        ];
+        for (const { claim, verifier } of cases) {
+            const fixture = pearlShareFixture({ claim, verifier });
+            fixture.context.tryTrustedShare = () => {
+                fixture.calls.trusted += 1;
+                assert.fail("claimed network candidates must not use trusted shares");
+            };
+            assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
+            assert.equal(fixture.calls.trusted, 0);
+            assert.equal(fixture.calls.verifier, 1);
+            assert.deepEqual(fixture.calls.invalid, ["invalid"]);
+            assert.deepEqual(fixture.calls.verified, []);
+        }
     });
 
     test("rejects a valid proof that does not meet the assigned share target", () => {
