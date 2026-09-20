@@ -848,6 +848,7 @@ test("share processor records accepted shares through the common verification pa
         activeBlockTemplates,
         proxyMiners: {},
         minerWallets,
+        ipWhitelist: {},
         walletTrust,
         walletLastSeeTime,
         processSend(message) {

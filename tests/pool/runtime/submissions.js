@@ -217,6 +217,57 @@ test("throttle drops unlisted trusted shares without affecting a whitelisted pee
     }
 });
 
+test("whitelisting an active miner immediately bypasses the payout throttle", async () => {
+    const { runtime } = await startHarness();
+    const originalThrottlePerSec = global.config.pool.minerThrottleSharePerSec;
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const socket = {};
+    const ip = "10.0.0.205";
+
+    try {
+        global.config.pool.minerThrottleSharePerSec = 0;
+        global.config.pool.trustedMiners = false;
+
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 1956,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "late-whitelist"
+            },
+            ip
+        });
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+
+        assert.equal(miner.whiteList, false);
+        state.ip_whitelist[ip] = 1;
+
+        const reply = invokePoolMethod({
+            socket,
+            id: 1957,
+            method: "submit",
+            params: {
+                id: socket.miner_id,
+                job_id: jobId,
+                nonce: "00000021",
+                result: VALID_RESULT
+            }
+        });
+
+        assert.deepEqual(reply.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(miner.whiteList, true);
+        assert.equal(state.minerWallets[MAIN_WALLET].last_ver_shares, 0);
+        assert.equal(state.shareStats.throttledShares, 0);
+    } finally {
+        global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        await runtime.stop();
+    }
+});
+
 test("expired shares do not retain unique nonce entries", async () => {
     const { runtime } = await startHarness();
     const socket = {};
