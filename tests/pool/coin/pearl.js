@@ -114,7 +114,10 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
 
     test("deduplicates the same Pearl work across job ids and dense proof encodings", () => {
         const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES, 7).toString("base64");
-        const canonical = Buffer.concat([Buffer.from("dense-proof"), Buffer.from([0])]);
+        // A real dense proof ends with zero-valued high bytes from its final
+        // little-endian row field before the canonical Option::None tag.
+        const denseBody = Buffer.concat([Buffer.from("dense-proof"), Buffer.alloc(8)]);
+        const canonical = Buffer.concat([denseBody, Buffer.from([0])]);
         const legacy = canonical.subarray(0, canonical.length - 1);
         const key = (jobId, proof, workHeader = header) => pearlProfile.pool.submissionKey({
             miner: {},
@@ -124,7 +127,8 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
 
         assert.equal(key("job-a", canonical), key("job-b", legacy));
         assert.notEqual(key("job-a", canonical), key("job-c", Buffer.from("other-proof")));
-        assert.notEqual(key("job-a", canonical), key("job-d", canonical, Buffer.alloc(pearl.PEARL_HEADER_BYTES, 8).toString("base64")));
+        assert.notEqual(key("job-a", canonical), key("job-d", Buffer.concat([denseBody, Buffer.from([1])])));
+        assert.notEqual(key("job-a", canonical), key("job-e", canonical, Buffer.alloc(pearl.PEARL_HEADER_BYTES, 8).toString("base64")));
     });
 
     test("normalizes the standard Pearl object authorize shape", () => {
