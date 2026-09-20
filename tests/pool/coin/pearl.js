@@ -14,7 +14,9 @@ function validPearlVerifierConfig(adjustment_factor) {
     };
 }
 
-function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareDifficulty = 1 }) {
+const PEARL_SOLUTION_ID = "56".repeat(32);
+
+function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareDifficulty = 1, solutionId = PEARL_SOLUTION_ID, nativeAdjustmentFactor = 1 }) {
     const networkTarget = pearl.targetForDifficulty(networkDifficulty);
     const shareTarget = pearl.targetForDifficulty(shareDifficulty);
     assert.ok(networkTarget);
@@ -22,11 +24,16 @@ function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareD
     const proof = Buffer.from("pearl-proof");
     const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
     header.writeUInt32LE(pearl.targetToCompact(networkTarget.target), 72);
-    const calls = { invalid: [], trusted: 0, verifier: 0, verified: [] };
+    const calls = { identity: [], invalid: [], trusted: 0, verifier: 0, verified: [] };
+    const identityConfig = validPearlVerifierConfig(nativeAdjustmentFactor);
+    const verifierResult = verifier && verifier.valid === true
+        ? { solution_id: solutionId, ...verifier }
+        : verifier;
     const context = {
         blockTemplate: { header: header.toString("base64"), target: networkTarget.targetDecimal },
         params: { plain_proof: proof.toString("base64"), ...claim },
         job: {
+            incomplete_header_bytes: header.toString("base64"),
             target: Buffer.from(shareTarget.targetHex, "hex").toString("base64"),
             targetHex: shareTarget.targetHex,
             targetDecimal: shareTarget.targetDecimal,
@@ -34,9 +41,14 @@ function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareD
         },
         miner: { payout: "miner" },
         coinFuncs: {
+            pearlSolutionId(wireHeader, wireProof) {
+                calls.identity.push({ wireHeader, wireProof });
+                assert.equal(Buffer.isBuffer(wireProof), true);
+                return { valid: true, solution_id: solutionId, config: identityConfig };
+            },
             verifyPearlAsync(_header, _proof, _target, _miner, callback) {
                 calls.verifier += 1;
-                callback(verifier);
+                callback(verifierResult);
             }
         },
         invalidShare() { return "invalid"; },
@@ -112,23 +124,107 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         }
     });
 
-    test("deduplicates the same Pearl work across job ids and dense proof encodings", () => {
+    test("uses the native semantic identity across job ids and proof encodings", () => {
         const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES, 7).toString("base64");
-        // A real dense proof ends with zero-valued high bytes from its final
-        // little-endian row field before the canonical Option::None tag.
-        const denseBody = Buffer.concat([Buffer.from("dense-proof"), Buffer.alloc(8)]);
-        const canonical = Buffer.concat([denseBody, Buffer.from([0])]);
-        const legacy = canonical.subarray(0, canonical.length - 1);
-        const key = (jobId, proof, workHeader = header) => pearlProfile.pool.submissionKey({
-            miner: {},
-            job: { id: jobId, incomplete_header_bytes: workHeader, blockHash: "template" },
-            params: { plain_proof: proof.toString("base64") }
-        });
+        const canonical = Buffer.from("canonical-proof");
+        const legacy = Buffer.from("legacy-proof");
+        const coinFuncs = {
+            pearlSolutionId(wireHeader, wireProof) {
+                assert.equal(wireHeader, Buffer.alloc(pearl.PEARL_HEADER_BYTES, 7).toString("hex"));
+                assert.equal(Buffer.isBuffer(wireProof), true);
+                return { valid: true, solution_id: PEARL_SOLUTION_ID, config: validPearlVerifierConfig(1) };
+            }
+        };
+        const key = (jobId, proof) => {
+            const params = { job_id: jobId, plain_proof: proof.toString("base64") };
+            assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+                coinFuncs,
+                job: { id: jobId, incomplete_header_bytes: header },
+                params,
+                wireParams: {}
+            }), true);
+            return pearlProfile.pool.submissionKey({ coinFuncs, miner: {}, job: { id: jobId, incomplete_header_bytes: header }, params });
+        };
 
-        assert.equal(key("job-a", canonical), key("job-b", legacy));
-        assert.notEqual(key("job-a", canonical), key("job-c", Buffer.from("other-proof")));
-        assert.notEqual(key("job-a", canonical), key("job-d", Buffer.concat([denseBody, Buffer.from([1])])));
-        assert.notEqual(key("job-a", canonical), key("job-e", canonical, Buffer.alloc(pearl.PEARL_HEADER_BYTES, 8).toString("base64")));
+        assert.equal(key("job-a", canonical), PEARL_SOLUTION_ID);
+        assert.equal(key("job-b", legacy), PEARL_SOLUTION_ID);
+    });
+
+    test("does not include claimed jackpot or factor in the semantic key", () => {
+        const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES, 9).toString("base64");
+        const coinFuncs = {
+            pearlSolutionId() {
+                return { valid: true, solution_id: PEARL_SOLUTION_ID, config: validPearlVerifierConfig(7) };
+            }
+        };
+        const key = claim => {
+            const params = { job_id: "job", plain_proof: Buffer.from("proof").toString("base64"), ...claim };
+            assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+                coinFuncs,
+                job: { id: "job", incomplete_header_bytes: header },
+                params,
+                wireParams: {}
+            }), true);
+            return pearlProfile.pool.submissionKey({ coinFuncs, miner: {}, job: { id: "job", incomplete_header_bytes: header }, params });
+        };
+        assert.equal(key({ jackpot: "00".repeat(32), adjustment_factor: 7 }), key({ jackpot: "ff".repeat(32), adjustment_factor: 7 }));
+    });
+
+    test("rejects an invalid native identity through normal submit validation", () => {
+        const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES, 3).toString("base64");
+        const params = { job_id: "job", plain_proof: Buffer.from("proof").toString("base64") };
+        const coinFuncs = { pearlSolutionId() { return { valid: false }; } };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+            coinFuncs,
+            job: { id: "job", incomplete_header_bytes: header },
+            params,
+            wireParams: {}
+        }), true);
+        assert.equal(pearlProfile.pool.validateSubmitParams({ params, job: { id: "job", incomplete_header_bytes: header }, coinFuncs }), false);
+    });
+
+    test("does not reuse a cached identity after failed renormalization", () => {
+        const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES, 4).toString("base64");
+        const params = { job_id: "job", plain_proof: Buffer.from("proof").toString("base64") };
+        const coinFuncs = {
+            pearlSolutionId() {
+                return { valid: true, solution_id: PEARL_SOLUTION_ID, config: validPearlVerifierConfig(1) };
+            }
+        };
+        const context = { coinFuncs, job: { id: "job", incomplete_header_bytes: header }, params, wireParams: {} };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams(context), true);
+        assert.equal(pearlProfile.pool.parseMiningSubmitParams({ params }), true);
+        params.plain_proof = "not-base64";
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams(context), false);
+        assert.equal(pearlProfile.pool.parseMiningSubmitParams({ params }), false);
+    });
+
+    test("rejects zero or oversized native adjustment factors", () => {
+        for (const adjustment_factor of [0, 0x1_0000_0000]) {
+            assert.equal(pearl.parsePearlSolutionIdResult({
+                valid: true,
+                solution_id: PEARL_SOLUTION_ID,
+                config: validPearlVerifierConfig(adjustment_factor)
+            }), null);
+            assert.equal(pearl.parsePearlVerifierResult({
+                valid: true,
+                solution_id: PEARL_SOLUTION_ID,
+                candidate: true,
+                jackpot: "00".repeat(32),
+                config: validPearlVerifierConfig(adjustment_factor)
+            }), null);
+        }
+    });
+
+    test("does not call native identity work for an unknown job", () => {
+        let identityCalls = 0;
+        const params = { job_id: "missing", plain_proof: Buffer.from("proof").toString("base64") };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+            coinFuncs: { pearlSolutionId() { identityCalls += 1; return { valid: false }; } },
+            params,
+            wireParams: {}
+        }), true);
+        assert.equal(identityCalls, 0);
     });
 
     test("normalizes the standard Pearl object authorize shape", () => {
@@ -299,6 +395,39 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.deepEqual(fixture.calls.invalid, []);
     });
 
+    test("rejects a trusted claim whose factor differs from native identity config", () => {
+        const fixture = pearlShareFixture({
+            claim: { jackpot: pearl.targetForDifficulty(1).targetHex, adjustment_factor: 1 },
+            nativeAdjustmentFactor: 2,
+            verifier: { valid: true, candidate: true, jackpot: "00".repeat(32), config: validPearlVerifierConfig(2) }
+        });
+        fixture.context.tryTrustedShare = onTrustedShare => {
+            fixture.calls.trusted += 1;
+            onTrustedShare();
+            return true;
+        };
+
+        assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
+        assert.equal(fixture.calls.trusted, 0);
+        assert.equal(fixture.calls.verifier, 0);
+        assert.deepEqual(fixture.calls.invalid, ["invalid"]);
+    });
+
+    test("rejects a job header that differs from its block template", () => {
+        const fixture = pearlShareFixture({
+            claim: { jackpot: pearl.targetForDifficulty(1).targetHex, adjustment_factor: 1 },
+            verifier: { valid: true, candidate: true, jackpot: "00".repeat(32), config: validPearlVerifierConfig(1) }
+        });
+        fixture.context.job.incomplete_header_bytes = Buffer.alloc(pearl.PEARL_HEADER_BYTES, 1).toString("base64");
+        fixture.context.tryTrustedShare = () => {
+            assert.fail("mismatched headers must fail before trust");
+        };
+
+        assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
+        assert.equal(fixture.calls.verifier, 0);
+        assert.deepEqual(fixture.calls.invalid, ["invalid"]);
+    });
+
     test("fully verifies a claimed network candidate without trying trusted shares", () => {
         const fixture = pearlShareFixture({
             claim: { jackpot: "00".repeat(32), adjustment_factor: 1 },
@@ -319,6 +448,28 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(fixture.calls.verifier, 1);
         assert.deepEqual(fixture.calls.verified, [[1, null, fixture.proof.toString("base64"), false, true, true]]);
         assert.deepEqual(fixture.calls.invalid, []);
+    });
+
+    test("rejects a full verifier result with a different solution id", () => {
+        const fixture = pearlShareFixture({
+            claim: { jackpot: "00".repeat(32), adjustment_factor: 1 },
+            verifier: {
+                valid: true,
+                solution_id: "ab".repeat(32),
+                candidate: true,
+                jackpot: "00".repeat(32),
+                config: validPearlVerifierConfig(1)
+            }
+        });
+        fixture.context.tryTrustedShare = () => {
+            fixture.calls.trusted += 1;
+            assert.fail("network candidates must be fully verified");
+        };
+
+        assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
+        assert.equal(fixture.calls.verifier, 1);
+        assert.deepEqual(fixture.calls.invalid, ["invalid"]);
+        assert.deepEqual(fixture.calls.verified, []);
     });
 
     test("rejects claims outside the assigned share target before verification", () => {
@@ -350,7 +501,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                 }
             }
         ];
-        for (const { claim, verifier } of cases) {
+        for (const [index, { claim, verifier }] of cases.entries()) {
             const fixture = pearlShareFixture({ claim, verifier });
             fixture.context.tryTrustedShare = () => {
                 fixture.calls.trusted += 1;
@@ -358,7 +509,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             };
             assert.equal(pearlProfile.pool.verifySpecialShare(fixture.context), true);
             assert.equal(fixture.calls.trusted, 0);
-            assert.equal(fixture.calls.verifier, 1);
+            assert.equal(fixture.calls.verifier, index === 0 ? 1 : 0);
             assert.deepEqual(fixture.calls.invalid, ["invalid"]);
             assert.deepEqual(fixture.calls.verified, []);
         }
@@ -375,13 +526,22 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         const context = {
             blockTemplate: { header: header.toString("base64"), target: parsed.targetDecimal },
             params: { plain_proof: Buffer.from("proof").toString("base64") },
-            job: { target: Buffer.from(parsed.targetHex, "hex").toString("base64"), targetHex: parsed.targetHex, difficulty: 1 },
+            job: {
+                incomplete_header_bytes: header.toString("base64"),
+                target: Buffer.from(parsed.targetHex, "hex").toString("base64"),
+                targetHex: parsed.targetHex,
+                difficulty: 1
+            },
             miner: { payout: "miner" },
             coinFuncs: {
+                pearlSolutionId() {
+                    return { valid: true, solution_id: PEARL_SOLUTION_ID, config: validPearlVerifierConfig(128) };
+                },
                 verifyPearlAsync(wireHeader, _proof, wireTarget, _miner, callback) {
                     verifierWire = { wireHeader, wireTarget };
                     callback({
                         valid: true,
+                        solution_id: PEARL_SOLUTION_ID,
                         candidate: false,
                         jackpot: "ff".repeat(32),
                         config: {
@@ -412,12 +572,16 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         const context = {
             blockTemplate: { header: header.toString("base64"), target: parsed.targetDecimal },
             params: { plain_proof: proof.toString("base64") },
-            job: { targetHex: parsed.targetHex, difficulty: 1 },
+            job: { incomplete_header_bytes: header.toString("base64"), targetHex: parsed.targetHex, difficulty: 1 },
             miner: { payout: "miner" },
             coinFuncs: {
+                pearlSolutionId() {
+                    return { valid: true, solution_id: PEARL_SOLUTION_ID, config: validPearlVerifierConfig(128) };
+                },
                 verifyPearlAsync(_header, _proof, _target, _miner, callback) {
                     callback({
                         valid: true,
+                        solution_id: PEARL_SOLUTION_ID,
                         candidate: true,
                         jackpot: "00".repeat(32),
                         proof_id: "12".repeat(32),
@@ -434,6 +598,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         };
         assert.equal(pearlProfile.pool.verifySpecialShare(context), true);
         assert.deepEqual(verifiedArgs, [1, null, proof.toString("base64"), false, true, true]);
+        assert.equal(context.params.pearl_solution_id, PEARL_SOLUTION_ID);
         assert.equal(context.params.pearl_proof_id, "12".repeat(32));
     });
 

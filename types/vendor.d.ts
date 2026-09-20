@@ -92,6 +92,7 @@ declare module "node-powhash" {
         c29s_packed_edges(ring: number[]): string;
         c29b_packed_edges(ring: number[]): string;
         c29_cycle_hash(packedEdges: string): Buffer;
+        pearl_v3_solution_id(header: Buffer, proof: Buffer | string): unknown;
         setRandomxCacheSize(size: number): void;
         getRandomxCacheSize(): number;
     }

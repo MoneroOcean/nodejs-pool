@@ -323,6 +323,7 @@ export interface CoinRuntime {
     c29_packed_edges(ring: number[], blobTypeNum: number, hint?: number | string | ProtoMessage): string;
     c29_cycle_hash(packedEdges: string): Buffer;
     kawpowQuickHash(convertedBlob: Buffer, nonce: string, mixhash: string): Buffer;
+    pearlSolutionId?(headerHex: string, proof: Buffer): unknown;
     ethBlockCheck(port: number, minerHex: string, nonceHex: string, blockHeightHex: string, callback: (blockHash: string | null, blockHeight?: number | null, profile?: CoinProfile | null) => void): void;
     ethBlockFind(port: number, nonceHex: string, callback: (blockHash: string | null) => void): void;
     fixDaemonIssue(issueOrHeight: ProtoMessage | number | string | null, topHeight?: number, port?: number): void;

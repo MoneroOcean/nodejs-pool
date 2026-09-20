@@ -337,6 +337,8 @@ export interface PoolSubmitParams {
     raw_params?: unknown[];
     header_hash?: string;
     mixhash?: string;
+    pearl_solution_id?: string;
+    pearl_proof_id?: string;
     pow?: number[];
     poolNonce?: number;
     workerNonce?: number;
@@ -360,6 +362,7 @@ export interface PoolSubmitContext {
 }
 
 export interface PoolSubmissionKeyContext {
+    coinFuncs?: CoinRuntime;
     miner: PoolMinerView;
     job: PoolJob;
     params: PoolSubmitParams;
@@ -400,6 +403,7 @@ export interface PoolSpecialCoinRuntime {
     slowHashBuff(blob: Buffer, template: ProtoMessage, nonce?: string, mixhash?: string): Buffer | Buffer[] | false;
     slowHashBuffAsync?(blob: Buffer, template: ProtoMessage, minerAddress: string, callback: (result: Buffer | Buffer[] | null | false, errorKind?: string) => void, verifyContext?: ProtoMessage): void;
     verifyPearlAsync?(header: string, proof: string, target: string, minerAddress: string, callback: (result: unknown, errorKind?: string) => void): void;
+    pearlSolutionId?(headerHex: string, proof: Buffer): unknown;
     isHashVerifierEnabled?(): boolean;
 }
 
@@ -476,7 +480,7 @@ export interface PoolProfileSettings {
     parseMiningSubmitParams?(context: {params: PoolSubmitParams}): boolean;
     normalizeNamedAuthorizeParams?(context: {params: PoolSubmitParams, port: number, profile: CoinProfile}): boolean;
     sendNamedLoginResult?(context: PoolLoginContext): void;
-    normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, job?: PoolJob, request?: ProtoMessage}): boolean;
+    normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, coinFuncs?: CoinRuntime, job?: PoolJob, request?: ProtoMessage}): boolean;
     sanitizeSubmitParams?(context: {params: PoolSubmitParams}): Record<string, unknown>;
     sensitiveSubmitData?: boolean;
     validateSubmitParams(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
