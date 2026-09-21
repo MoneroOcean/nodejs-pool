@@ -305,6 +305,14 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(result.targetDecimal, result.target.toString(10));
     });
 
+    test("derives targets above the JavaScript safe-integer work boundary", () => {
+        const difficulty = (Number.MAX_SAFE_INTEGER + 1) / pearl.PEARL_HASHES_PER_DIFFICULTY;
+        const result = pearl.targetForDifficulty(difficulty);
+        assert.ok(result);
+        assert.equal(result.work, BigInt(Math.ceil(difficulty * pearl.PEARL_HASHES_PER_DIFFICULTY)));
+        assert.ok(result.target > 0n);
+    });
+
     test("builds the established Pearl miner wire job from the gateway template", () => {
         const networkTarget = pearl.targetForDifficulty(1);
         assert.ok(networkTarget);
