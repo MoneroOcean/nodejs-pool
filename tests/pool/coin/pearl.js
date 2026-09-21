@@ -72,7 +72,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
     });
 
     test("maps the established fixed-coin selector to canonical PearlHash accounting", () => {
-        assert.deepEqual(pearlProfile.minerAlgoAliases, { pearlhash: ["pearl"] });
+        assert.deepEqual(pearlProfile.minerAlgoAliases, { pearlhash: ["pearl", "pearlhash"] });
         assert.deepEqual(pearlProfile.perf.aliases, ["pearlhash", "pearl"]);
         assert.equal(pearlProfile.pool.hashesPerDifficulty, 1_000_000);
     });
