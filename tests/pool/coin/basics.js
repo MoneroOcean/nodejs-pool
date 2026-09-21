@@ -1397,9 +1397,9 @@ test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
 
     sockets[0].connectCallback();
     const header = JSON.parse(sockets[0].writes[0]);
-    assert.equal(header.proof, proof.toString("base64"));
-    assert.equal(header.proof_bytes, undefined);
-    assert.equal(sockets[0].writes.length, 1);
+    assert.equal(header.proof, undefined);
+    assert.equal(header.proof_bytes, proof.length);
+    assert.strictEqual(sockets[0].writes[1], proof);
 
     sockets[0].emit("error", new Error("connection failed"));
     submit("miner-e");
