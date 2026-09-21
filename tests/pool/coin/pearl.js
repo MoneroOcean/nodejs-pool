@@ -110,7 +110,12 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
 
     test("accepts and strips only the current submit certificate version", () => {
         const proof = Buffer.from("pearl-proof").toString("base64");
-        const params = { job_id: 7, plain_proof: proof, cert_version: pearl.PEARL_CERT_VERSION };
+        const params = {
+            job_id: 7,
+            plain_proof: proof,
+            cert_version: pearl.PEARL_CERT_VERSION,
+            future_extension: { ignored: true }
+        };
         assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {} }), true);
         assert.deepEqual(params, { job_id: "7", plain_proof: proof });
 

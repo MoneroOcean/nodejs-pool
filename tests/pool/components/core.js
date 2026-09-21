@@ -25,25 +25,7 @@ async function captureConsole(run) {
 }
 
 test.describe("pool components: core", { concurrency: false }, () => {
-test("Pearl large-packet admission is narrow and proof logs are redacted", () => {
-    assert.equal(createServerFactory.isPearlSubmitPrefix(
-        '{"id":1,"method":"mining.submit","params":{"job_id":"j","plain_proof":"'
-    ), true);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(
-        '{"jsonrpc":"2.0","id":3,"method":"mining.submit","params":{"job_id":"j","plain_proof":"'
-    ), true);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(
-        '{"id":1,"method":"submit","params":{"plain_proof":"'
-    ), false);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(
-        `${'{"padding":"'}${"x".repeat(4096)}","method":"mining.submit","plain_proof":"`
-    ), false);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(
-        '{"id":1,"method":"other","params":{"job_id":"j","decoy":{"method":"mining.submit","plain_proof":"'
-    ), false);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(
-        '{"id":1,"params":{"job_id":"j","plain_proof":"'
-    ), false);
+test("Pearl large-packet admission is job-scoped and proof logs are redacted", () => {
     assert.equal(createServerFactory.hasPearlJob(undefined), false);
     assert.equal(createServerFactory.hasPearlJob({ validJobs: { toarray() { return [{ coin: "XMR" }]; } } }), false);
     assert.equal(createServerFactory.hasPearlJob({ validJobs: { toarray() { return [{ coin: "PRL" }]; } } }), true);

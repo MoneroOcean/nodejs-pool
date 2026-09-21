@@ -14,24 +14,28 @@ function clearObject(target) {
 }
 
 test.describe("pool components: runtime", { concurrency: false }, () => {
-test("Pearl large-frame admission accepts only the current certificate version", () => {
-    function request(certVersion, extraParams = {}) {
-        return JSON.stringify({
+test("Pearl large-frame framing admits extension fields and defers their semantics", () => {
+    function request(extraRequest = {}, extraParams = {}) {
+        return {
             id: 40,
             method: "mining.submit",
+            ...extraRequest,
             params: {
                 job_id: "pearl-job",
-                cert_version: certVersion,
-                ...extraParams,
-                plain_proof: "A".repeat(200000)
+                plain_proof: "A".repeat(200000),
+                ...extraParams
             }
-        });
+        };
     }
 
-    assert.equal(createServerFactory.isPearlSubmitPrefix(request(3)), true);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(request(2)), false);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(request("3")), false);
-    assert.equal(createServerFactory.isPearlSubmitPrefix(request(3, { unexpected: true })), false);
+    assert.equal(createServerFactory.isPearlSubmitRequest(request({}, {
+        cert_version: 4,
+        future_extension: { supported: false }
+    })), true);
+    assert.equal(createServerFactory.isPearlSubmitRequest(request({ future_request_field: true })), true);
+    assert.equal(createServerFactory.isPearlSubmitRequest(request({ method: "login" })), false);
+    assert.equal(createServerFactory.isPearlSubmitRequest(request({}, { job_id: "" })), false);
+    assert.equal(createServerFactory.isPearlSubmitRequest(request({}, { plain_proof: "" })), false);
 });
 
 test("pool state preserves coin helper receiver when formatting a port", () => {
