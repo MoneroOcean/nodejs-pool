@@ -54,10 +54,21 @@ test("Pearl large-packet admission is narrow and proof logs are redacted", () =>
         params: { job_id: "j", plain_proof: "secret-proof", proof_encoding: "raw" }
     };
     const sanitized = createServerFactory.sanitizeRequestForLog(request);
-    assert.equal(sanitized.params.plain_proof, "<redacted:12 bytes>");
-    assert.equal(sanitized.params.proof_encoding, "raw");
+    assert.equal(sanitized.params.plain_proof_chars, request.params.plain_proof.length);
+    assert.equal(sanitized.params.proof_encoding, undefined);
     assert.equal(request.params.plain_proof, "secret-proof");
-});
+})
+
+    test("Large-packet logging redacts malformed parameters", () => {
+        const malformed = {
+            method: "mining.submit",
+            params: { plain_proof: { secret: "hidden" }, token: "hidden" },
+        };
+        assert.deepEqual(createServerFactory.sanitizeRequestForLog(malformed), {
+            method: "mining.submit",
+            params: "[redacted]",
+        });
+    });;
 
 test("Pearl large-packet buffers have a process-local aggregate byte limit", () => {
     const originalConfig = global.config;
@@ -88,9 +99,9 @@ test("Pearl large-packet buffers have a process-local aggregate byte limit", () 
             removeMiner() {}
         });
         const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
-        function createPearlSocket(index) {
+        function createPearlSocket(index, remoteAddress = `127.0.0.${index + 1}`) {
             const socket = new EventEmitter();
-            socket.remoteAddress = `127.0.0.${index + 1}`;
+            socket.remoteAddress = remoteAddress;
             socket.writable = true;
             socket.destroyed = false;
             socket.miner_id = `pearl-${index}`;
@@ -111,12 +122,19 @@ test("Pearl large-packet buffers have a process-local aggregate byte limit", () 
         }
 
         const partialProof = `${JSON.stringify({ id: 1, method: "mining.submit", params: { job_id: "j" } }).slice(0, -2)},"plain_proof":"${"A".repeat(11 * 1024 * 1024)}`;
-        const sockets = [0, 1, 2].map(createPearlSocket);
+        const sameSourceSockets = [10, 11].map((index) => createPearlSocket(index, "127.0.1.1"));
+        for (const socket of sameSourceSockets) socket.emit("data", partialProof);
+        assert.equal(sameSourceSockets[0].destroyed, false);
+        assert.equal(sameSourceSockets[1].destroyed, true);
+        assert.equal(sameSourceSockets[1].destroyReason, "large-frame-buffer-limit");
+        sameSourceSockets[0].destroy();
+
+        const sockets = [0, 1, 2].map((index) => createPearlSocket(index));
         for (const socket of sockets) socket.emit("data", partialProof);
         assert.equal(sockets[0].destroyed, false);
         assert.equal(sockets[1].destroyed, false);
         assert.equal(sockets[2].destroyed, true);
-        assert.equal(sockets[2].destroyReason, "pearl-buffer-limit");
+        assert.equal(sockets[2].destroyReason, "large-frame-buffer-limit");
 
         sockets[0].destroy();
         const replacement = createPearlSocket(3);
@@ -125,6 +143,103 @@ test("Pearl large-packet buffers have a process-local aggregate byte limit", () 
         sockets[1].destroy();
         replacement.destroy();
     } finally {
+        global.config = originalConfig;
+    }
+});
+
+test("unfinished Pearl frames expire and completed frames clear their deadline", () => {
+    const originalConfig = global.config;
+    const originalSetTimeout = global.setTimeout;
+    const originalClearTimeout = global.clearTimeout;
+    let largeFrameTimer = null;
+    try {
+        global.config = {
+            pool: {
+                socketAuthTimeout: 100,
+                maxConnectionsPerIP: 10,
+                maxConnectionsPerSubnet: 10,
+                protocolErrorLimit: 10
+            }
+        };
+        global.setTimeout = function capturePearlTimer(fn, delay, ...args) {
+            if (delay === createServerFactory.LARGE_FRAME_TIMEOUT_MS) {
+                largeFrameTimer = { fn, cleared: false };
+                return largeFrameTimer;
+            }
+            return originalSetTimeout(fn, delay, ...args);
+        };
+        global.clearTimeout = function clearCapturedTimer(timer) {
+            if (timer === largeFrameTimer) {
+                timer.cleared = true;
+                return;
+            }
+            originalClearTimeout(timer);
+        };
+
+        const state = {
+            threadName: "worker ",
+            activeConnectionsByIP: {},
+            activeConnectionsBySubnet: {},
+            activeMiners: new Map(),
+            activeMinerSockets: new Map(),
+            freeEthExtranonces: []
+        };
+        let handledMessages = 0;
+        const serverFactory = createServerFactory({
+            debug() {},
+            fs: require("fs"),
+            net: require("net"),
+            tls: require("tls"),
+            state,
+            handleMinerData() { handledMessages += 1; },
+            removeMiner() {}
+        });
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 1, portType: "pplns" });
+        function createPearlSocket(index) {
+            const socket = new EventEmitter();
+            socket.remoteAddress = `192.0.2.${index + 1}`;
+            socket.writable = true;
+            socket.destroyed = false;
+            socket.miner_id = `pearl-timeout-${index}`;
+            socket.setKeepAlive = function setKeepAlive() {};
+            socket.setEncoding = function setEncoding() {};
+            socket.write = function write() { return true; };
+            socket.destroy = function destroy() {
+                if (socket.destroyed) return;
+                socket.destroyed = true;
+                socket.writable = false;
+                socket.emit("close");
+            };
+            state.activeMiners.set(socket.miner_id, {
+                validJobs: { toarray() { return [{ coin: "PRL" }]; } }
+            });
+            handleSocket(socket);
+            return socket;
+        }
+
+        const prefix = `${JSON.stringify({ id: 1, method: "mining.submit", params: { job_id: "job-1" } }).slice(0, -2)},"plain_proof":"`;
+        const unfinished = createPearlSocket(0);
+        unfinished.emit("data", `${prefix}${"A".repeat(101 * 1024)}`);
+        assert.ok(largeFrameTimer);
+        const originalLargeFrameTimer = largeFrameTimer;
+        unfinished.emit("data", "AAAA");
+        assert.equal(largeFrameTimer, originalLargeFrameTimer);
+        assert.equal(unfinished.destroyed, false);
+        largeFrameTimer.fn();
+        assert.equal(unfinished.destroyed, true);
+        assert.equal(unfinished.destroyReason, "large frame timeout");
+
+        largeFrameTimer = null;
+        const completed = createPearlSocket(1);
+        completed.emit("data", `${prefix}${"A".repeat(101 * 1024)}"}}\n`);
+        assert.ok(largeFrameTimer);
+        assert.equal(largeFrameTimer.cleared, true);
+        assert.equal(completed.destroyed, false);
+        assert.equal(handledMessages, 1);
+        completed.destroy();
+    } finally {
+        global.setTimeout = originalSetTimeout;
+        global.clearTimeout = originalClearTimeout;
         global.config = originalConfig;
     }
 });

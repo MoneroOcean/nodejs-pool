@@ -337,7 +337,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         const originalGatewayRequest = pearl.gatewayRequest;
         pearl.gatewayRequest = function mockGatewayRequest(method, params, callback) {
             assert.equal(method, "getMiningInfo");
-            assert.deepEqual(params, {});
+            assert.deepEqual(params, { worker_id: 7 });
             callback(null, { result: {
                 cert_version: pearl.PEARL_CERT_VERSION,
                 incomplete_header_bytes: header.toString("base64"),
@@ -358,7 +358,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                             id: "0", jsonrpc: "2.0", method: "getblockheader", params: [previousHash, true]
                         });
                         callback({ result: { height: 99, hash: previousHash, difficulty: 1 } });
-                    } } },
+                    } } , coinFuncs: { uniqueWorkerId: 7 }},
                     callback(error, result) { if (error) reject(error); else resolve(result); }
                 });
             });

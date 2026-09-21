@@ -57,6 +57,61 @@ function createRequest() {
 }
 
 test.describe("support", { concurrency: false }, () => {
+    test("daemon request debug output excludes credentials and RPC bodies", async () => {
+        const restore = installSupportGlobals();
+        const debugFactory = require("debug");
+        const supportPath = require.resolve("../lib/common/support");
+        const originalRequest = http.request;
+        const originalDebugLog = debugFactory.log;
+        const previousDebug = process.env.DEBUG;
+        const logs = [];
+        let requestOptions;
+        const basicAuth = "Basic test-user:test-password";
+        const headerCredential = "example-value";
+        const requestMarker = "private-request-marker";
+
+        global.config.daemon.basicAuth = basicAuth;
+        global.config.daemon["X-API-KEY"] = headerCredential;
+        debugFactory.log = function captureDebugLog(...args) {
+            logs.push(args.join(" "));
+        };
+        debugFactory.enable("support");
+        delete require.cache[supportPath];
+        const freshSupport = require(supportPath)();
+        http.request = function fakeRequest(options, onResponse) {
+            requestOptions = options;
+            const request = createRequest();
+            const response = createResponse();
+            setImmediate(function respond() {
+                onResponse(response);
+                response.emit("data", JSON.stringify({ result: { ok: true } }));
+                response.emit("end");
+            });
+            return request;
+        };
+
+        try {
+            await new Promise((resolve) => {
+                freshSupport.rpcPortDaemon2(global.config.daemon.port, "test_method", { marker: requestMarker }, resolve);
+            });
+            assert.equal(requestOptions.headers.Authorization, basicAuth);
+            assert.equal(requestOptions.headers["X-API-KEY"], headerCredential);
+            assert.equal(requestOptions.headers.api_key, headerCredential);
+            assert.ok(logs.length > 0);
+            const output = logs.join("\n");
+            assert.equal(output.includes(basicAuth), false);
+            assert.equal(output.includes(headerCredential), false);
+            assert.equal(output.includes(requestMarker), false);
+        }
+        finally {
+            http.request = originalRequest;
+            debugFactory.log = originalDebugLog;
+            debugFactory.enable(previousDebug || "");
+            delete require.cache[supportPath];
+            restore();
+        }
+    });
+
     test("rpcPortDaemon2 enforces a hard wall timeout", async () => {
         const restore = installSupportGlobals();
         const originalRequest = http.request;

@@ -199,6 +199,7 @@ export interface PoolSocket extends Socket {
     firstShareTimer?: NodeJS.Timeout | null;
     authTimer?: NodeJS.Timeout | null;
     finalReplyTimer?: NodeJS.Timeout | null;
+    largeFrameTimer?: NodeJS.Timeout | null;
     destroyReason?: string;
     __poolClosedByRegistry?: boolean;
     finalizing?: boolean;
@@ -331,7 +332,7 @@ export interface PoolSubmitParams {
     plain_proof?: string;
     proof_encoding?: "none";
     jackpot?: string;
-    adjustment_factor?: number;
+    adjustment_factor?: string;
     nonce?: string | number;
     result?: string;
     raw_params?: unknown[];
@@ -484,6 +485,7 @@ export interface PoolProfileSettings {
     normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, coinFuncs?: CoinRuntime, job?: PoolJob, request?: ProtoMessage}): boolean;
     sanitizeSubmitParams?(context: {params: PoolSubmitParams}): Record<string, unknown>;
     sensitiveSubmitData?: boolean;
+    getTrustedQueueRetainedBytes?: (params: PoolSubmitParams) => number;
     validateSubmitParams(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
     validateExtraSubmitFields?(this: PoolSubmitValidationSettings, context: PoolSubmitContext): boolean;
     submissionKey(context: PoolSubmissionKeyContext): string;

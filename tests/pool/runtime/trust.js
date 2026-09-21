@@ -700,6 +700,59 @@ test("trusted shares wait for pending wallet verification and rerun the trust de
     }
 });
 
+test("trusted queues enforce profile-retained byte budgets", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalRandomBytes = crypto.randomBytes;
+    const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalGetJobProfile = global.coinFuncs.getJobProfile;
+    const socket = {};
+    const verifierCallbacks = [];
+
+    try {
+        global.config.pool.trustedMiners = true;
+        global.coinFuncs.slowHashAsync = function holdWalletVerification(_buffer, _blockTemplate, _wallet, callback) {
+            verifierCallbacks.push(callback);
+        };
+
+        const { jobId, trackedJob } = loginTrustedMiner(runtime, socket, 1, "byte-budget");
+        selectVerificationThenTrust();
+        global.coinFuncs.getJobProfile = function retainedPayloadProfile(job) {
+            const profile = originalGetJobProfile.call(global.coinFuncs, job);
+            return {
+                ...profile,
+                pool: {
+                    ...profile.pool,
+                    getTrustedQueueRetainedBytes() { return 12 * 1024 * 1024; }
+                }
+            };
+        };
+
+        const verifyingReply = submitShare(socket, 2, jobId, "01000000");
+        const queuedReply = submitShare(socket, 3, jobId, "02000000");
+        const overflowReply = submitShare(socket, 4, jobId, "03000000");
+
+        assert.deepEqual(verifyingReply.replies, []);
+        assert.deepEqual(queuedReply.replies, []);
+        assert.deepEqual(overflowReply.replies, THROTTLED_REPLY);
+        assert.equal(trackedJob.submissions.has("03000000"), false);
+
+        verifierCallbacks.shift()(VALID_RESULT);
+        await flushTimers();
+
+        assert.deepEqual(verifyingReply.replies, OK_REPLY);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await flushTimers();
+        assert.deepEqual(queuedReply.replies, OK_REPLY);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        crypto.randomBytes = originalRandomBytes;
+        global.coinFuncs.slowHashAsync = originalSlowHashAsync;
+        global.coinFuncs.getJobProfile = originalGetJobProfile;
+        await runtime.stop();
+    }
+});
+
 test("pending verification queues are isolated by payout distribution", async () => {
     const { runtime } = await startHarness();
     const originalTrustedMiners = global.config.pool.trustedMiners;

@@ -37,6 +37,7 @@ export interface ProfileRuntime {
 
 export type RawCoinCallback = (error: unknown, body?: RawBlockHeader) => void;
 export interface ProfileCoinFuncs {
+    uniqueWorkerId: number;
     getPortAnyBlockHeaderByHash(port: number, hash: string | Buffer, isOurBlock: boolean, callback: RpcCallback, noErrorReport?: boolean): void;
     getPortBlockHeaderByID(port: number, blockId: number | string, callback: RpcCallback, noErrorReport?: boolean): void;
     getPortBlockTemplate(port: number, callback: RpcCallback, noErrorReport?: boolean): void;
