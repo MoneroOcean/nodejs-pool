@@ -14,6 +14,26 @@ function clearObject(target) {
 }
 
 test.describe("pool components: runtime", { concurrency: false }, () => {
+test("Pearl large-frame admission accepts only the current certificate version", () => {
+    function request(certVersion, extraParams = {}) {
+        return JSON.stringify({
+            id: 40,
+            method: "mining.submit",
+            params: {
+                job_id: "pearl-job",
+                cert_version: certVersion,
+                ...extraParams,
+                plain_proof: "A".repeat(200000)
+            }
+        });
+    }
+
+    assert.equal(createServerFactory.isPearlSubmitPrefix(request(3)), true);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(request(2)), false);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(request("3")), false);
+    assert.equal(createServerFactory.isPearlSubmitPrefix(request(3, { unexpected: true })), false);
+});
+
 test("pool state preserves coin helper receiver when formatting a port", () => {
     const originalCoinFuncs = global.coinFuncs;
     try {

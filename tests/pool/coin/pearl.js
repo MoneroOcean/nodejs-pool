@@ -108,6 +108,19 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         }
     });
 
+    test("accepts and strips only the current submit certificate version", () => {
+        const proof = Buffer.from("pearl-proof").toString("base64");
+        const params = { job_id: 7, plain_proof: proof, cert_version: pearl.PEARL_CERT_VERSION };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {} }), true);
+        assert.deepEqual(params, { job_id: "7", plain_proof: proof });
+
+        for (const cert_version of [2, 4, "3", null]) {
+            assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+                params: { job_id: "7", plain_proof: proof, cert_version }, wireParams: {}
+            }), false);
+        }
+    });
+
     test("normalizes and validates optional Pearl claim fields", () => {
         const proof = Buffer.from("pearl-proof").toString("base64");
         const jackpot = "ab".repeat(32).toUpperCase();
