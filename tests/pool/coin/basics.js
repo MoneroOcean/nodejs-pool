@@ -1363,9 +1363,11 @@ test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
     const sockets = [];
     const timers = new Set();
     class Socket extends EventEmitter {
-        constructor() { super(); sockets.push(this); }
+        constructor() { super(); this.writes = []; sockets.push(this); }
         connect(_port, host, callback) { this.host = host; this.connectCallback = callback; }
-        write() {}
+        cork() {}
+        uncork() {}
+        write(value) { this.writes.push(value); }
         destroy() {}
     }
     const sandbox = {
@@ -1381,7 +1383,7 @@ test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
     };
     vm.runInNewContext(fs.readFileSync(filename, "utf8"), sandbox, { filename });
     const coin = new sandbox.module.exports({});
-    const proof = Buffer.alloc(8 * 1024 * 1024).toString("base64");
+    const proof = Buffer.alloc(8 * 1024 * 1024);
     const results = [];
     const submit = miner => coin.verifyPearlAsync("00".repeat(76), proof, "ff".repeat(32), miner,
         (...args) => results.push({ miner, args }));
@@ -1389,14 +1391,22 @@ test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
     submit("miner-a");
     submit("miner-b");
     submit("miner-c");
-    assert.equal(sockets.length, 2);
-    assert.deepEqual(results, [{ miner: "miner-c", args: [null, "verify-host-overload"] }]);
-
-    sockets[0].emit("error", new Error("connection failed"));
     submit("miner-d");
     assert.equal(sockets.length, 3);
+    assert.deepEqual(results, [{ miner: "miner-d", args: [null, "verify-host-overload"] }]);
+
+    sockets[0].connectCallback();
+    const header = JSON.parse(sockets[0].writes[0]);
+    assert.equal(header.proof, undefined);
+    assert.equal(header.proof_bytes, proof.length);
+    assert.strictEqual(sockets[0].writes[1], proof);
+
+    sockets[0].emit("error", new Error("connection failed"));
+    submit("miner-e");
+    assert.equal(sockets.length, 4);
     sockets[1].emit("error", new Error("connection failed"));
     sockets[2].emit("error", new Error("connection failed"));
+    sockets[3].emit("error", new Error("connection failed"));
     assert.equal(timers.size, 0);
 });
 

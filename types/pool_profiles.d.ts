@@ -329,8 +329,8 @@ export interface PoolExtraNonceLoginContext extends PoolLoginContext {
 
 export interface PoolSubmitParams {
     job_id?: string | number;
-    plain_proof?: string;
-    proof_encoding?: "none";
+    plain_proof?: string | Buffer;
+    proof_encoding?: "none" | "gzip";
     jackpot?: string;
     adjustment_factor?: string;
     nonce?: string | number;
@@ -403,7 +403,7 @@ export interface PoolSpecialCoinRuntime {
     kawpowQuickHash(convertedBlob: Buffer, nonce: string, mixhash: string): Buffer;
     slowHashBuff(blob: Buffer, template: ProtoMessage, nonce?: string, mixhash?: string): Buffer | Buffer[] | false;
     slowHashBuffAsync?(blob: Buffer, template: ProtoMessage, minerAddress: string, callback: (result: Buffer | Buffer[] | null | false, errorKind?: string) => void, verifyContext?: ProtoMessage): void;
-    verifyPearlAsync?(header: string, proof: string, target: string, minerAddress: string, callback: (result: unknown, errorKind?: string) => void): void;
+    verifyPearlAsync?(header: string, proof: Buffer, target: string, minerAddress: string, callback: (result: unknown, errorKind?: string) => void): void;
     pearlSolutionId?(headerHex: string, proof: Buffer): unknown;
     pearlSolutionIdFromData?(solutionData: Buffer): string;
     isHashVerifierEnabled?(): boolean;

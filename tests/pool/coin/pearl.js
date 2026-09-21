@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const test = require("node:test");
+const zlib = require("node:zlib");
 const blockTemplate = require("node-blocktemplate");
 
 const pearl = require("../../../lib/coins/core/pearl.js");
@@ -37,7 +38,7 @@ function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareD
         : verifier;
     const context = {
         blockTemplate: { header: header.toString("base64"), target: networkTarget.targetDecimal },
-        params: { plain_proof: proof.toString("base64"), ...claim },
+        params: { plain_proof: proof, ...claim },
         job: {
             incomplete_header_bytes: header.toString("base64"),
             target: Buffer.from(shareTarget.targetHex, "hex").toString("base64"),
@@ -95,17 +96,36 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(pearl.isCanonicalBase64("AAB="), false);
     });
 
-    test("accepts omitted or none encoding and rejects compression labels", () => {
-        const proof = Buffer.from("pearl-proof").toString("base64");
+    test("decodes accepted proofs once into an uncompressed buffer", () => {
+        const rawProof = Buffer.from("pearl-proof");
+        const proof = rawProof.toString("base64");
         for (const proof_encoding of [undefined, "none"]) {
             const params = { job_id: 7, plain_proof: proof, ...(proof_encoding ? { proof_encoding } : {}) };
             assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {} }), true);
-            assert.deepEqual(params, { job_id: "7", plain_proof: proof });
+            assert.equal(params.job_id, "7");
+            assert.deepEqual(params.plain_proof, rawProof);
         }
-        for (const proof_encoding of ["raw", "gzip", "zlib"]) {
+        const gzipParams = {
+            job_id: "7",
+            plain_proof: zlib.gzipSync(rawProof).toString("base64"),
+            proof_encoding: "gzip"
+        };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params: gzipParams, wireParams: {} }), true);
+        assert.deepEqual(gzipParams, { job_id: "7", plain_proof: rawProof });
+
+        for (const proof_encoding of ["raw", "zlib"]) {
             const params = { job_id: "7", plain_proof: proof, proof_encoding };
             assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {} }), false);
         }
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+            params: { job_id: "7", plain_proof: proof, proof_encoding: "gzip" }, wireParams: {}
+        }), false);
+    });
+
+    test("bounds gzip proof expansion", () => {
+        const oversized = zlib.gzipSync(Buffer.alloc(pearl.PEARL_MAX_PROOF_BYTES + 1));
+        assert.equal(pearl.decodePearlProof(oversized.toString("base64"), "gzip"), null);
+        assert.equal(pearl.decodePearlProof(zlib.gzipSync(Buffer.from("proof")).toString("base64"), "gzip")?.toString(), "proof");
     });
 
     test("accepts and strips only the current submit certificate version", () => {
@@ -117,7 +137,8 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             future_extension: { ignored: true }
         };
         assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {} }), true);
-        assert.deepEqual(params, { job_id: "7", plain_proof: proof });
+        assert.equal(params.job_id, "7");
+        assert.deepEqual(params.plain_proof, Buffer.from("pearl-proof"));
 
         for (const cert_version of [2, 4, "3", null]) {
             assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
@@ -578,7 +599,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         let verifierWire;
         const context = {
             blockTemplate: { header: header.toString("base64"), target: parsed.targetDecimal },
-            params: { plain_proof: Buffer.from("proof").toString("base64") },
+            params: { plain_proof: Buffer.from("proof") },
             job: {
                 incomplete_header_bytes: header.toString("base64"),
                 target: Buffer.from(parsed.targetHex, "hex").toString("base64"),
@@ -626,7 +647,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         let verifiedArgs;
         const context = {
             blockTemplate: { header: header.toString("base64"), target: parsed.targetDecimal },
-            params: { plain_proof: proof.toString("base64") },
+            params: { plain_proof: proof },
             job: { incomplete_header_bytes: header.toString("base64"), targetHex: parsed.targetHex, difficulty: 1 },
             miner: { payout: "miner" },
             coinFuncs: {
