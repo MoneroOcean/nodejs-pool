@@ -357,7 +357,8 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             header: header.toString("hex"),
             job_id: "pearl-job",
             target: shareTarget.target.toString(16).padStart(64, "0"),
-            cert_version: pearl.PEARL_CERT_VERSION
+            cert_version: pearl.PEARL_CERT_VERSION,
+            proof_encodings: ["none", "gzip"]
         });
         assert.equal(newJob.targetHex, shareTarget.targetHex);
         assert.equal(payload.target, Buffer.from(newJob.targetHex, "hex").reverse().toString("hex"));
