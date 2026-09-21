@@ -241,20 +241,27 @@ test("submit requests are rejected when the per-IP submit rate limit is exceeded
             },
             ip
         });
+        let paramsTouched = false;
+        const exhaustedSubmitParams = new Proxy({}, {
+            get() {
+                paramsTouched = true;
+                throw new Error("rate-limited submit params must not be read");
+            },
+            ownKeys() {
+                paramsTouched = true;
+                throw new Error("rate-limited submit params must not be enumerated");
+            }
+        });
         const secondSubmit = invokePoolMethod({
             socket,
             id: 1945,
             method: "submit",
-            params: {
-                id: socket.miner_id,
-                job_id: jobId,
-                nonce: "00000012",
-                result: VALID_RESULT
-            },
+            params: exhaustedSubmitParams,
             ip
         });
 
         assert.deepEqual(firstSubmit.replies, [{ error: null, result: { status: "OK" } }]);
+        assert.equal(paramsTouched, false);
         assert.deepEqual(secondSubmit.finals, [{
             error: "Rate limit exceeded for submit requests",
             timeout: undefined

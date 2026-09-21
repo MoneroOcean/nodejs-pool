@@ -38,6 +38,114 @@ test("Pearl large-frame framing admits extension fields and defers their semanti
     assert.equal(createServerFactory.isPearlSubmitRequest(request({}, { plain_proof: "" })), false);
 });
 
+test("large Pearl frames keep base64 proofs and bounded unknown extensions parseable", () => {
+    const request = {
+        id: 41,
+        method: "mining.submit",
+        params: {
+            job_id: "pearl-job",
+            plain_proof: "A".repeat(101 * 1024),
+            future_extension: {
+                supported: false,
+                metadata: { version: 1 }
+            },
+            punctuation_extension: "[{}:,.]".repeat(128)
+        }
+    };
+    const message = `${JSON.stringify(request)}\n`;
+
+    assert.ok(Buffer.byteLength(message, "utf8") > 100 * 1024);
+    assert.equal(createServerFactory.LARGE_FRAME_MAX_STRUCTURE_TOKENS, 64);
+    assert.equal(createServerFactory.hasBoundedLargeFrameStructure(message), true);
+});
+
+test("large Pearl frames reject excessive raw structure before JSON.parse", () => {
+    const originalConfig = global.config;
+    const originalJsonParse = JSON.parse;
+    let parseCalls = 0;
+    let handledMessages = 0;
+    const state = {
+        threadName: "(Test) ",
+        activeConnectionsByIP: {},
+        activeConnectionsBySubnet: {},
+        activeMiners: new Map(),
+        activeMinerSockets: new Map(),
+        freeEthExtranonces: []
+    };
+    const socket = new EventEmitter();
+    socket.remoteAddress = "127.0.0.2";
+    socket.writable = true;
+    socket.destroyed = false;
+    socket.miner_id = "pearl-structure-limit";
+    socket.setKeepAlive = function setKeepAlive() {};
+    socket.setEncoding = function setEncoding() {};
+    socket.write = function write() { return true; };
+    socket.destroy = function destroy() {
+        if (socket.destroyed) return;
+        socket.destroyed = true;
+        socket.writable = false;
+        socket.emit("close");
+    };
+    state.activeMiners.set(socket.miner_id, {
+        validJobs: { toarray() { return [{ coin: "PRL" }]; } }
+    });
+
+    const serverFactory = createServerFactory({
+        debug() {},
+        fs: require("node:fs"),
+        net: require("node:net"),
+        tls: require("node:tls"),
+        state,
+        handleMinerData() { handledMessages += 1; },
+        removeMiner() {}
+    });
+
+    try {
+        global.config = {
+            pool: {
+                socketAuthTimeout: 15,
+                maxConnectionsPerIP: 10,
+                maxConnectionsPerSubnet: 10,
+                protocolErrorLimit: 10
+            }
+        };
+
+        let nestedExtension = 0;
+        for (let depth = 0; depth <= createServerFactory.LARGE_FRAME_MAX_STRUCTURE_TOKENS; ++depth) {
+            nestedExtension = [nestedExtension];
+        }
+        const request = {
+            id: 42,
+            method: "mining.submit",
+            params: {
+                job_id: "pearl-job",
+                plain_proof: "A".repeat(101 * 1024),
+                future_extension: nestedExtension
+            }
+        };
+        const message = `${JSON.stringify(request)}\n`;
+
+        assert.ok(Buffer.byteLength(message, "utf8") > 100 * 1024);
+        assert.equal(createServerFactory.hasBoundedLargeFrameStructure(message), false);
+
+        JSON.parse = function parse(...args) {
+            parseCalls += 1;
+            return originalJsonParse(...args);
+        };
+        const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+        handleSocket(socket);
+        socket.emit("data", message);
+
+        assert.equal(parseCalls, 0);
+        assert.equal(handledMessages, 0);
+        assert.equal(socket.destroyed, true);
+    } finally {
+        JSON.parse = originalJsonParse;
+        if (!socket.destroyed) socket.destroy();
+        global.config = originalConfig;
+    }
+});
+
 test("pool state preserves coin helper receiver when formatting a port", () => {
     const originalCoinFuncs = global.coinFuncs;
     try {
