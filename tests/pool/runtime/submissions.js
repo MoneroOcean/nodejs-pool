@@ -88,6 +88,8 @@ test("throttle drops unlisted trusted shares without affecting a whitelisted pee
     const originalTrustedMiners = global.config.pool.trustedMiners;
     const originalRandomBytes = crypto.randomBytes;
     const originalSlowHashAsync = global.coinFuncs.slowHashAsync;
+    const originalConsoleWarn = console.warn;
+    const throttleWarnings = [];
     const socket = {};
     const whitelistedSocket = {};
     const whitelistedIp = "10.0.0.204";
@@ -138,6 +140,7 @@ test("throttle drops unlisted trusted shares without affecting a whitelisted pee
         const threshold = global.config.pool.minerThrottleSharePerSec * global.config.pool.minerThrottleShareWindow;
         state.walletTrust[MAIN_WALLET] = 1000;
         state.minerWallets[MAIN_WALLET].last_ver_shares = threshold;
+        console.warn = (message) => throttleWarnings.push(String(message));
         miner.trust.trust = 1000;
         miner.trust.check_height = 0;
         whitelistedMiner.trust.trust = 1000;
@@ -168,6 +171,10 @@ test("throttle drops unlisted trusted shares without affecting a whitelisted pee
         });
 
         await flushTimers();
+        const maskedWallet = global.support.maskWalletAddress(MAIN_WALLET);
+        assert.equal(throttleWarnings.length, 1);
+        assert.ok(throttleWarnings[0].includes(`wallet=${maskedWallet}`));
+        assert.equal(throttleWarnings[0].includes(MAIN_WALLET), false);
         const throttledReply = [{
             error: "Throttled down share submission (please increase difficulty)",
             result: undefined
@@ -211,6 +218,7 @@ test("throttle drops unlisted trusted shares without affecting a whitelisted pee
         global.config.pool.minerThrottleSharePerSec = originalThrottlePerSec;
         global.config.pool.minerThrottleShareWindow = originalThrottleWindow;
         global.config.pool.trustedMiners = originalTrustedMiners;
+        console.warn = originalConsoleWarn;
         crypto.randomBytes = originalRandomBytes;
         global.coinFuncs.slowHashAsync = originalSlowHashAsync;
         await runtime.stop();
