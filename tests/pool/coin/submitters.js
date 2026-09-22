@@ -480,7 +480,10 @@ test("xtm-t SubmitBlock payload roundtrips the miner's Tari RandomXT blob", () =
     assert.equal(calls[0].method, "SubmitBlock");
     assert.equal(calls[0].params.header.nonce, minerBlob.readBigUInt64BE(XTM_T_NONCE_OFFSET).toString(10));
     assert.equal(minerBlob[XTM_T_POW_ALGO_OFFSET], XTM_T_RANDOMXT_POW_ALGO);
-    assert.deepEqual(calls[0].params.header.pow.pow_data, [...minerBlob.subarray(XTM_T_POW_DATA_OFFSET)]);
+    const submittedPowData = [...minerBlob.subarray(XTM_T_POW_DATA_OFFSET)];
+    while (submittedPowData.at(-1) === 0) submittedPowData.pop();
+    assert.deepEqual(calls[0].params.header.pow.pow_data, submittedPowData);
+    assert.notEqual(calls[0].params.header.pow.pow_data.at(-1), 0);
     assert.equal(reconstructXtmTMiningBlob(miningHash, calls[0].params).equals(minerBlob), true);
     assert.notStrictEqual(calls[0].params, xtmBlock);
     assert.equal(xtmBlock.header.nonce, "0");
@@ -581,8 +584,9 @@ test("xtm-t layout keeps pool reserve clear of Tari nonce and pow_algo", (t) => 
     if (!validatorPath) return;
     const validatorSource = fs.readFileSync(validatorPath, "utf8");
     const randomXtArm = readRustMatchArm(validatorSource, "PowAlgorithm::RandomXT", "PowAlgorithm::Sha3x");
-    assert.match(randomXtArm, /pow\.pow_data\.len\(\)\s*>\s*32/);
-    assert.doesNotMatch(randomXtArm, /is_empty/);
+    assert.match(randomXtArm, /check_randomxt_pow_data/);
+    assert.match(validatorSource, /pow\.pow_data\.len\(\)\s*>\s*32/);
+    assert.match(validatorSource, /pow\.pow_data\.last\(\)\s*==\s*Some\(&0\)/);
 });
 
 test("xtm submit and verify handlers preserve the pre-refactor special-case tari semantics", () => {
