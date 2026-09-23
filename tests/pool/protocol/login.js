@@ -429,7 +429,7 @@ test("mining.submit rejects missing array params", async () => {
 });
 
 test("named submits resolve the profile from the assigned job on a shared port", async () => {
-    const { runtime } = await startHarness();
+    const { runtime, database } = await startHarness();
     const socket = {};
     const originalCoin2Port = global.coinFuncs.COIN2PORT;
     const originalGetPoolProfile = global.coinFuncs.getPoolProfile;
@@ -449,6 +449,10 @@ test("named submits resolve the profile from the assigned job on a shared port",
             portData: global.config.ports[0]
         });
         assert.deepEqual(reply.replies, [{ error: "Invalid job params", result: undefined }]);
+        assert.equal(miner.invalidShares, 1);
+        assert.equal(database.invalidShares.length, 1);
+        assert.equal(runtime.getState().activeMiners.has(socket.miner_id), false);
+        assert.equal(socket.finalizing, true);
     } finally {
         global.coinFuncs.COIN2PORT = originalCoin2Port;
         global.coinFuncs.getPoolProfile = originalGetPoolProfile;
