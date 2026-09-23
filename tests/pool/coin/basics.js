@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const process = require("node:process");
 const test = require("node:test");
+const blockTemplateLib = require("node-blocktemplate");
 
 const loadRegistry = require("../../../lib/coins/core/registry.js");
 const createMinerJobs = require("../../../lib/pool/jobs.js");
@@ -687,6 +688,20 @@ test("registered profiles either issue unique per-job work or enable template-wi
                 delete template.blocktemplate_blob;
             }
 
+            if (profile.coin === "PRL") {
+                const coinbase = Buffer.from([1, 2, 3, 0]);
+                const header = blockTemplateLib.derivePearlWorkerHeader(Buffer.alloc(76), coinbase, 3, Buffer.alloc(0), 0);
+                const encoded = header.toString("base64");
+                Object.assign(template, {
+                    hash: encoded,
+                    header: encoded,
+                    incomplete_header_bytes: encoded,
+                    worker_coinbase_bytes: coinbase.toString("base64"),
+                    worker_coinbase_offset: 3,
+                    worker_merkle_branch: ""
+                });
+            }
+
             // XTM-C's daemon adapter is the only compact-nonce template source.
             if (profile.coin === "XTM-C") template.bt_nonce_size = 8;
 
@@ -712,6 +727,35 @@ test("registered profiles either issue unique per-job work or enable template-wi
         }
     } finally {
         global.coinFuncs.convertBlob = originalConvertBlob;
+    }
+});
+
+test("Pearl workers derive distinct assigned headers from one base template", () => {
+    const coinFuncs = global.coinFuncs.__realCoinFuncs;
+    const previousId = global.coinFuncs.uniqueWorkerId;
+    const coinbase = Buffer.from([1, 2, 3, 0]);
+    const baseHeader = blockTemplateLib.derivePearlWorkerHeader(Buffer.alloc(76), coinbase, 3, Buffer.alloc(0), 0);
+    const encoded = baseHeader.toString("base64");
+    const template = {
+        coin: "PRL", port: 44109, height: 500, difficulty: 100,
+        hash: encoded, header: encoded, incomplete_header_bytes: encoded,
+        worker_coinbase_bytes: coinbase.toString("base64"), worker_coinbase_offset: 3,
+        worker_merkle_branch: ""
+    };
+    try {
+        const headers = [0, 1, 255].map((id) => {
+            global.coinFuncs.uniqueWorkerId = id;
+            const work = new coinFuncs.BlockTemplate(template);
+            assert.equal(work.header, work.nextBlobHex());
+            assert.equal(work.hash, work.idHash);
+            return work.header;
+        });
+        assert.equal(headers[0], encoded);
+        assert.equal(new Set(headers).size, 3);
+        global.coinFuncs.uniqueWorkerId = 256;
+        assert.throws(() => new coinFuncs.BlockTemplate(template), /worker ID/);
+    } finally {
+        global.coinFuncs.uniqueWorkerId = previousId;
     }
 });
 

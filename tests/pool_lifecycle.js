@@ -132,7 +132,7 @@ test("replacement workers retain their logical ID when cluster IDs differ", () =
         const lifecycle = createLifecycle({
             cluster, os: {cpus: () => [{}]}, net: {createServer: () => ({listen() {}})},
             state: {threadName: "", minerCount: [], workerMinerCounts: {}, newCoinHashFactor: {}, lastCoinHashFactor: {}, lastCoinHashFactorMM: {}},
-            minerRegistry: {registerPool() {}}, templateManager: {templateUpdate() {}, unregisterWorkerTemplate() {}}, messageHandler() {}
+            minerRegistry: {registerPool() {}}, templateManager: {templateUpdate() {}}, messageHandler() {}
         });
         lifecycle.startMaster();
         listeners.exit(workers[0], 1, "");

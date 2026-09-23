@@ -62,6 +62,7 @@ declare module "node-blocktemplate" {
         blockHashBuff(blob: Buffer): Buffer;
         blockHashBuff3(blob: Buffer): Buffer;
         pearlSolutionId(solutionData: Buffer): Buffer;
+        derivePearlWorkerHeader(header: Buffer, coinbase: Buffer, coinbaseOffset: number, merkleBranch: Buffer, workerId: number): Buffer;
         RavenBlockTemplate(result: Record<string, unknown>, poolAddress: string): import("./runtime").BlockTemplateRecord;
         RtmBlockTemplate(result: Record<string, unknown>, poolAddress: string): import("./runtime").BlockTemplateRecord;
         EthBlockTemplate(result: unknown): import("./runtime").BlockTemplateRecord;

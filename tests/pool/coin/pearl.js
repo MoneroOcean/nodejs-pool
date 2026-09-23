@@ -23,6 +23,21 @@ function pearlSolutionIdFromData(solutionData) {
     return blockTemplate.pearlSolutionId(solutionData).toString("hex");
 }
 
+function workerRecipeFixture(header) {
+    const coinbase = Buffer.from("0100000001000000000000000000000000000000000000000000000000000000000000000000", "hex");
+    const offset = coinbase.length - 1;
+    const branch = Buffer.alloc(0);
+    const baseHeader = blockTemplate.derivePearlWorkerHeader(header, coinbase, offset, branch, 0);
+    return {
+        header: baseHeader,
+        recipe: {
+            worker_coinbase_bytes: coinbase.toString("base64"),
+            worker_coinbase_offset: offset,
+            worker_merkle_branch: ""
+        }
+    };
+}
+
 function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareDifficulty = 1, nativeAdjustmentFactor = 1 }) {
     const networkTarget = pearl.targetForDifficulty(networkDifficulty);
     const shareTarget = pearl.targetForDifficulty(shareDifficulty);
@@ -380,17 +395,19 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
         Buffer.from(previousHash, "hex").reverse().copy(header, 4);
         header.writeUInt32LE(compact, 72);
-        const parsed = pearl.parseMiningHeader(header.toString("base64"));
+        const { header: baseHeader, recipe } = workerRecipeFixture(header);
+        const parsed = pearl.parseMiningHeader(baseHeader.toString("base64"));
         assert.ok(parsed);
         const originalGatewayRequest = pearl.gatewayRequest;
         pearl.gatewayRequest = function mockGatewayRequest(method, params, callback) {
             assert.equal(method, "getMiningInfo");
-            assert.deepEqual(params, { worker_id: 7 });
+            assert.deepEqual(params, {});
             callback(null, { result: {
                 cert_version: pearl.PEARL_CERT_VERSION,
-                incomplete_header_bytes: header.toString("base64"),
+                incomplete_header_bytes: baseHeader.toString("base64"),
                 target_decimal: parsed.targetDecimal,
-                expected_reward: 50
+                expected_reward: 50,
+                ...recipe
             } });
         };
         try {
@@ -417,51 +434,39 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         }
     });
 
-    test("worker variants keep the base tip without another daemon lookup", async () => {
+    test("one gateway template carries enough data for each worker header", async () => {
         const target = pearl.targetForDifficulty(2);
         assert.ok(target);
-        const baseHeader = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
-        baseHeader.writeUInt32LE(pearl.targetToCompact(target.target), 72);
-        const workerHeader = Buffer.from(baseHeader);
-        workerHeader[36] = 1;
-        const group = baseHeader.subarray(0, 36).toString("hex") + baseHeader.subarray(68).toString("hex");
+        const seedHeader = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
+        seedHeader.writeUInt32LE(pearl.targetToCompact(target.target), 72);
+        const { header: baseHeader, recipe } = workerRecipeFixture(seedHeader);
         const parsedBase = pearl.parseMiningHeader(baseHeader.toString("base64"));
         assert.ok(parsedBase);
-        const base = {
-            hash: baseHeader.toString("base64"), header: baseHeader.toString("base64"),
-            incomplete_header_bytes: baseHeader.toString("base64"), worker_template_group: group,
-            target: parsedBase.targetDecimal, difficulty: parsedBase.difficulty,
-            height: 100, expected_reward: 50
-        };
         const originalGatewayRequest = pearl.gatewayRequest;
         pearl.gatewayRequest = function mockGatewayRequest(method, params, callback) {
             assert.equal(method, "getMiningInfo");
-            assert.deepEqual(params, { worker_id: 1 });
+            assert.deepEqual(params, {});
             callback(null, { result: {
                 cert_version: pearl.PEARL_CERT_VERSION,
-                incomplete_header_bytes: workerHeader.toString("base64"),
-                target_decimal: base.target,
-                expected_reward: 50
+                incomplete_header_bytes: baseHeader.toString("base64"),
+                target_decimal: parsedBase.targetDecimal,
+                expected_reward: 50,
+                ...recipe
             } });
         };
         try {
-            const variant = await new Promise((resolve, reject) => {
-                pearlProfile.rpc.getWorkerBlockTemplate({
-                    baseTemplate: base, workerId: 1,
+            const base = await new Promise((resolve, reject) => {
+                pearlProfile.rpc.getBlockTemplate({
+                    port: pearl.PEARL_PORT,
+                    runtime: { support: { rpcPortDaemon2(_port, _path, _request, callback) {
+                        callback({ result: { height: 99, hash: parsedBase.prevHash } });
+                    } } },
                     callback(result, error) { if (error) reject(error); else resolve(result); }
                 });
             });
-            assert.equal(variant.hash, workerHeader.toString("base64"));
-            assert.equal(variant.height, base.height);
-            workerHeader[68] = 1;
-            const mismatch = await new Promise((resolve) => {
-                pearlProfile.rpc.getWorkerBlockTemplate({
-                    baseTemplate: base, workerId: 1,
-                    callback(result, error) { resolve({ result, error }); }
-                });
-            });
-            assert.equal(mismatch.result, null);
-            assert.ok(mismatch.error);
+            assert.equal(base.hash, baseHeader.toString("base64"));
+            assert.equal(base.height, 100);
+            assert.deepEqual(pearl.decodeWorkerRecipe(base), pearl.decodeWorkerRecipe(recipe));
         } finally {
             pearl.gatewayRequest = originalGatewayRequest;
         }

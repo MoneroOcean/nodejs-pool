@@ -100,7 +100,6 @@ export interface RpcSettings {
     getLastBlockHeader?(context: RpcContext): unknown;
     getBlockTemplate?(context: RpcContext): unknown;
     /** Return a worker variant only when it belongs to the supplied base template. */
-    getWorkerBlockTemplate?(context: {baseTemplate: RpcRecord, workerId: number, callback: RpcCallback}): unknown;
     enrichLastBlockHeader?(context: HeaderEnrichmentRpcContext): unknown;
 }
 
@@ -218,6 +217,9 @@ export interface BlockTemplateInput extends Record<string, unknown> {
     target_hex?: string;
     target_compact?: number;
     incomplete_header_bytes?: string;
+    worker_coinbase_bytes?: string;
+    worker_coinbase_offset?: number;
+    worker_merkle_branch?: string;
     gateway_target?: number;
     bits?: string;
     seed_hash?: string;
