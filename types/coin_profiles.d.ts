@@ -99,6 +99,8 @@ export interface RpcSettings {
     getAnyBlockHeaderByHash?(context: BlockHashRpcContext): unknown;
     getLastBlockHeader?(context: RpcContext): unknown;
     getBlockTemplate?(context: RpcContext): unknown;
+    /** Return a worker variant only when it belongs to the supplied base template. */
+    getWorkerBlockTemplate?(context: {baseTemplate: RpcRecord, workerId: number, callback: RpcCallback}): unknown;
     enrichLastBlockHeader?(context: HeaderEnrichmentRpcContext): unknown;
 }
 

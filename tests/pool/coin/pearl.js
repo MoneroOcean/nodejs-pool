@@ -417,6 +417,56 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         }
     });
 
+    test("worker variants keep the base tip without another daemon lookup", async () => {
+        const target = pearl.targetForDifficulty(2);
+        assert.ok(target);
+        const baseHeader = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
+        baseHeader.writeUInt32LE(pearl.targetToCompact(target.target), 72);
+        const workerHeader = Buffer.from(baseHeader);
+        workerHeader[36] = 1;
+        const group = baseHeader.subarray(0, 36).toString("hex") + baseHeader.subarray(68).toString("hex");
+        const parsedBase = pearl.parseMiningHeader(baseHeader.toString("base64"));
+        assert.ok(parsedBase);
+        const base = {
+            hash: baseHeader.toString("base64"), header: baseHeader.toString("base64"),
+            incomplete_header_bytes: baseHeader.toString("base64"), worker_template_group: group,
+            target: parsedBase.targetDecimal, difficulty: parsedBase.difficulty,
+            height: 100, expected_reward: 50
+        };
+        const originalGatewayRequest = pearl.gatewayRequest;
+        pearl.gatewayRequest = function mockGatewayRequest(method, params, callback) {
+            assert.equal(method, "getMiningInfo");
+            assert.deepEqual(params, { worker_id: 1 });
+            callback(null, { result: {
+                cert_version: pearl.PEARL_CERT_VERSION,
+                incomplete_header_bytes: workerHeader.toString("base64"),
+                target_decimal: base.target,
+                expected_reward: 50
+            } });
+        };
+        try {
+            const variant = await new Promise((resolve, reject) => {
+                pearlProfile.rpc.getWorkerBlockTemplate({
+                    baseTemplate: base, workerId: 1,
+                    callback(result, error) { if (error) reject(error); else resolve(result); }
+                });
+            });
+            assert.equal(variant.hash, workerHeader.toString("base64"));
+            assert.equal(variant.height, base.height);
+            workerHeader[68] = 1;
+            const mismatch = await new Promise((resolve) => {
+                pearlProfile.rpc.getWorkerBlockTemplate({
+                    baseTemplate: base, workerId: 1,
+                    callback(result, error) { resolve({ result, error }); }
+                });
+            });
+            assert.equal(mismatch.result, null);
+            assert.ok(mismatch.error);
+        } finally {
+            pearl.gatewayRequest = originalGatewayRequest;
+        }
+    });
+
     test("uses complete JSON-RPC envelopes for pearld header lookups", async () => {
         const blockHash = "34".repeat(32);
         const calls = [];

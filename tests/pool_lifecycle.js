@@ -77,6 +77,7 @@ test("worker startup loads the IP whitelist before starting port servers", () =>
         console.log = () => {};
         console.error = () => {};
         createLifecycle({
+            cluster: {worker: {id: 1}},
             fs: fakeFs,
             os: {cpus: () => []},
             pruneTimedEntries() {},
@@ -131,7 +132,7 @@ test("replacement workers retain their logical ID when cluster IDs differ", () =
         const lifecycle = createLifecycle({
             cluster, os: {cpus: () => [{}]}, net: {createServer: () => ({listen() {}})},
             state: {threadName: "", minerCount: [], workerMinerCounts: {}, newCoinHashFactor: {}, lastCoinHashFactor: {}, lastCoinHashFactorMM: {}},
-            minerRegistry: {registerPool() {}}, templateManager: {templateUpdate() {}}, messageHandler() {}
+            minerRegistry: {registerPool() {}}, templateManager: {templateUpdate() {}, unregisterWorkerTemplate() {}}, messageHandler() {}
         });
         lifecycle.startMaster();
         listeners.exit(workers[0], 1, "");

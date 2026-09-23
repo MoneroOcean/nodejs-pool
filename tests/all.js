@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 require("./pool.js");
+require("./pool/components/worker_templates.js");
 require("./miner_registry.js");
 require("./pool_lifecycle.js");
 require("./block_manager.js");
