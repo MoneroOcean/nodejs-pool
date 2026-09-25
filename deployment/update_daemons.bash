@@ -6,6 +6,12 @@ MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v6.0.0}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
+TARI_PEER_PURGE_INTERVAL_SECONDS="${TARI_PEER_PURGE_INTERVAL_SECONDS:-604800}"
+
+if [[ ! "$TARI_PEER_PURGE_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "TARI_PEER_PURGE_INTERVAL_SECONDS must be a positive integer" >&2
+  exit 1
+fi
 
 retry_command() { for i in 1 2 3 4 5; do "$@" && return 0; [ "$i" = 5 ] || sleep $((i * 5)); done; return 1; }
 
@@ -57,4 +63,15 @@ checkout_repo_ref "$TARI_REPO_URL" /usr/local/src/tari "$TARI_RELEASE_TAG"
 sudo rm -rf /usr/local/src/tari/target
 sudo TARI_TARGET_NETWORK="$TARI_NETWORK" bash -lc ". /root/.cargo/env && cd /usr/local/src/tari && cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy -p minotari_console_wallet"
 
-echo "Done. Deploy the Tari node/proxy/wallet binaries to their service paths, then restart the applicable services one at a time."
+peer_db="/home/jail/blockchains/xtm/$TARI_NETWORK/peer_db/base_node/peers.db"
+peer_purge_minutes=$(((TARI_PEER_PURGE_INTERVAL_SECONDS + 59) / 60))
+sudo install -d -m 755 /etc/systemd/system/xtm.service.d
+sudo tee /etc/systemd/system/xtm.service.d/60-peer-purge.conf >/dev/null <<EOF
+[Service]
+ExecStopPost=
+# The container is fully stopped here; purge peer discovery state weekly.
+ExecStopPost=-/bin/sh -c 'marker="$peer_db.last-purge"; if [ -r "\$\$marker" ] && [ -n "\$\$(find "\$\$marker" -mmin -$peer_purge_minutes -print -quit)" ]; then exit 0; fi; if [ -e "$peer_db" ] || [ -e "$peer_db-wal" ] || [ -e "$peer_db-shm" ]; then rm -f -- "$peer_db" "$peer_db-wal" "$peer_db-shm" && touch "\$\$marker"; fi'
+EOF
+sudo systemctl daemon-reload
+
+echo "Done. The weekly Tari peer purge is installed. Deploy binaries, then restart applicable services one at a time."

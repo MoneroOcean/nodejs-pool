@@ -304,6 +304,9 @@ EOF
 write_tari_service() {
   local mode="${1:-with-json-bridges}"
   local exec_start
+  local peer_db="$TARI_HOME/.tari/${TARI_NETWORK:-mainnet}/peer_db/base_node/peers.db"
+  local peer_purge_interval="${TARI_PEER_PURGE_INTERVAL_SECONDS:-604800}"
+  local peer_purge_minutes=$(((peer_purge_interval + 59) / 60))
   if [ "$mode" = "base-node-only" ]; then
     # Keep this compatibility mode for hosts where a separately managed relay
     # owns the JSON ports. The merge-mining proxy talks to the local base-node
@@ -324,6 +327,9 @@ After=network.target
 
 [Service]
 ExecStart=$exec_start
+# The node is fully stopped here. Keep cleanup inline and gate it with a marker
+# so the six-hour service restart only drops the peer SQLite set once a week.
+ExecStopPost=-/bin/sh -c 'marker="$peer_db.last-purge"; if [ -r "\$\$marker" ] && [ -n "\$\$(find "\$\$marker" -mmin -$peer_purge_minutes -print -quit)" ]; then exit 0; fi; if [ -e "$peer_db" ] || [ -e "$peer_db-wal" ] || [ -e "$peer_db-shm" ]; then rm -f -- "$peer_db" "$peer_db-wal" "$peer_db-shm" && touch "\$\$marker"; fi'
 Restart=always
 RestartSec=10s
 RuntimeMaxSec=6h
