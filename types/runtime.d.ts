@@ -413,6 +413,7 @@ export type DatabaseCandidate = LocalDatabasePending | DatabaseRuntime;
 
 export interface PoolConfig {
     api: Record<string, unknown>;
+    api_worker_num?: number;
     bind_ip: string;
     coin: CoinConfig;
     daemon: DaemonConfig;

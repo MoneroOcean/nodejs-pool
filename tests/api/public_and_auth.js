@@ -771,6 +771,42 @@ test.describe("api public and auth", { concurrency: false }, () => {
         assert.ok(captured.errors.includes("[M] Worker exit: pid=9101 code=7 signal=SIGTERM"));
     });
 
+    test("api_worker_num overrides the CPU-count default", async () => {
+        const clusterApi = createFakeCluster({ isPrimary: true, pidBase: 9200 });
+        const config = createConfig();
+        config.api_worker_num = 1;
+        const captured = await captureConsole(async function run() {
+            const runtime = createApiRuntime({
+                blockTemplate: createBlockTemplate(),
+                cluster: clusterApi,
+                clusterEnabled: true,
+                config,
+                database: createDatabase({ caches: {} }),
+                mysql: createMysql(async () => []),
+                os: { cpus() { return [{}, {}, {}, {}]; } },
+                support: createSupport()
+            });
+            runtime.start();
+            await runtime.stop();
+        });
+
+        assert.ok(captured.logs.includes("[M] IMPORTANT: Cluster start: workers=1"));
+    });
+
+    test("api_worker_num rejects invalid configured values", () => {
+        const config = createConfig();
+        config.api_worker_num = 0;
+        assert.throws(() => createApiRuntime({
+            blockTemplate: createBlockTemplate(),
+            cluster: createFakeCluster({ isPrimary: true }),
+            clusterEnabled: true,
+            config,
+            database: createDatabase({ caches: {} }),
+            mysql: createMysql(async () => []),
+            support: createSupport()
+        }), /api_worker_num must be a positive integer/);
+    });
+
     test("cluster worker listen logs use pool-style worker prefixes", async () => {
         const clusterApi = createFakeCluster({ isPrimary: false, workerId: 7 });
         const captured = await captureConsole(async function run() {
