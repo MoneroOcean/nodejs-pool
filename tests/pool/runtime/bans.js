@@ -367,6 +367,106 @@ test("whitelisted miners are not banned for invalid shares", async () => {
     }
 });
 
+test("whitelisted IPs bypass temporary protocol bans and ban-producing login errors", async () => {
+    const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+    const ip = "10.0.0.91";
+    const malformedIp = "10.0.0.92";
+    const preBannedSocket = {};
+    const doubleLoginSocket = {};
+
+    try {
+        cluster.isMaster = false;
+        runtime.getState().ip_whitelist[ip] = 1;
+        runtime.getState().bannedTmpIPs[ip] = 1;
+
+        const preBannedLogin = invokePoolMethod({
+            socket: preBannedSocket,
+            id: 194,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "whitelist-prebanned" },
+            ip
+        });
+        assert.equal(preBannedLogin.finals.length, 0);
+        assert.equal(preBannedLogin.replies[0].error, null);
+
+        runtime.getState().ip_whitelist[malformedIp] = 1;
+        const noParams = invokePoolMethod({
+            id: 195,
+            method: "login",
+            params: undefined,
+            ip: malformedIp
+        });
+        assert.deepEqual(noParams.finals, [{ error: "No params specified", timeout: undefined }]);
+
+        const noLogin = invokePoolMethod({
+            id: 196,
+            method: "login",
+            params: { pass: "whitelist-no-login" },
+            ip: malformedIp
+        });
+        assert.deepEqual(noLogin.finals, [{ error: "No login specified", timeout: undefined }]);
+
+        const firstDoubleLogin = invokePoolMethod({
+            socket: doubleLoginSocket,
+            id: 197,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "whitelist-first-login" },
+            ip: malformedIp
+        });
+        assert.equal(firstDoubleLogin.replies[0].error, null);
+
+        const secondDoubleLogin = invokePoolMethod({
+            socket: doubleLoginSocket,
+            id: 198,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "whitelist-second-login" },
+            ip: malformedIp
+        });
+        assert.deepEqual(secondDoubleLogin.finals, [{ error: "No double login is allowed", timeout: undefined }]);
+        assert.equal(runtime.getState().bannedTmpIPs[malformedIp], undefined);
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        await runtime.stop();
+    }
+});
+
+test("whitelisted ban messages do not enter or propagate temporary IP bans", async () => {
+    const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+    const originalWorkers = cluster.workers;
+    const ip = "10.0.0.93";
+    const otherIp = "10.0.0.94";
+    const workerMessages = [];
+
+    try {
+        runtime.getState().ip_whitelist[ip] = 1;
+        cluster.isMaster = false;
+        poolModule.messageHandler({ type: "banIP", data: ip });
+        assert.equal(runtime.getState().bannedTmpIPs[ip], undefined);
+
+        cluster.isMaster = true;
+        cluster.workers = {
+            testWorker: {
+                send(message) {
+                    workerMessages.push(message);
+                }
+            }
+        };
+        poolModule.messageHandler({ type: "banIP", data: ip });
+        assert.deepEqual(workerMessages, []);
+
+        poolModule.messageHandler({ type: "banIP", data: otherIp });
+        assert.deepEqual(workerMessages, [{ type: "banIP", data: otherIp }]);
+    } finally {
+        cluster.isMaster = originalIsMaster;
+        cluster.workers = originalWorkers;
+        await runtime.stop();
+    }
+});
+
 test("messageHandler sendRemote queues the payload in master mode", async () => {
     const { runtime, database } = await startHarness();
     const cluster = require("cluster");

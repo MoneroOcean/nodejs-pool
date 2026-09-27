@@ -611,6 +611,46 @@ test("main coin remains selected during algo minimum time when a competing coin 
     }
 });
 
+test("login falls back to a live advertised algorithm when measured algorithms have no template", async () => {
+    const { runtime } = await startHarness();
+    const socket = {};
+    const mainSocket = {};
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            id: 491,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-partial-perf-fallback",
+                algo: ["cn/half", "kawpow"],
+                "algo-perf": { "cn/half": 1 }
+            }
+        });
+
+        assert.equal(loginReply.replies[0].error, null);
+        assert.equal(runtime.getState().activeMiners.get(socket.miner_id).curr_coin, "ETH");
+
+        const mainLoginReply = invokePoolMethod({
+            socket: mainSocket,
+            id: 492,
+            method: "login",
+            params: {
+                login: MAIN_WALLET,
+                pass: "worker-partial-perf-main-fallback",
+                algo: ["rx/0", "cn/half"],
+                "algo-perf": { "cn/half": 1 }
+            }
+        });
+
+        assert.equal(mainLoginReply.replies[0].error, null);
+        assert.equal(runtime.getState().activeMiners.get(mainSocket.miner_id).curr_coin, "");
+    } finally {
+        await runtime.stop();
+    }
+});
+
 test("getjob rejects nested algo tuning without poisoning later factor updates", async () => {
     const { runtime } = await startHarness();
     const socket = {};
