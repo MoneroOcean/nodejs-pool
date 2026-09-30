@@ -42,6 +42,10 @@ message Share {
     optional int64 shares2 = 14;
     optional int64 share_num = 15;
     optional float raw_shares = 16;
+    // Work exceeding signed int64 uses a zero legacy field and a double extension.
+    optional double shares_double = 17;
+    optional double shares2_double = 18;
+    optional double blockDiff_double = 19;
 }
 
 message Block {
@@ -54,6 +58,8 @@ message Block {
     required bool valid = 7;
     optional int64 value = 8;
     optional bool pay_ready = 9;
+    optional double difficulty_double = 10;
+    optional double shares_double = 11;
 }
 
 message AltBlock {
@@ -72,4 +78,6 @@ message AltBlock {
     optional string pay_stage = 13;
     optional string pay_status = 14;
     optional bool pay_ready = 15;
+    optional double difficulty_double = 16;
+    optional double shares_double = 17;
 }

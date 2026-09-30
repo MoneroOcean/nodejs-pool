@@ -16,6 +16,7 @@ require("./support.js");
 require("./local_comms.js");
 require("./database.js");
 require("./common/callbacks.js");
+require("./common/work_codec.js");
 require("./live_helpers.js");
 if (process.env.NODEJS_POOL_RUN_LIVE_TESTS === "1") require("./live.js");
 require("./payments.js");

@@ -7,6 +7,7 @@ const argv = require('./parse_args')(process.argv.slice(2));
 const config = fs.readFileSync("./config.json", "utf8");
 const coinConfig = fs.readFileSync("./coinConfig.json", "utf8");
 const protobuf = require('protocol-buffers');
+const adaptWorkCodecs = require("./lib/common/work_codec.js");
 const resolveCoinConfig = require("./resolve_coin_config.js");
 const path = require('path');
 const applyConfigRows = require("./lib/common/config_rows.js");
@@ -25,7 +26,7 @@ const startupConfig = JSON.parse(config);
 const resolvedCoinConfig = resolveCoinConfig(startupConfig, JSON.parse(coinConfig));
 global.config = startupConfig;
 global.mysql = mysql.createPool(global.config.mysql);
-global.protos = protobuf(fs.readFileSync('./lib/common/data.proto'));
+global.protos = adaptWorkCodecs(protobuf(fs.readFileSync('./lib/common/data.proto')));
 global.argv = argv;
 let coinInc;
 /** @type {unknown} */

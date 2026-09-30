@@ -2,6 +2,7 @@
 const applyConfigRows = require("./lib/common/config_rows.js");
 const path = require("path");
 const resolveCoinConfig = require("./resolve_coin_config.js");
+const adaptWorkCodecs = require("./lib/common/work_codec.js");
 const { getInitializedLocalDatabase } = require("./lib/common/database.js");
 
 const REPO_ROOT = __dirname;
@@ -40,7 +41,7 @@ function init(callback) {
     const resolvedCoinConfig = resolveCoinConfig(startupConfig, JSON.parse(coinConfig));
     global.config = startupConfig;
     global.mysql = mysql.createPool(global.config.mysql);
-    global.protos = protobuf(fs.readFileSync(DATA_PROTO_PATH));
+    global.protos = adaptWorkCodecs(protobuf(fs.readFileSync(DATA_PROTO_PATH)));
 
     /** @type {Promise<import("./lib/common/config_rows.js").ConfigRow[]>} */
     const configRows = global.mysql.query("SELECT * FROM config");

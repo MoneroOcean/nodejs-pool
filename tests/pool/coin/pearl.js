@@ -472,6 +472,38 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         }
     });
 
+    test("reads owned coinbase rewards and preserves orphan and maturity status", async () => {
+        const hash = "ab".repeat(32);
+        async function lookup({ confirmations = 101, destination = "pool-address", rawtx = true, malformed = false } = {}) {
+            const calls = [];
+            const result = await new Promise(resolve => pearlProfile.rpc.getAnyBlockHeaderByHash({
+                port: pearl.PEARL_PORT, profile: pearlProfile, blockHash: hash, isOurBlock: true,
+                runtime: { getPoolAddress() { return "pool-address"; }, support: { rpcPortDaemon2(_port, _path, request, callback) {
+                    calls.push(request.method);
+                    if (request.method === "getblockheader") return callback({ result: { hash, height: 100, confirmations } });
+                    const coinbase = { vin: [{ coinbase: "00" }], vout: [
+                        { value: malformed ? NaN : 12.34567891, scriptPubKey: { address: destination } },
+                        { value: 1, scriptPubKey: { addresses: ["other-address"] } }
+                    ] };
+                    callback({ result: { hash, [rawtx ? "rawtx" : "tx"]: [coinbase] } });
+                } } }, callback(error, header) { resolve({ error, header, calls }); }
+            }));
+            return result;
+        }
+        for (const rawtx of [true, false]) {
+            const { error, header } = await lookup({ rawtx });
+            assert.equal(error, null);
+            assert.equal(header.reward, 1234567891);
+            assert.equal(header.depth, 101);
+        }
+        assert.equal((await lookup({ destination: "other-address" })).error, true);
+        assert.equal((await lookup({ malformed: true })).error, true);
+        const orphan = await lookup({ confirmations: -1 });
+        assert.equal(orphan.header.orphan_status, true);
+        assert.deepEqual(orphan.calls, ["getblockheader"]);
+        assert.equal(pearlProfile.rpc.unlockConfirmationDepth, 100);
+    });
+
     test("uses complete JSON-RPC envelopes for pearld header lookups", async () => {
         const blockHash = "34".repeat(32);
         const calls = [];
