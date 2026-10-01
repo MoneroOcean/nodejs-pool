@@ -109,7 +109,9 @@ async function ensureRunnerImage(distro, buildLog) {
         "ENV DEBIAN_FRONTEND=noninteractive",
         "RUN apt-get update -o Acquire::Retries=5 \\",
         " && apt-get install -y -o Acquire::Retries=5 --no-install-recommends \\",
+        "    git \\",
         "    nodejs \\",
+        "    openssl \\",
         "    socat \\",
         " && rm -rf /var/lib/apt/lists/*",
         "COPY container_shim.sh /usr/local/bin/codex-container-shim",
@@ -257,6 +259,14 @@ async function prepareContainer(context) {
     await appendCheckLog(context, "runner image includes baked-in harness shims");
 
     if (context.script === "leaf") {
+        // Provision into a source checkout, as an operator does before a fresh
+        // leaf install. The clone shim copies the workspace under test.
+        await execInContainer(context.containerName, [
+            "id -u user >/dev/null 2>&1 || useradd -m -s /bin/bash user",
+            "su -l user -s /bin/bash -c 'git clone https://github.com/MoneroOcean/nodejs-pool.git && /usr/bin/git -C nodejs-pool init -q'",
+            "su -l user -s /bin/bash -c 'cd nodejs-pool && umask 077 && openssl req -subj /CN=pool-test.invalid -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 1 && chmod 644 cert.pem'"
+        ].join(" && "));
+        await appendCheckLog(context, "provisioned existing test TLS pair in leaf source checkout");
         await execInContainer(context.containerName, [
             "install -d -m 755 /etc/moneroocean",
             `printf '%s\\n' ${shellQuote(`SSH_FAIL2BAN_IGNORE_IPS="${TRUSTED_POOL_SOURCE_B}"`)} ${shellQuote(`POOL_TRUSTED_SOURCE_IPV4S="${TRUSTED_POOL_SOURCE_A},${TRUSTED_POOL_SOURCE_B}"`)} > /etc/moneroocean/leaf.conf`,

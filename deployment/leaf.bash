@@ -62,14 +62,6 @@ if [ -e "$LEAF_CONFIG_FILE" ]; then
   source "$LEAF_CONFIG_FILE"
 fi
 
-# Optional CENTRAL receiver public certificate, installed separately from the
-# leaf's mining TLS certificate. Never copy the receiver private key to leaves.
-SHARE_TLS_CERT_FILE="${SHARE_TLS_CERT_FILE:-}"
-if [ -n "$SHARE_TLS_CERT_FILE" ] && [ ! -f "$SHARE_TLS_CERT_FILE" ]; then
-  echo "SHARE_TLS_CERT_FILE must name the receiver public certificate" >&2
-  exit 1
-fi
-
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
 MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
@@ -758,10 +750,7 @@ fi
 install_typecheck_dependencies
 command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2 --min-release-age=7
 retry_command pm2 install pm2-logrotate
-if [ ! -e cert.key ] && [ ! -e cert.pem ]; then
-  (umask 077; openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500)
-fi
-test -s cert.key && test -s cert.pem || { echo 'Restore the complete existing cert.key/cert.pem pair before installing' >&2; exit 1; }
+test -s cert.key && test -s cert.pem || { echo 'Provision the existing pool cert.key/cert.pem pair through a trusted channel before installing or accepting miners' >&2; exit 1; }
 chmod 600 cert.key
 chmod 644 cert.pem
 openssl x509 -in cert.pem -noout -checkend 0
@@ -770,21 +759,6 @@ test "\$(openssl x509 -in cert.pem -pubkey -noout)" = "\$(openssl pkey -in cert.
 # certificates, firewall rules, and relay services have been verified.
 # pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 EOF
-
-if [ -n "$SHARE_TLS_CERT_FILE" ]; then
-  openssl x509 -in "$SHARE_TLS_CERT_FILE" -noout -checkend 0
-  install -o user -g user -m 644 -- "$SHARE_TLS_CERT_FILE" /home/user/nodejs-pool/share-cert.pem
-  # Preserve all existing local settings; this override takes precedence over
-  # the shared database's default cert.pem path.
-  node -e '
-    const fs = require("fs");
-    const filename = "/home/user/nodejs-pool/config.json";
-    const config = JSON.parse(fs.readFileSync(fs.existsSync(filename) ? filename : "/home/user/nodejs-pool/config_example.json", "utf8"));
-    config.general = { ...config.general, shareTlsCert: "share-cert.pem" };
-    fs.writeFileSync(filename, JSON.stringify(config, null, 2) + "\n");
-  '
-  chown user:user /home/user/nodejs-pool/config.json
-fi
 
 configure_pool_health_guard
 

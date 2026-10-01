@@ -45,11 +45,12 @@ async function waitForFailure(database) {
     assert.fail("TLS failure was not recorded within five seconds");
 }
 
-async function withTlsUplink(identity, certPath, run) {
+async function withTlsUplink(identity, directory, run) {
     const Database = require("../../lib/pool/remote_uplink.js");
     const originalSetInterval = global.setInterval;
     const originalConfig = global.config;
     const originalDatabase = global.database;
+    const originalCwd = process.cwd();
     const intervals = [];
     const bodies = [];
     const sockets = new Set();
@@ -77,6 +78,7 @@ async function withTlsUplink(identity, certPath, run) {
         return handle;
     };
     try {
+        process.chdir(directory);
         await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
         global.config = {
             hostname: "pool-harness",
@@ -85,7 +87,6 @@ async function withTlsUplink(identity, certPath, run) {
                 shareHost: `https://127.0.0.1:${server.address().port}/leafApi?test=tls`
             }
         };
-        if (certPath !== undefined) global.config.general.shareTlsCert = certPath;
         global.database = { thread_id: "[M] " };
         database = new Database();
         await run({
@@ -98,6 +99,7 @@ async function withTlsUplink(identity, certPath, run) {
         global.setInterval = originalSetInterval;
         global.config = originalConfig;
         global.database = originalDatabase;
+        process.chdir(originalCwd);
         for (const handle of intervals) clearInterval(handle);
         for (const socket of sockets) socket.destroy();
         await new Promise((resolve) => server.close(resolve));
@@ -106,33 +108,45 @@ async function withTlsUplink(identity, certPath, run) {
 
 test.describe("pool remote uplink", { concurrency: false }, () => {
 let fixtureDirectory;
+let expiredFixtureDirectory;
+let missingFixtureDirectory;
 let tlsFixtures;
 test.before(() => {
     fixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "pool-uplink-tls-"));
     tlsFixtures = createTlsFixtures(fixtureDirectory);
+    expiredFixtureDirectory = path.join(fixtureDirectory, "expired-pin");
+    fs.mkdirSync(expiredFixtureDirectory);
+    fs.writeFileSync(path.join(expiredFixtureDirectory, "cert.pem"), tlsFixtures.expired.cert);
+    missingFixtureDirectory = path.join(fixtureDirectory, "missing-pin");
+    fs.mkdirSync(missingFixtureDirectory);
 });
 test.after(() => {
     fs.rmSync(fixtureDirectory, { recursive: true, force: true });
 });
 
 test("HTTPS loads the default pinned certificate, permits its hostname mismatch, and reuses one connection", { timeout: 10000 }, async () => {
+    await withTlsUplink(tlsFixtures.pinned, fixtureDirectory, async ({ send, bodies, connectionCount }) => {
+        const payloads = [Buffer.from([0xde, 0xad]), Buffer.from([0xbe, 0xef]), Buffer.from([0x01, 0x02])];
+        for (const payload of payloads) await send(payload);
+        assert.deepEqual(bodies, payloads, "each distinct frame must be delivered exactly once");
+        assert.equal(connectionCount(), 1, "serial frames must reuse the TLS connection");
+    });
+});
+
+test("HTTPS requires cert.pem in the working directory before starting the send queue", async () => {
     const originalCwd = process.cwd();
-    process.chdir(fixtureDirectory);
-    try {
-        await withTlsUplink(tlsFixtures.pinned, undefined, async ({ send, bodies, connectionCount }) => {
-            const payloads = [Buffer.from([0xde, 0xad]), Buffer.from([0xbe, 0xef]), Buffer.from([0x01, 0x02])];
-            for (const payload of payloads) await send(payload);
-            assert.deepEqual(bodies, payloads, "each distinct frame must be delivered exactly once");
-            assert.equal(connectionCount(), 1, "serial frames must reuse the TLS connection");
-        });
-    } finally {
-        process.chdir(originalCwd);
-    }
+    await assert.rejects(
+        withTlsUplink(tlsFixtures.pinned, missingFixtureDirectory, async () => {
+            assert.fail("the uplink constructor must reject a missing cert.pem");
+        }),
+        { code: "ENOENT", path: "cert.pem" }
+    );
+    assert.equal(process.cwd(), originalCwd, "constructor failures must restore the working directory");
 });
 
 for (const [name, initialIdentity] of [["unrelated self-signed certificate", "unrelated"], ["CA-signed child of the pinned certificate", "child"]]) {
     test(`HTTPS rejects the ${name} and retries the intact frame after the pinned server recovers`, { timeout: 10000 }, async () => {
-        await withTlsUplink(tlsFixtures[initialIdentity], path.join(fixtureDirectory, "cert.pem"), async ({ database, server, send, bodies }) => {
+        await withTlsUplink(tlsFixtures[initialIdentity], fixtureDirectory, async ({ database, server, send, bodies }) => {
             const payload = Buffer.from([0x00, 0xff, 0xca, 0xfe]);
             const delivery = send(payload);
             try {
@@ -149,8 +163,8 @@ for (const [name, initialIdentity] of [["unrelated self-signed certificate", "un
     });
 }
 
-test("HTTPS rejects an expired certificate even when it exactly matches the configured pin", { timeout: 10000 }, async () => {
-    await withTlsUplink(tlsFixtures.expired, path.join(fixtureDirectory, "expired.pem"), async ({ database, send, bodies }) => {
+test("HTTPS rejects an expired certificate even when it exactly matches cert.pem", { timeout: 10000 }, async () => {
+    await withTlsUplink(tlsFixtures.expired, expiredFixtureDirectory, async ({ database, send, bodies }) => {
         // Observe the first retry scheduling without leaving a permanently failing send task alive.
         const originalSetTimeout = global.setTimeout;
         let delivery;

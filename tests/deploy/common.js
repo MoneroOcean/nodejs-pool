@@ -52,36 +52,76 @@ test("deployment entrypoints have valid shell syntax and production-safe shebang
     }
 });
 
-test("pool installers preserve certificate pairs and fail closed on partial restores", () => {
-    for (const entrypoint of ENTRYPOINTS) {
+for (const entrypoint of ENTRYPOINTS) {
+    test(`${entrypoint} preserves supplied certificates and rejects incomplete or invalid pairs`, () => {
         const source = fs.readFileSync(path.join(DEPLOYMENT_DIR, entrypoint), "utf8");
-        const start = source.indexOf("if [ ! -e cert.key ] && [ ! -e cert.pem ]; then");
+        const generatesPair = entrypoint === "deploy.bash";
+        const start = source.indexOf(generatesPair
+            ? "if [ ! -e cert.key ] && [ ! -e cert.pem ]; then"
+            : "test -s cert.key && test -s cert.pem ||");
         const end = source.indexOf("\n# ", start);
         assert.ok(start >= 0 && end > start);
         // Execute only the certificate guard from the user-session heredoc.
         const certificateSetup = source.slice(start, end).replaceAll("\\$", "$");
         const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pool-cert-setup-"));
+        const runGuard = () => runBash(["-eu", "-c", certificateSetup], { cwd: directory });
+        const makePair = () => {
+            const generated = spawnSync("openssl", [
+                "req", "-subj", "/CN=pool-test.invalid", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", "cert.key", "-x509", "-out", "cert.pem", "-days", "1"
+            ], { cwd: directory, encoding: "utf8" });
+            assert.equal(generated.status, 0, generated.stderr);
+        };
         try {
-            const first = runBash(["-eu", "-c", certificateSetup], { cwd: directory });
-            assert.equal(first.status, 0, first.stderr);
+            const first = runGuard();
+            if (generatesPair) {
+                assert.equal(first.status, 0, first.stderr);
+            } else {
+                assert.notEqual(first.status, 0);
+                assert.match(first.stderr, /Provision the existing pool cert.key\/cert.pem pair/);
+                assert.equal(fs.existsSync(path.join(directory, "cert.pem")), false);
+                assert.equal(fs.existsSync(path.join(directory, "cert.key")), false);
+                makePair();
+            }
             const cert = fs.readFileSync(path.join(directory, "cert.pem"));
             const key = fs.readFileSync(path.join(directory, "cert.key"));
-            const second = runBash(["-eu", "-c", certificateSetup], { cwd: directory });
+            fs.chmodSync(path.join(directory, "cert.key"), 0o644);
+            const second = runGuard();
             assert.equal(second.status, 0, second.stderr);
             assert.deepEqual(fs.readFileSync(path.join(directory, "cert.pem")), cert);
             assert.deepEqual(fs.readFileSync(path.join(directory, "cert.key")), key);
             assert.equal(fs.statSync(path.join(directory, "cert.key")).mode & 0o777, 0o600);
-            fs.unlinkSync(path.join(directory, "cert.key"));
-            const partial = runBash(["-eu", "-c", certificateSetup], { cwd: directory });
-            assert.notEqual(partial.status, 0);
-            assert.match(partial.stderr, /Restore the complete existing/);
-            assert.deepEqual(fs.readFileSync(path.join(directory, "cert.pem")), cert);
-            assert.equal(fs.existsSync(path.join(directory, "cert.key")), false);
+            assert.equal(fs.statSync(path.join(directory, "cert.pem")).mode & 0o777, 0o644);
+            for (const [missing, retained, contents] of [
+                ["cert.key", "cert.pem", cert], ["cert.pem", "cert.key", key]
+            ]) {
+                fs.unlinkSync(path.join(directory, missing));
+                const partial = runGuard();
+                assert.notEqual(partial.status, 0);
+                assert.match(partial.stderr, generatesPair ? /Restore the complete existing/ : /Provision the existing pool/);
+                assert.deepEqual(fs.readFileSync(path.join(directory, retained)), contents);
+                assert.equal(fs.existsSync(path.join(directory, missing)), false);
+                fs.writeFileSync(path.join(directory, missing), missing === "cert.key" ? key : cert);
+            }
+            makePair();
+            fs.writeFileSync(path.join(directory, "cert.pem"), cert);
+            const mismatch = runGuard();
+            assert.notEqual(mismatch.status, 0);
+            assert.match(mismatch.stderr, /cert.key and cert.pem do not match/);
+            fs.writeFileSync(path.join(directory, "cert.key"), key);
+            const expired = spawnSync("openssl", [
+                "x509", "-in", "cert.pem", "-signkey", "cert.key", "-days", "0", "-out", "expired.pem"
+            ], { cwd: directory, encoding: "utf8" });
+            assert.equal(expired.status, 0, expired.stderr);
+            fs.renameSync(path.join(directory, "expired.pem"), path.join(directory, "cert.pem"));
+            const expiration = runGuard();
+            assert.notEqual(expiration.status, 0);
+            assert.match(expiration.stdout, /Certificate will expire/);
         } finally {
             fs.rmSync(directory, { recursive: true, force: true });
         }
-    }
-});
+    });
+}
 
 test("common deployment helper exposes the versioned source-only API", () => {
     const command = [
