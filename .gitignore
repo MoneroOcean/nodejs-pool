@@ -18,6 +18,7 @@ package-lock.json
 
 # Local runtime config and TLS files
 cert*
+share-cert.pem
 config.json
 
 # Generated local runtime outputs
