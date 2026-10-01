@@ -16,6 +16,7 @@ test("registry broadcasts tolerate worker slots removed during shutdown", () => 
 
 test("retarget counts stay numeric when a connected miner's port is absent from configuration", () => {
     const originalConfig = global.config;
+    const originalWorkerId = process.env.WORKER_ID;
     const messages = [];
     const state = {
         threadName: "",
@@ -23,14 +24,18 @@ test("retarget counts stay numeric when a connected miner's port is absent from 
         minerCount: {}
     };
     global.config = {ports: []};
+    process.env.WORKER_ID = "1";
     try {
         const registry = createMinerRegistry({cluster: {}, state, debug() {}, processSend(message) { messages.push(message); }});
         registry.retargetMiners();
         assert.equal(state.minerCount[1234], 1);
+        assert.equal(messages[0].data.worker_id, 1);
         assert.equal(messages[0].data.ports[1234], 1);
         registry.retargetMiners();
         assert.equal(state.minerCount[1234], 1);
     } finally {
         global.config = originalConfig;
+        if (typeof originalWorkerId === "undefined") delete process.env.WORKER_ID;
+        else process.env.WORKER_ID = originalWorkerId;
     }
 });

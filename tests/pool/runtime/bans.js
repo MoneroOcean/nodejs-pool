@@ -765,9 +765,15 @@ test("messageHandler minerPortCount stores the reported per-port counts in maste
     }
 });
 
-test("retargetMiners updates miner counts and pushes a new job when difficulty changes", async () => {
+test("retargetMiners reports numeric worker ids accepted by the master and skips invalid ids", async () => {
     const { runtime } = await startHarness();
+    const cluster = require("cluster");
+    const originalIsMaster = cluster.isMaster;
+    const originalTestMode = global.__poolTestMode;
+    const originalWorkerId = process.env.WORKER_ID;
+    const originalProcessSend = process.send;
     const socket = {};
+    const sentMessages = [];
 
     try {
         const loginReply = invokePoolMethod({
@@ -784,12 +790,46 @@ test("retargetMiners updates miner counts and pushes a new job when difficulty c
         loginReply.pushes.length = 0;
         miner.calcNewDiff = () => miner.difficulty + 10;
 
+        // Exercise the real worker IPC send path, then deliver that payload to
+        // the real master handler. WORKER_ID values supplied by cluster.fork are
+        // strings even though the master protocol requires a number.
+        global.__poolTestMode = false;
+        cluster.isMaster = false;
+        process.send = (message) => sentMessages.push(structuredClone(message));
+        process.env.WORKER_ID = "1";
         poolModule.retargetMiners();
 
         assert.equal(loginReply.pushes.length, 1);
         assert.equal(loginReply.pushes[0].method, "job");
         assert.equal(runtime.getState().minerCount[MAIN_PORT], 1);
+        assert.equal(sentMessages.length, 1);
+        assert.deepEqual(sentMessages[0], {
+            type: "minerPortCount",
+            data: { worker_id: 1, ports: runtime.getState().minerCount }
+        });
+
+        cluster.isMaster = true;
+        poolModule.messageHandler(sentMessages[0]);
+        assert.deepEqual(runtime.getState().workerMinerCounts[1], runtime.getState().minerCount);
+
+        cluster.isMaster = false;
+        for (const workerId of [undefined, "", "0", "-1", "1.5", "NaN", "9007199254740992"]) {
+            if (typeof workerId === "undefined") delete process.env.WORKER_ID;
+            else process.env.WORKER_ID = workerId;
+            sentMessages.length = 0;
+
+            poolModule.retargetMiners();
+
+            assert.equal(sentMessages.length, 0, `unexpected IPC report for WORKER_ID=${String(workerId)}`);
+            assert.equal(runtime.getState().minerCount[MAIN_PORT], 1, "invalid worker id must not skip retarget count updates");
+        }
     } finally {
+        cluster.isMaster = originalIsMaster;
+        global.__poolTestMode = originalTestMode;
+        if (typeof originalWorkerId === "undefined") delete process.env.WORKER_ID;
+        else process.env.WORKER_ID = originalWorkerId;
+        if (typeof originalProcessSend === "undefined") delete process.send;
+        else process.send = originalProcessSend;
         await runtime.stop();
     }
 });
