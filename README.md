@@ -111,6 +111,8 @@ The installers load `deployment/common.bash` from a local checkout when availabl
 
 After install, update the leaf config so it points at the main pool infrastructure, then start the `pool` module on that node.
 
+Share delivery uses pinned HTTPS on port 80: set `general.shareHost` to `https://<receiver>:80/leafApi`. The central installer reuses `cert.pem` and `cert.key` for this listener, generating them only when both are absent. Keep port 80 restricted to trusted leaf addresses. Each sender must trust the receiver's exact public certificate; the default `general.shareTlsCert` is `cert.pem`. If the leaf uses a different mining certificate, supply `SHARE_TLS_CERT_FILE=/path/to/receiver-public.pem` to the leaf installer (or in its root-only configuration file). It installs that public certificate as `share-cert.pem` and sets a local `general.shareTlsCert` override. Transfer the public certificate through a trusted channel; the receiver's private key is not needed on leaves. Coordinate receiver certificate replacement with every sender's pin update to avoid delivery failures.
+
 ### Docker And Optional Multi-Coin Stack
 
 The Docker-based setup and the optional `lib2` altblock stack live in [`lib2/README.md`](lib2/README.md). Use that path if you are building out the broader multi-coin environment rather than the simpler default install.

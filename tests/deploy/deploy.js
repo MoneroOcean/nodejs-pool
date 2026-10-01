@@ -15,7 +15,7 @@ const DEFAULT_CASE_TIMEOUT_MS = 45 * 60 * 1000;
 const EXPECTED_DEPLOY_PROCESSES = [
     "api", "block_manager", "worker", "remote_share", "long_runner", "pool_stats"
 ];
-const REMOTE_SHARE_URL = "http://127.0.0.1/leafApi";
+const REMOTE_SHARE_URL = "https://127.0.0.1:80/leafApi";
 const XMR_POOL_ADDRESS = "46yzCCD3Mza9tRj7aqPSaxVbbePtuAeKzf8Ky2eRtcXGcEgCg1iTBio6N4sPmznfgGEUGDoBz5CLxZ2XPTyZu1yoCAG7zt6";
 const XMR_FEE_ADDRESS = "463tWEBn5XZJSxLU6uLQnQ2iY9xuNcDbjLSjkn3XAXHCbLrTTErJrBWYgHJQyrCwkNgYvyV3z8zctJLPCZy24jvb3NiTcTJ";
 const TARI_WALLET_PAYMENT_ADDRESS = "12FrDe5cUauXdMeCiG1DU3XQZdShjFd9A4p9agxsddVyAwpmz73x4b2Qdy5cPYaGmKNZ6g1fbCASJpPxnjubqjvHDa5";
@@ -238,9 +238,18 @@ async function httpRequest(context, request, options = {}) {
     const script = `
 const http = require("node:http");
 const https = require("node:https");
+const fs = require("node:fs");
+const crypto = require("node:crypto");
 const input = ${JSON.stringify(request)};
 const transport = input.url.startsWith("https:") ? https : http;
-const req = transport.request(input.url, { method: input.method || "GET", headers: input.headers || {} }, (res) => {
+const tlsOptions = {};
+if (input.certFile) {
+  tlsOptions.ca = fs.readFileSync(input.certFile);
+  const pinned = new crypto.X509Certificate(tlsOptions.ca).raw;
+  tlsOptions.checkServerIdentity = (_hostname, cert) => cert.raw && cert.raw.equals(pinned)
+    ? undefined : new Error("Receiver certificate does not match pin");
+}
+const req = transport.request(input.url, { method: input.method || "GET", headers: input.headers || {}, ...tlsOptions }, (res) => {
   let body = "";
   res.setEncoding("utf8");
   res.on("data", (chunk) => { body += chunk; });
@@ -255,12 +264,17 @@ req.end();`;
 
 async function assertRemoteShareResponse(context) {
     // Exercise nginx's real upstream; an empty frame must reach the backend and be rejected.
-    const probe = await httpRequest(context, { method: "POST", url: REMOTE_SHARE_URL }, { check: false });
+    const probe = await httpRequest(context, { method: "POST", url: REMOTE_SHARE_URL, certFile: "/home/user/nodejs-pool/cert.pem" }, { check: false });
     const probePath = artifactPath(context, "remote-share-status.txt");
     await writeJson(probePath, probe);
     assert.equal(probe.statusCode, 400, `remote_share must reject an empty frame through nginx. See ${probePath}`);
     assert.equal(probe.body, "", `Expected the remote_share rejection, not a proxy error page. See ${probePath}`);
     await appendCheckData(context, "remote_share nginx probe", probe);
+    const unpinned = await httpRequest(context, { method: "POST", url: REMOTE_SHARE_URL }, { check: false });
+    assert.equal(unpinned.statusCode, 0, "A self-signed receiver must require an explicit certificate pin");
+    const plaintext = await httpRequest(context, { method: "POST", url: "http://127.0.0.1:80/leafApi" }, { check: false });
+    assert.equal(plaintext.statusCode, 400, "The TLS listener must reject plaintext HTTP");
+    assert.notEqual(plaintext.body, "", "Plaintext frames must not reach the remote_share backend");
 }
 
 async function runInstaller(context) {
@@ -330,6 +344,11 @@ async function verifyDeployInstall(context) {
     await execInContainer(context.containerName, "grep -q '^nf_conntrack$' /etc/modules-load.d/moneroocean-conntrack.conf && grep -q '^net.netfilter.nf_conntrack_max = 1048576$' /etc/sysctl.d/92-moneroocean-conntrack.conf");
     await appendCheckLog(context, "verified pool conntrack capacity");
     await execInContainer(context.containerName, [
+        "grep -Fq 'listen 80 ssl;' /etc/nginx/sites-enabled/default",
+        "grep -Fq 'ssl_certificate /home/user/nodejs-pool/cert.pem;' /etc/nginx/sites-enabled/default",
+        "grep -Fq 'ssl_certificate_key /home/user/nodejs-pool/cert.key;' /etc/nginx/sites-enabled/default",
+        "grep -Fq 'ssl_protocols TLSv1.2 TLSv1.3;' /etc/nginx/sites-enabled/default",
+        "test $(stat -c %a /home/user/nodejs-pool/cert.key) = 600",
         "grep -Fq 'gzip_vary on;' /etc/nginx/conf.d/moneroocean-gzip.conf",
         "grep -Fq 'gzip_types text/plain text/css application/json application/javascript application/xml application/xml+rss image/svg+xml text/javascript text/xml;' /etc/nginx/conf.d/moneroocean-gzip.conf",
         "grep -Fq 'expires 1y;' /etc/nginx/sites-enabled/default",

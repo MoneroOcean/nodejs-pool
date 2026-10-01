@@ -52,6 +52,37 @@ test("deployment entrypoints have valid shell syntax and production-safe shebang
     }
 });
 
+test("pool installers preserve certificate pairs and fail closed on partial restores", () => {
+    for (const entrypoint of ENTRYPOINTS) {
+        const source = fs.readFileSync(path.join(DEPLOYMENT_DIR, entrypoint), "utf8");
+        const start = source.indexOf("if [ ! -e cert.key ] && [ ! -e cert.pem ]; then");
+        const end = source.indexOf("\n# ", start);
+        assert.ok(start >= 0 && end > start);
+        // Execute only the certificate guard from the user-session heredoc.
+        const certificateSetup = source.slice(start, end).replaceAll("\\$", "$");
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pool-cert-setup-"));
+        try {
+            const first = runBash(["-eu", "-c", certificateSetup], { cwd: directory });
+            assert.equal(first.status, 0, first.stderr);
+            const cert = fs.readFileSync(path.join(directory, "cert.pem"));
+            const key = fs.readFileSync(path.join(directory, "cert.key"));
+            const second = runBash(["-eu", "-c", certificateSetup], { cwd: directory });
+            assert.equal(second.status, 0, second.stderr);
+            assert.deepEqual(fs.readFileSync(path.join(directory, "cert.pem")), cert);
+            assert.deepEqual(fs.readFileSync(path.join(directory, "cert.key")), key);
+            assert.equal(fs.statSync(path.join(directory, "cert.key")).mode & 0o777, 0o600);
+            fs.unlinkSync(path.join(directory, "cert.key"));
+            const partial = runBash(["-eu", "-c", certificateSetup], { cwd: directory });
+            assert.notEqual(partial.status, 0);
+            assert.match(partial.stderr, /Restore the complete existing/);
+            assert.deepEqual(fs.readFileSync(path.join(directory, "cert.pem")), cert);
+            assert.equal(fs.existsSync(path.join(directory, "cert.key")), false);
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    }
+});
+
 test("common deployment helper exposes the versioned source-only API", () => {
     const command = [
         `source ${JSON.stringify(COMMON_PATH)}`,

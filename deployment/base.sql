@@ -371,7 +371,8 @@ INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES 
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feeSlewAmount', '.0001', 'float', 'Amount to charge for the txn fee');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'feeSlewEnd', '4', 'float', 'Value at which txn fee amount drops to 0');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('payout', 'maxPaymentTxns', '15', 'int', 'Maximum number of transactions in a single payment');
-INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'shareHost', 'http://localhost/leafApi', 'string', 'Host that receives share information');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'shareHost', 'https://localhost:80/leafApi', 'string', 'TLS host that receives share information');
+INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'shareTlsCert', 'cert.pem', 'string', 'Pinned receiver public certificate file for share delivery');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'adminEmail', '', 'string', 'Email of pool admin for alert notification stuff');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'emailBrand', 'MoneroOcean', 'string', 'Brand name for miner notification email subjects and bodies.');
 INSERT INTO pool.config (module, item, item_value, item_type, Item_desc) VALUES ('general', 'emailSig', 'MoneroOcean Admin Team', 'string', 'Signature line for miner notification emails.');

@@ -286,7 +286,7 @@ case "$cmd" in
                 nohup socat TCP-LISTEN:"$xtm_t_compat_port",bind=127.0.0.1,reuseaddr,fork TCP:127.0.0.1:"$minotari_node_port" >/tmp/codex-minotari-compat.log 2>&1 &
                 exit 0
                 ;;
-            restart:nginx)
+            restart:nginx|reload-or-restart:nginx)
                 if command -v nginx >/dev/null 2>&1; then
                     nginx -t
                     pgrep nginx >/dev/null 2>&1 && nginx -s reload || nginx

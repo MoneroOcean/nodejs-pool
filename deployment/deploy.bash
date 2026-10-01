@@ -305,7 +305,12 @@ gzip_types text/plain text/css application/json application/javascript applicati
 EOF
 cat >/etc/nginx/sites-enabled/default <<EOF
 server {
-	listen 80;
+	listen 80 ssl;
+	ssl_certificate /home/user/nodejs-pool/cert.pem;
+	ssl_certificate_key /home/user/nodejs-pool/cert.key;
+	ssl_protocols TLSv1.2 TLSv1.3;
+	ssl_session_cache shared:leaf_tls:10m;
+	ssl_session_timeout 1h;
 	location /leafApi {
 		proxy_pass http://127.0.0.1:8000;
 		proxy_redirect off;
@@ -384,9 +389,6 @@ server {
 EOF
 chown -R www-data:www-data /var/www
 chmod g+s /var/www
-if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
-  systemctl restart nginx
-fi
 checkout_repo_ref "$MONERO_REPO_URL" /usr/local/src/monero "$MONERO_RELEASE_TAG"
 retry_command git submodule update --init
 if ! monero_build_is_current; then
@@ -570,9 +572,14 @@ fi
 install_typecheck_dependencies
 command -v pm2 >/dev/null 2>&1 || retry_command npm install -g pm2 --min-release-age=7
 retry_command pm2 install pm2-logrotate
-if [ ! -f cert.key ] || [ ! -f cert.pem ]; then
-  openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500
+if [ ! -e cert.key ] && [ ! -e cert.pem ]; then
+  (umask 077; openssl req -subj "/C=IT/ST=Pool/L=Daemon/O=Mining Pool/CN=mining.pool" -newkey rsa:2048 -nodes -keyout cert.key -x509 -out cert.pem -days 36500)
 fi
+test -s cert.key && test -s cert.pem || { echo 'Restore the complete existing cert.key/cert.pem pair before installing' >&2; exit 1; }
+chmod 600 cert.key
+chmod 644 cert.pem
+openssl x509 -in cert.pem -noout -checkend 0
+test "\$(openssl x509 -in cert.pem -pubkey -noout)" = "\$(openssl pkey -in cert.key -pubout)" || { echo 'cert.key and cert.pem do not match' >&2; exit 1; }
 # install lmdb tools
 ( cd /home/user
   if [ ! -d node-lmdb/.git ]; then
@@ -663,6 +670,13 @@ fi
 retry_command npx playwright install --with-deps chromium
 retry_command npm run build
 EOF
+
+# The port-80 TLS listener references the pool certificate created or restored
+# above. Do not apply the configuration before that certificate exists.
+if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
+  nginx -t
+  systemctl reload-or-restart nginx
+fi
 
 # The conntrack pressure guard is installed on public leaf nodes only.
 # configure_pool_health_guard
