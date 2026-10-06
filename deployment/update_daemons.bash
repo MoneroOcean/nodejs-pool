@@ -2,7 +2,7 @@
 set -e
 
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
-MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
+MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.3}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v6.0.0}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"

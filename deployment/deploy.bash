@@ -40,7 +40,7 @@ fi
 
 NODEJS_VERSION="${NODEJS_VERSION:-v24.15.0}"
 MONERO_REPO_URL="${MONERO_REPO_URL:-https://github.com/monero-project/monero.git}"
-MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.1}"
+MONERO_RELEASE_TAG="${MONERO_RELEASE_TAG:-v0.18.5.3}"
 WWW_DNS="${WWW_DNS:-moneroocean.stream}"
 API_DNS="${API_DNS:-api.moneroocean.stream}"
 CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN:-n/a}"
