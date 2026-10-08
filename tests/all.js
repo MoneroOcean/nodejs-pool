@@ -18,6 +18,7 @@ require("./database.js");
 require("./common/callbacks.js");
 require("./common/work_codec.js");
 require("./live_helpers.js");
+require("./live_security.js");
 if (process.env.NODEJS_POOL_RUN_LIVE_TESTS === "1") require("./live.js");
 require("./payments.js");
 require("./payment_batch_unlock.js");

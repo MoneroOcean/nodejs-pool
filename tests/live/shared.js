@@ -24,7 +24,7 @@ const DEFAULT_SRBMINER_CN_GPU_INTENSITY = process.env.NODEJS_POOL_LIVE_SRBMINER_
     || process.env.NODEJS_POOL_LIVE_SRBMINER_GPU_INTENSITY
     || "1";
 const DEFAULT_SRBMINER_API_PORT = 21550;
-const DEFAULT_MOM_C29_DEVICE = "gpu1*1";
+const DEFAULT_MOM_C29_DEVICE = "gpu1";
 
 const XMRIG_RELEASE_API = "https://api.github.com/repos/MoneroOcean/xmrig/releases/latest";
 const SRBMINER_RELEASE_API = "https://api.github.com/repos/doktor83/SRBMiner-Multi/releases/latest";
@@ -59,6 +59,12 @@ const EMBEDDED_ACTIVE_ALGOS = [
     { algorithm: "rx/arq" }
 ];
 
+// Pearl is intentionally opt-in: a default live run must remain usable on hosts without a
+// compatible GPU, while loopback/Intel qualification can request it explicitly.
+const OPTIONAL_ACTIVE_ALGOS = [
+    { algorithm: "pearlhash", optional: true }
+];
+
 const SRBMINER_INTEL_ALGORITHM_MAP = {
     autolykos2: "autolykos2",
     "cn/gpu": "cryptonight_gpu",
@@ -70,7 +76,7 @@ const MOM_NO_BENCH_ALGOS = words(`
     argon2/chukwa argon2/chukwav2 argon2/wrkz c29 cn-heavy/0 cn-heavy/tube cn-heavy/xhv
     cn-lite/0 cn-lite/1 cn-pico/0 cn-pico/tlo cn/0 cn/1 cn/2 cn/ccx cn/double cn/fast
     cn/half cn/gpu cn/r cn/rto cn/rwz cn/upx2 cn/xao cn/zls ghostrider panthera
-    rx/0 rx/arq rx/graft rx/sfx rx/wow rx/yada
+    pearlhash rx/0 rx/arq rx/graft rx/sfx rx/wow rx/yada
 `);
 const XMRIG_CPU_ALGOS = new Set(words(`
     argon2/chukwav2 cn-heavy/xhv cn/gpu cn-half cn/half cn/pico cn-pico/trtl cn/r
@@ -82,7 +88,7 @@ const XMRIG_ALGO_PERF_SEED = Object.fromEntries(words(`
 `).map((algorithm) => [algorithm, 1]));
 
 const SRBMINER_NICEHASH_STRATUM_ALGOS = new Set(["etchash"]);
-const MOM_INTEL_ALGOS = new Set(["c29"]);
+const MOM_INTEL_ALGOS = new Set(["c29", "pearlhash"]);
 const GPU_PROTOCOL_PROBE_ALGOS = new Set(["autolykos2", "c29", "etchash", "kawpow"]);
 
 const stripAnsi = (value) => typeof value === "string" ? value.replace(ANSI_ESCAPE_PATTERN, "") : "";
@@ -134,8 +140,8 @@ function detectIntelGpu() {
     return result.status === 0 && /Device Type\s+GPU/i.test(output) && /\bIntel\b/i.test(output) && !/Device Available\s+No/i.test(output);
 }
 
-const ensureDir = async (dirPath) => await fsp.mkdir(dirPath, { recursive: true });
-const writeJson = async (filePath, value) => await fsp.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+const ensureDir = async (dirPath) => await fsp.mkdir(dirPath, { recursive: true, mode: 0o700 });
+const writeJson = async (filePath, value) => await fsp.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 const emitProgress = (message) => process.stdout.write(`${message}\n`);
 
 function formatReadableTime(date) {
@@ -317,12 +323,28 @@ async function isTcpReachable(host, port, timeoutMs = 750) {
 
 function createLogger(runDir) {
     const eventPath = path.join(runDir, "events.jsonl");
-    const stream = fs.createWriteStream(eventPath, { flags: "a" });
+    const stream = fs.createWriteStream(eventPath, { flags: "a", mode: 0o600 });
+    // Structured diagnostics never copy argv, addresses, proof bodies, or raw miner lines.
+    const fields = new Set([
+        "algorithm", "algo", "miner", "protocolProbe", "target", "attempt", "stream", "source",
+        "detected", "runId", "release", "asset", "name", "protocol", "exitCode", "exitSignal",
+        "success", "skipped", "connected", "jobReceived", "acceptedShares", "rejectedShares",
+        "invalidShares", "disconnects", "retriesObserved", "assignedDifficulty", "hashrate",
+        "durationMs", "failureCount", "unsupportedAlgorithmCount", "cleanupComplete", "descendantsGone"
+    ]);
 
     return {
         eventPath,
-        event(type, payload) {
-            stream.write(`${JSON.stringify({ ts: new Date().toISOString(), type, ...payload })}\n`);
+        event(type, payload = {}) {
+            const entry = { ts: new Date().toISOString(), type };
+            for (const key of fields) {
+                const value = payload[key];
+                if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))
+                    || (typeof value === "string" && value.length <= 128 && !/[\r\n]/.test(value))) {
+                    entry[key] = value;
+                }
+            }
+            stream.write(`${JSON.stringify(entry)}\n`);
         },
         async close() {
             await new Promise((resolve) => stream.end(resolve));
@@ -397,6 +419,7 @@ module.exports = {
     BLOCK_SUBMIT_TEST_MODE_WAIT_MS,
     BASE_DIFF,
     EMBEDDED_ACTIVE_ALGOS,
+    OPTIONAL_ACTIVE_ALGOS,
     SRBMINER_INTEL_ALGORITHM_MAP,
     MOM_NO_BENCH_ALGOS,
     XMRIG_CPU_ALGOS,

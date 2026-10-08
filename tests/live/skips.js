@@ -17,6 +17,7 @@ function targetHasDetail(target, text) {
 
 function expectedLiveMinerSkipReason(target) {
     if (!target || target.success) return "";
+    if (target.miner === "mom") return "";
     if (
         target.algorithm === "rx/arq"
         && !target.jobReceived

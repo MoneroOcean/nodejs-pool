@@ -28,8 +28,6 @@ const {
     formatReadableTime,
     emitLiveStatus,
     firstLine,
-    tailText,
-    readTextFileIfExists,
     detectIntelGpu,
     createLogger,
     createRandomWalletAllocator
@@ -71,12 +69,9 @@ function buildSummary(run, coveredResults) {
         generatedAt: new Date().toISOString(),
         algorithms: run.algorithms.map((entry) => entry.algorithm),
         configuration: {
-            targetHost: run.config.targetHost,
-            targetPort: run.config.targetPort,
             tls: run.config.tls,
             difficulty: run.config.difficulty,
             threads: run.config.threads,
-            wallet: run.config.wallet,
             timeoutMs: run.config.timeoutMs
         },
         hardware: run.hardware || {},
@@ -100,37 +95,21 @@ function buildSummary(run, coveredResults) {
 }
 
 function formatSummary(summary) {
-    const failureCount = summary.failureCount || 0;
-    const unsupportedCount = summary.unsupportedAlgorithmCount || 0;
-    if ((summary.exitCode || 0) === 0) return "live suite passed";
-
-    const parts = [];
-    if (failureCount) parts.push(`${failureCount} ${failureCount === 1 ? "failure" : "failures"}`);
-    if (unsupportedCount) parts.push(`${unsupportedCount} unsupported ${unsupportedCount === 1 ? "algorithm" : "algorithms"}`);
-    return [
-        `live suite failed: ${parts.join(", ") || "unknown error"}`,
-        summary.error ? `reason: ${summary.error}` : ""
-    ].filter(Boolean).join("\n");
+    const count = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    if ((summary.exitCode || 0) === 0) return "Live checks passed.";
+    return `Live checks failed: ${count(summary.failureCount)} failures, ${count(summary.unsupportedAlgorithmCount)} unsupported algorithms. Inspect the private run logs.`;
 }
 
 async function formatFailureDetails(summary) {
     if (!summary) return "";
-    const sections = [];
-    if (summary.errorDetail) sections.push(tailText(summary.errorDetail, 8000));
-    if (!Array.isArray(summary.results)) return sections.join("\n\n");
-    for (const result of summary.results) {
-        if (result.target?.success || result.target?.skipped) continue;
-        const stdoutText = await readTextFileIfExists(result.target.rawStdoutPath);
-        const stderrText = await readTextFileIfExists(result.target.rawStderrPath);
-        const srbMinerLogText = await readTextFileIfExists(result.target.srbMinerLogPath);
-        sections.push([
-            `[${result.algorithm}] ${result.target.failureReason || result.target.error || "failed"}`,
-            stdoutText ? tailText(stdoutText, 4000) : "<stdout empty>",
-            stderrText ? `stderr:\n${tailText(stderrText, 4000)}` : "",
-            srbMinerLogText ? `srbminer.log:\n${tailText(srbMinerLogText, 4000)}` : ""
-        ].filter(Boolean).join("\n"));
-    }
-    return sections.join("\n\n");
+    // Raw miner output can contain credentials or proofs. Keep it in the private run directory.
+    const failed = (summary.results || []).filter((result) => !result.target?.success && !result.target?.skipped);
+    if (!failed.length) return summary.error ? "Setup failed; inspect the private run logs." : "";
+    return failed.map((result) => {
+        const target = result.target || {};
+        const count = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+        return `Failed attempt: accepted=${count(target.acceptedShares)}, rejected=${count(target.rejectedShares)}, invalid=${count(target.invalidShares)}. Inspect the private run logs.`;
+    }).join("\n");
 }
 
 const printSummary = (summary) => process.stdout.write(`${formatSummary(summary)}\n`);
@@ -166,14 +145,14 @@ async function createLivePoolRun(input) {
 
         logger.event("hardware.intel-gpu.detect", { detected: intelGpuDetected });
 
-        if (intelGpuDetected && usesAny(activeAlgorithmSet, Object.keys(SRBMINER_INTEL_ALGORITHM_MAP))) {
-            const srbMiner = await ensureSrbMinerBinary(config, logger);
-            miners.push(buildSrbMiner(srbMiner.binaryPath));
-        }
-
         if (intelGpuDetected && usesAny(activeAlgorithmSet, MOM_INTEL_ALGOS)) {
             const moMiner = await ensureMoMinerRoot(config, logger);
             miners.push(buildMoMiner(moMiner.rootDir, moMiner.binaryPath));
+        }
+
+        if (intelGpuDetected && usesAny(activeAlgorithmSet, Object.keys(SRBMINER_INTEL_ALGORITHM_MAP))) {
+            const srbMiner = await ensureSrbMinerBinary(config, logger);
+            miners.push(buildSrbMiner(srbMiner.binaryPath));
         }
 
         miners.push(buildXmrigMiner((await ensureXmrigBinary(config, logger)).binaryPath));
@@ -248,13 +227,19 @@ async function finalizeLivePoolRun(run, coveredResults, error) {
 }
 
 function buildConfig(input) {
-    const options = input || {};
+    const {
+        runId: configuredRunId = buildRunId(),
+        targetHost: configuredTargetHost = DEFAULT_TARGET_HOST,
+        momReleaseTag: configuredMomReleaseTag = process.env.NODEJS_POOL_LIVE_MOM_RELEASE_TAG || "",
+        moMinerC29Device: configuredMomDevice = DEFAULT_MOM_C29_DEVICE,
+        emitStartLines: configuredEmitStartLines = true
+    } = input || {};
     return {
-        runId: options.runId || buildRunId(),
+        runId: configuredRunId || buildRunId(),
         cacheDir: DEFAULT_CACHE_DIR,
         logDir: DEFAULT_LOG_DIR,
         wallet: DEFAULT_WALLET,
-        targetHost: options.targetHost || DEFAULT_TARGET_HOST,
+        targetHost: configuredTargetHost || DEFAULT_TARGET_HOST,
         targetPort: DEFAULT_TARGET_PORT,
         tls: true,
         difficulty: DEFAULT_DIFFICULTY,
@@ -265,9 +250,10 @@ function buildConfig(input) {
         srbMinerGpuIntensity: DEFAULT_SRBMINER_GPU_INTENSITY,
         srbMinerCnGpuIntensity: DEFAULT_SRBMINER_CN_GPU_INTENSITY,
         srbMinerApiPort: DEFAULT_SRBMINER_API_PORT,
-        moMinerC29Device: DEFAULT_MOM_C29_DEVICE,
+        momReleaseTag: configuredMomReleaseTag || process.env.NODEJS_POOL_LIVE_MOM_RELEASE_TAG || "",
+        moMinerC29Device: configuredMomDevice || DEFAULT_MOM_C29_DEVICE,
         targetName: "target",
-        emitStartLines: typeof options.emitStartLines === "boolean" ? options.emitStartLines : true
+        emitStartLines: typeof configuredEmitStartLines === "boolean" ? configuredEmitStartLines : true
     };
 }
 
@@ -334,7 +320,7 @@ async function runLivePoolSuite(input) {
             const result = await executeScenario(run, plan, target);
             if (run.config.emitStartLines) {
                 const label = plan.miner ? `algo ${plan.algorithm} ${plan.miner.name}` : `algo ${plan.algorithm}`;
-                emitLiveStatus(result.success ? "pass" : "fail", label, result.success ? "" : (result.failureReason || result.error || "failed"));
+                emitLiveStatus(result.success ? "pass" : "fail", label, result.success ? "" : ("Inspect the private run logs."));
             }
             coveredResults.push({ algorithm: plan.algorithm, miner: plan.miner ? plan.miner.name : "protocol-probe", target: result });
         }
@@ -343,7 +329,7 @@ async function runLivePoolSuite(input) {
         if (protocolPlans.length) {
             for (const result of await executeProtocolProbeBatch(run, protocolPlans, target)) {
                 if (run.config.emitStartLines) {
-                    emitLiveStatus(result.success ? "pass" : "fail", `probe ${result.algorithm}`, result.success ? "" : (result.failureReason || result.error || "failed"));
+                    emitLiveStatus(result.success ? "pass" : "fail", `probe ${result.algorithm}`, result.success ? "" : ("Inspect the private run logs."));
                 }
                 coveredResults.push({ algorithm: result.algorithm, miner: result.miner, target: result });
             }

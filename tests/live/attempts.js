@@ -14,6 +14,8 @@ const {
 const {
     writeXmrigSeedConfig,
     makeWorkerName,
+    captureOwnedProcessTree,
+    refreshOwnedProcessTree,
     stopProcess,
     summarizeLatency,
     hasMetSuccessCriterion,
@@ -26,6 +28,8 @@ const {
     sendProtocolJson,
     parseProtocolLines
 } = require("./protocol.js");
+
+const PROCESS_CLOSE_WAIT_MS = 1000;
 
 function createDeferred() { let resolve; return { promise: new Promise((innerResolve) => { resolve = innerResolve; }), resolve }; }
 
@@ -83,7 +87,7 @@ function createMinerMetrics(targetAcceptedShares) {
     };
 }
 
-function openLogStreams(stdoutPath, stderrPath) { return { stdout: fs.createWriteStream(stdoutPath, { flags: "a" }), stderr: fs.createWriteStream(stderrPath, { flags: "a" }) }; }
+function openLogStreams(stdoutPath, stderrPath) { return { stdout: fs.createWriteStream(stdoutPath, { flags: "a", mode: 0o600 }), stderr: fs.createWriteStream(stderrPath, { flags: "a", mode: 0o600 }) }; }
 const closeStreams = async (...streams) => await Promise.all(streams.filter(Boolean).map((stream) => new Promise((resolve) => stream.end(resolve))));
 
 function attachAttemptStream(run, plan, target, attempt, name, stream, sink, onLine) {
@@ -177,10 +181,11 @@ function attachAttemptFileTail(run, plan, target, attempt, name, filePath, onLin
     };
 }
 
-async function waitForMinerAttempt(child, metrics, plan, timeoutMs, getProcessError, successObserveMs = 0) {
+async function waitForMinerAttempt(child, metrics, plan, timeoutMs, getProcessError, successObserveMs = 0, refreshOwnership = null) {
     const deadline = Date.now() + timeoutMs;
     let successObservedAt = 0;
     while (Date.now() < deadline) {
+        if (refreshOwnership) await refreshOwnership();
         if (getProcessError()) break;
         if (child.exitCode !== null) break;
         if (metrics.rejectedShares > 0 || metrics.invalidShares > 0) break;
@@ -314,9 +319,8 @@ function createProtocolProbeSession(config, run, plan, target, attempt) {
                 algorithm: plan.algorithm,
                 protocolProbe: plan.protocolProbe,
                 target: target.name,
-                host: target.host,
-                port: target.port,
-                attempt
+                attempt,
+                timeoutMs: config.timeoutMs
             });
 
             socket.once(config.tls ? "secureConnect" : "connect", () => {
@@ -458,11 +462,10 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
     run.logger.event("attempt.start", {
         algorithm: plan.algorithm,
         miner: plan.miner.name,
-        target: target.name,
-        host: target.host,
-        port: target.port,
         attempt,
-        args
+        successCriterion: plan.successCriterion || "accepted-share",
+        targetAcceptedShares: config.targetAcceptedShares,
+        timeoutMs: config.timeoutMs
     });
 
     let processError = null;
@@ -475,6 +478,7 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         },
         stdio: ["ignore", "pipe", "pipe"]
     });
+    const ownershipPromise = captureOwnedProcessTree(child.pid);
     const childClosed = new Promise((resolve) => {
         child.once("close", (code, signal) => resolve({ code, signal }));
     });
@@ -496,10 +500,20 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         }));
     }
 
-    await waitForMinerAttempt(child, metrics, plan, config.timeoutMs, () => processError);
-    await stopProcess(child);
-
-    const exitState = await childClosed;
+    const ownership = await ownershipPromise;
+    await waitForMinerAttempt(
+        child,
+        metrics,
+        plan,
+        config.timeoutMs,
+        () => processError,
+        0,
+        () => refreshOwnedProcessTree(ownership)
+    );
+    await refreshOwnedProcessTree(ownership);
+    const cleanup = await stopProcess(child, ownership);
+    const exitState = await waitWithTimeout(childClosed, PROCESS_CLOSE_WAIT_MS);
+    const closeObserved = Boolean(exitState);
     if (typeof plan.miner.cleanup === "function") {
         await plan.miner.cleanup(context);
     }
@@ -508,15 +522,27 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
     await Promise.all(fileTailers.map((tailer) => tailer.stop()));
 
     if (processError) {
-        return { ...base, success: false, failureReason: "launch-failure", error: processError.message };
+        return {
+            ...base,
+            ...cleanup,
+            closeObserved,
+            success: false,
+            failureReason: "launch-failure",
+            error: processError.message
+        };
     }
 
-    const failureReason = determineFailureReason(plan, metrics);
+    let failureReason = determineFailureReason(plan, metrics);
+    if (!failureReason && !cleanup.processCleanupComplete) failureReason = "process-cleanup-incomplete";
+    if (!failureReason && cleanup.processCleanupForced) failureReason = "process-cleanup-forced";
+    if (!failureReason && !closeObserved) failureReason = "process-close-timeout";
     const success = failureReason === "";
-    const endAtMs = metrics.firstAcceptedAtMs || metrics.jobAtMs || Date.now();
+    const endAtMs = Date.now();
 
     return {
         ...base,
+        ...cleanup,
+        closeObserved,
         success,
         failureReason,
         connected: metrics.connected,
@@ -532,8 +558,8 @@ async function runMinerAttempt(config, run, plan, target, attempt) {
         hashrate: metrics.hashrate,
         latency: summarizeLatency(metrics.latenciesMs),
         durationMs: Math.max(0, endAtMs - metrics.startedAtMs),
-        exitCode: exitState.code,
-        exitSignal: exitState.signal,
+        exitCode: exitState?.code ?? child.exitCode ?? null,
+        exitSignal: exitState?.signal ?? null,
         error: metrics.lastErrorLine
     };
 }
@@ -581,5 +607,6 @@ async function executeProtocolProbeBatch(run, plans, target) {
 
 module.exports = {
     executeScenario,
-    executeProtocolProbeBatch
+    executeProtocolProbeBatch,
+    openLogStreams
 };

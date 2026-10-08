@@ -156,6 +156,8 @@ Caveats:
 
 - Dependencies include native addons ([`node-blocktemplate`](https://github.com/MoneroOcean/node-blocktemplate), [`node-powhash`](https://github.com/MoneroOcean/node-powhash), `node-lmdb`) that must compile against your toolchain on `npm install`.
 - The live suites (`test:live*`) require network access to a reachable pool host and are not suitable for offline/CI-only runs.
+- Live miner archives resolve the current GitHub release before consulting the release-keyed cache. Set `NODEJS_POOL_LIVE_MOM_RELEASE_TAG` for an explicit, validated MoM release tag; cached archives are reused only after their GitHub SHA-256 digest matches.
+- PearlHash live coverage is opt-in with `NODEJS_POOL_LIVE_ALGOS=pearlhash`; it is intended for a compatible Intel-GPU loopback qualification and is not part of the default CPU-safe live set.
 
 ## Setup And Support
 

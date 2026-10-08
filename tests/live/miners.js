@@ -1,10 +1,12 @@
 "use strict";
+const fsp = require("node:fs/promises");
 const path = require("node:path");
 
 const {
     DIFF_SCALE,
     HASHRATE_SCALE,
     EMBEDDED_ACTIVE_ALGOS,
+    OPTIONAL_ACTIVE_ALGOS,
     SRBMINER_INTEL_ALGORITHM_MAP,
     MOM_NO_BENCH_ALGOS,
     XMRIG_CPU_ALGOS,
@@ -18,6 +20,12 @@ const {
     shortAlgoName,
     writeJson
 } = require("./shared.js");
+
+const PROCESS_TREE_SUPPORTED = process.platform === "linux";
+const PROCESS_TREE_MAX = 128;
+const PROCESS_SIGNAL_GRACE_MS = 1000;
+const PROCESS_TERM_GRACE_MS = 1500;
+const PROCESS_POLL_MS = 50;
 
 function parseDiffToken(token) {
     if (!token) return null;
@@ -329,7 +337,7 @@ function buildMoMinerNoBenchConfig(context) {
             first_job_wait: Math.max(5, Math.ceil(context.timeoutMs / 3000)),
             close_wait: 2,
             donate_interval: 86400,
-            donate_length: 0,
+            donate_length: 60,
             keepalive: 30
         },
         pools: [{
@@ -343,15 +351,16 @@ function buildMoMinerNoBenchConfig(context) {
         }],
         pool_ids: { primary: 0, donate: null },
         algo_params: Object.fromEntries(MOM_NO_BENCH_ALGOS.map((algorithm) => [algorithm, {
-            dev: algorithm === "c29" || algorithm === "cn/gpu" ? context.moMinerC29Device : "cpu",
+            dev: algorithm === "c29" || algorithm === "cn/gpu" || algorithm === "pearlhash"
+                ? context.moMinerC29Device
+                : "cpu",
             perf: 1
         }])),
         default_msrs: {},
         log_level: 0,
-        // mom v0.7.0 benchmarks the active MoneroOcean GPU algos (autolykos2/etchash/kawpow/pearl) at
-        // startup by default (bench_algo_params=1). Those aren't in MOM_NO_BENCH_ALGOS, so without this
-        // the "no-bench" live config still triggers slow -- and on some Intel Xe GPUs unstable -- DAG
-        // benchmarks before mining. 0 = skip all benchmarking and go straight to the pool job.
+        // The default benchmark mode includes active GPU algorithms (including PearlHash) and can
+        // delay or destabilize a short live probe. 0 skips all benchmarking and goes straight to
+        // the pool job.
         bench_algo_params: 0
     };
 }
@@ -400,14 +409,17 @@ function getActiveAlgorithms(logger) {
         .split(/[,\s]+/)
         .map((entry) => entry.trim())
         .filter(Boolean));
-    const knownAlgorithms = new Set(EMBEDDED_ACTIVE_ALGOS.map((entry) => entry.algorithm));
+    const definitions = [...EMBEDDED_ACTIVE_ALGOS, ...OPTIONAL_ACTIVE_ALGOS];
+    const knownAlgorithms = new Set(definitions.map((entry) => entry.algorithm));
     const unknownAlgorithms = Array.from(requestedAlgorithms).filter((algorithm) => !knownAlgorithms.has(algorithm)).sort();
     if (unknownAlgorithms.length) {
         throw new Error(`Unknown live algorithm filter: ${unknownAlgorithms.join(", ")}`);
     }
-    const selected = EMBEDDED_ACTIVE_ALGOS
+    const selected = definitions
         .map((entry) => ({ ...entry }))
-        .filter((entry) => !requestedAlgorithms.size || requestedAlgorithms.has(entry.algorithm))
+        .filter((entry) => requestedAlgorithms.size
+            ? requestedAlgorithms.has(entry.algorithm)
+            : !entry.optional)
         .sort((left, right) => left.algorithm.localeCompare(right.algorithm));
 
     logger.event("algorithms.discovered", {
@@ -449,15 +461,233 @@ function makeWorkerName(config, algorithm, side, attempt) {
         .slice(0, 63);
 }
 
-async function stopProcess(processHandle) {
-    if (!processHandle || processHandle.exitCode !== null || processHandle.killed) return;
-    processHandle.kill("SIGINT");
-    await sleep(1000);
-    if (processHandle.exitCode !== null) return;
-    processHandle.kill("SIGTERM");
-    await sleep(1500);
-    if (processHandle.exitCode !== null) return;
-    processHandle.kill("SIGKILL");
+function processIdentityKey(identity) {
+    return `${identity.pid}:${identity.startTicks}`;
+}
+
+function createProcessOwnership(readers = null) {
+    return {
+        supported: PROCESS_TREE_SUPPORTED,
+        readers: readers || { readIdentity: readProcessIdentity, readChildren: readProcessChildren },
+        processes: new Map(),
+        knownPids: new Map(),
+        queryFailures: 0,
+        truncated: false,
+        rootKey: "",
+        launcherExitedBeforeSnapshot: false
+    };
+}
+
+async function readProcessIdentity(pid) {
+    if (!PROCESS_TREE_SUPPORTED || !Number.isInteger(pid) || pid <= 0) return null;
+    try {
+        const stat = await fsp.readFile(`/proc/${pid}/stat`, "utf8");
+        const closeParen = stat.lastIndexOf(") ");
+        if (closeParen < 0) return undefined;
+        const fields = stat.slice(closeParen + 2).trim().split(/\s+/);
+        const state = fields[0];
+        const ppid = Number(fields[1]);
+        const startTicks = fields[19];
+        if (!/^[A-Z]$/.test(state || "") || !Number.isInteger(ppid) || !/^\d+$/.test(startTicks || "")) {
+            return undefined;
+        }
+        return { pid, ppid, startTicks, state };
+    } catch (error) {
+        if (error.code === "ENOENT") return null;
+        return undefined;
+    }
+}
+
+async function readProcessChildren(pid) {
+    if (!PROCESS_TREE_SUPPORTED) return [];
+    try {
+        const text = await fsp.readFile(`/proc/${pid}/task/${pid}/children`, "utf8");
+        const children = text.trim() ? text.trim().split(/\s+/).map(Number) : [];
+        return children.every((childPid) => Number.isInteger(childPid) && childPid > 0) ? children : null;
+    } catch (error) {
+        if (error.code === "ENOENT") return [];
+        return null;
+    }
+}
+
+function registerOwnedProcess(ownership, identity, queue) {
+    const knownStartTicks = ownership.knownPids.get(identity.pid);
+    if (knownStartTicks && knownStartTicks !== identity.startTicks) return;
+    const key = processIdentityKey(identity);
+    if (ownership.processes.has(key)) return;
+    if (ownership.processes.size >= PROCESS_TREE_MAX) {
+        ownership.truncated = true;
+        return;
+    }
+    ownership.knownPids.set(identity.pid, identity.startTicks);
+    ownership.processes.set(key, identity);
+    queue.push(identity);
+}
+
+async function expandProcessOwnership(ownership) {
+    if (!ownership.supported) return;
+    const queue = Array.from(ownership.processes.values());
+    const visited = new Set();
+    while (queue.length) {
+        const parent = queue.shift();
+        const parentKey = processIdentityKey(parent);
+        if (visited.has(parentKey)) continue;
+        visited.add(parentKey);
+
+        const currentParent = await ownership.readers.readIdentity(parent.pid);
+        if (currentParent === undefined) {
+            ownership.queryFailures += 1;
+            continue;
+        }
+        if (!currentParent || currentParent.startTicks !== parent.startTicks || currentParent.state === "Z") {
+            if (parentKey === ownership.rootKey && ownership.processes.size === 1) {
+                ownership.launcherExitedBeforeSnapshot = true;
+            }
+            continue;
+        }
+
+        const children = await ownership.readers.readChildren(parent.pid);
+        if (!Array.isArray(children)) {
+            ownership.queryFailures += 1;
+            continue;
+        }
+        const verifiedParent = await ownership.readers.readIdentity(parent.pid);
+        if (verifiedParent === undefined) {
+            ownership.queryFailures += 1;
+            continue;
+        }
+        if (!verifiedParent || verifiedParent.startTicks !== parent.startTicks || verifiedParent.state === "Z") {
+            if (parentKey === ownership.rootKey && ownership.processes.size === 1) {
+                ownership.launcherExitedBeforeSnapshot = true;
+            }
+            continue;
+        }
+        for (const childPid of children) {
+            const child = await ownership.readers.readIdentity(childPid);
+            if (child === undefined) {
+                ownership.queryFailures += 1;
+                continue;
+            }
+            if (!child || child.ppid !== parent.pid) continue;
+            registerOwnedProcess(ownership, child, queue);
+        }
+    }
+}
+
+async function captureOwnedProcessTree(pid, readers = null) {
+    const ownership = createProcessOwnership(readers);
+    if (!ownership.supported) return ownership;
+    const root = await ownership.readers.readIdentity(pid);
+    if (root === undefined) ownership.queryFailures += 1;
+    else if (root) {
+        ownership.rootKey = processIdentityKey(root);
+        registerOwnedProcess(ownership, root, []);
+    } else ownership.launcherExitedBeforeSnapshot = true;
+    await expandProcessOwnership(ownership);
+    return ownership;
+}
+
+async function refreshOwnedProcessTree(ownership) {
+    await expandProcessOwnership(ownership);
+    return ownership;
+}
+
+async function processState(identity, readers = { readIdentity: readProcessIdentity }) {
+    const current = await readers.readIdentity(identity.pid);
+    if (current === undefined) return "unknown";
+    if (!current || current.startTicks !== identity.startTicks || current.state === "Z") return "gone";
+    return "live";
+}
+
+async function ownedProcessState(ownership) {
+    let live = 0;
+    let unknown = 0;
+    for (const identity of ownership.processes.values()) {
+        const state = await processState(identity, ownership.readers);
+        if (state === "live") live += 1;
+        else if (state === "unknown") unknown += 1;
+    }
+    return { live, unknown };
+}
+
+async function waitForOwnedProcessExit(ownership, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let state = { live: 0, unknown: 0 };
+    do {
+        await expandProcessOwnership(ownership);
+        state = await ownedProcessState(ownership);
+        if (state.live === 0 && state.unknown === 0) return state;
+        if (Date.now() >= deadline) return state;
+        await sleep(Math.min(PROCESS_POLL_MS, Math.max(1, deadline - Date.now())));
+    } while (Date.now() < deadline);
+    return state;
+}
+
+async function signalOwnedProcesses(ownership, signal) {
+    await expandProcessOwnership(ownership);
+    for (const identity of ownership.processes.values()) {
+        if (await processState(identity, ownership.readers) !== "live") continue;
+        try {
+            process.kill(identity.pid, signal);
+        } catch (error) {
+            if (error.code !== "ESRCH") ownership.queryFailures += 1;
+        }
+    }
+}
+
+function cleanupResult(ownership, state, natural, forced) {
+    return {
+        processCleanupComplete: state.live === 0 && state.unknown === 0
+            && ownership.supported && ownership.queryFailures === 0 && !ownership.truncated
+            && !ownership.launcherExitedBeforeSnapshot,
+        processCleanupNatural: natural,
+        processCleanupForced: forced,
+        ownedProcessCount: ownership.processes.size,
+        remainingProcessCount: state.live + state.unknown,
+        processCleanupQueryFailures: ownership.queryFailures + state.unknown,
+        processCleanupTruncated: ownership.truncated,
+        processCleanupLauncherExitBeforeSnapshot: ownership.launcherExitedBeforeSnapshot
+    };
+}
+
+async function stopProcess(processHandle, ownership = null) {
+    if (!processHandle || !Number.isInteger(processHandle.pid)) {
+        return cleanupResult(createProcessOwnership(), { live: 0, unknown: 1 }, false, false);
+    }
+
+    const tracked = ownership || await captureOwnedProcessTree(processHandle.pid);
+    if (!tracked.supported) {
+        if (processHandle.exitCode !== null) return cleanupResult(tracked, { live: 0, unknown: 0 }, true, false);
+        processHandle.kill("SIGINT");
+        if (processHandle.exitCode === null) await sleep(PROCESS_SIGNAL_GRACE_MS);
+        if (processHandle.exitCode !== null) return cleanupResult(tracked, { live: 0, unknown: 0 }, true, false);
+        processHandle.kill("SIGTERM");
+        await sleep(PROCESS_TERM_GRACE_MS);
+        if (processHandle.exitCode !== null) return cleanupResult(tracked, { live: 0, unknown: 0 }, false, true);
+        processHandle.kill("SIGKILL");
+        return cleanupResult(tracked, { live: 1, unknown: 0 }, false, true);
+    }
+
+    if (!tracked.processes.size && processHandle.exitCode === null) {
+        const retry = await captureOwnedProcessTree(processHandle.pid);
+        if (retry.processes.size) return await stopProcess(processHandle, retry);
+        tracked.queryFailures += retry.queryFailures + 1;
+    }
+
+    let state = await ownedProcessState(tracked);
+    if (state.live === 0 && state.unknown === 0) return cleanupResult(tracked, state, true, false);
+
+    await signalOwnedProcesses(tracked, "SIGINT");
+    state = await waitForOwnedProcessExit(tracked, PROCESS_SIGNAL_GRACE_MS);
+    if (state.live === 0 && state.unknown === 0) return cleanupResult(tracked, state, true, false);
+
+    await signalOwnedProcesses(tracked, "SIGTERM");
+    state = await waitForOwnedProcessExit(tracked, PROCESS_TERM_GRACE_MS);
+    if (state.live === 0 && state.unknown === 0) return cleanupResult(tracked, state, false, true);
+
+    await signalOwnedProcesses(tracked, "SIGKILL");
+    state = await waitForOwnedProcessExit(tracked, PROCESS_SIGNAL_GRACE_MS);
+    return cleanupResult(tracked, state, false, true);
 }
 
 function summarizeLatency(latenciesMs) {
@@ -488,10 +718,13 @@ module.exports = {
     buildXmrigMiner,
     buildSrbMiner,
     buildMoMiner,
+    buildMoMinerNoBenchConfig,
     writeXmrigSeedConfig,
     getActiveAlgorithms,
     buildCoveragePlan,
     makeWorkerName,
+    captureOwnedProcessTree,
+    refreshOwnedProcessTree,
     stopProcess,
     summarizeLatency,
     hasMetSuccessCriterion,
