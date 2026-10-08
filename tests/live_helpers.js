@@ -1151,26 +1151,34 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         }
 
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nodejs-pool-live-descendants-"));
-        t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
         const markerPath = path.join(tempDir, "descendant.pid");
-        let descendantPid = 0;
-        let descendantStartTicks = "";
+        const runningStartTicks = (stat) => {
+            const fields = stat.slice(stat.lastIndexOf(") ") + 2).trim().split(/\s+/);
+            // An exited orphan can remain in /proc until the runner's init reaps it.
+            return fields[0] === "Z" ? "" : fields[19] || "";
+        };
+        const statFields = ["S", ...Array(18).fill("0"), "123"];
+        assert.equal(runningStartTicks(`1 (fixture) ${statFields.join(" ")}`), "123");
+        statFields[0] = "Z";
+        assert.equal(runningStartTicks(`1 (fixture) ${statFields.join(" ")}`), "");
         const readStartTicks = (pid) => {
             try {
-                const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-                const closeParen = stat.lastIndexOf(") ");
-                return closeParen < 0 ? "" : stat.slice(closeParen + 2).trim().split(/\s+/)[19] || "";
+                return runningStartTicks(fs.readFileSync(`/proc/${pid}/stat`, "utf8"));
             } catch (_error) {
                 return "";
             }
         };
         t.after(() => {
-            if (descendantPid && descendantStartTicks && readStartTicks(descendantPid) === descendantStartTicks) {
-                try {
-                    process.kill(descendantPid, "SIGKILL");
-                } catch (_error) {
-                    // The owned fixture may already have exited.
+            try {
+                if (!fs.existsSync(markerPath)) return;
+                const { pid, startTicks } = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+                if (pid && startTicks && readStartTicks(pid) === startTicks) {
+                    process.kill(pid, "SIGKILL");
                 }
+            } catch (_error) {
+                // The owned fixture may already have exited.
+            } finally {
+                fs.rmSync(tempDir, { recursive: true, force: true });
             }
         });
 
@@ -1180,7 +1188,9 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             "const { spawn } = require('node:child_process');",
             `const marker = ${JSON.stringify(markerPath)};`,
             `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantCode)}], { stdio: 'ignore' });`,
-            "fs.writeFileSync(marker, String(child.pid));",
+            "const stat = fs.readFileSync('/proc/' + child.pid + '/stat', 'utf8');",
+            "const startTicks = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\\s+/)[19];",
+            "fs.writeFileSync(marker, JSON.stringify({ pid: child.pid, startTicks }));",
             "process.stdout.write('Connected to fixture pool\\n');",
             "process.stdout.write('Accepted share\\n');",
             "process.on('SIGINT', () => process.exit(0));",
@@ -1215,8 +1225,8 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             port: 1
         });
 
-        descendantPid = Number(fs.readFileSync(markerPath, "utf8"));
-        descendantStartTicks = readStartTicks(descendantPid);
+        const { pid, startTicks } = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+        assert.match(startTicks, /^\d+$/);
         assert.equal(result.success, true);
         assert.equal(result.processCleanupComplete, true);
         assert.equal(result.processCleanupNatural, true);
@@ -1225,7 +1235,7 @@ test.describe("live miner helpers", { concurrency: false }, () => {
         assert.ok(result.ownedProcessCount >= 2);
         assert.equal(result.remainingProcessCount, 0);
         assert.equal(result.processCleanupQueryFailures, 0);
-        assert.equal(readStartTicks(descendantPid), "");
+        assert.notEqual(readStartTicks(pid), startTicks, "original descendant is no longer running");
 
         const startEvent = events.find((entry) => entry.name === "attempt.start");
         assert.ok(startEvent);
