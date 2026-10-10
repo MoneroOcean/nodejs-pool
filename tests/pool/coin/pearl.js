@@ -46,7 +46,7 @@ function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareD
     const proof = Buffer.from("pearl-proof");
     const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
     header.writeUInt32LE(pearl.targetToCompact(networkTarget.target), 72);
-    const calls = { identity: [], invalid: [], trusted: 0, verifier: 0, verified: [] };
+    const calls = { identity: [], invalid: [], trusted: 0, verifier: 0, verified: [], walletTrust: 0 };
     const identityConfig = validPearlVerifierConfig(nativeAdjustmentFactor);
     const verifierResult = verifier && verifier.valid === true
         ? { full: true, solution_data: PEARL_SOLUTION_DATA.toString("hex"), ...verifier }
@@ -76,6 +76,7 @@ function pearlShareFixture({ claim = {}, verifier, networkDifficulty = 2, shareD
         },
         invalidShare() { return "invalid"; },
         processShareCB(result) { calls.invalid.push(result); },
+        addWalletTrust() { calls.walletTrust += 1; },
         verifyShareCB(...args) { calls.verified.push(args); }
     };
     return { calls, context, networkTarget, proof, shareTarget };
@@ -555,6 +556,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(fixture.calls.verifier, 0);
         assert.deepEqual(fixture.calls.verified, [[1, null, null, true, false, false]]);
         assert.deepEqual(fixture.calls.invalid, []);
+        assert.equal(fixture.calls.walletTrust, 0);
     });
 
     test("rejects a trusted claim whose factor differs from native identity config", () => {
@@ -610,6 +612,65 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(fixture.calls.verifier, 1);
         assert.deepEqual(fixture.calls.verified, [[1, null, fixture.proof.toString("base64"), false, true, true]]);
         assert.deepEqual(fixture.calls.invalid, []);
+        assert.equal(fixture.calls.walletTrust, 1);
+    });
+
+    test("credits fully verified ordinary shares with or without jackpot claims", () => {
+        const jackpot = pearl.targetForDifficulty(1).targetHex;
+        for (const claim of [{}, { jackpot, adjustment_factor: 1 }]) {
+            const fixture = pearlShareFixture({
+                claim,
+                verifier: { valid: true, candidate: true, jackpot, config: validPearlVerifierConfig(1) }
+            });
+            fixture.context.tryTrustedShare = () => false;
+            pearlProfile.pool.verifySpecialShare(fixture.context);
+            assert.equal(fixture.calls.verifier, 1);
+            assert.equal(fixture.calls.walletTrust, 1);
+            assert.deepEqual(fixture.calls.verified, [[1, null, null, false, false, false]]);
+        }
+    });
+
+    test("does not credit invalid, unavailable, incomplete or mismatched verification", () => {
+        const results = [
+            null,
+            false,
+            { valid: false },
+            { valid: true, full: false, candidate: true, jackpot: "00".repeat(32), config: validPearlVerifierConfig(1) },
+            { valid: true, candidate: false, jackpot: "ff".repeat(32), config: validPearlVerifierConfig(1) },
+            { valid: true, candidate: true, jackpot: "00".repeat(32), config: validPearlVerifierConfig(2) },
+            { valid: true, candidate: true, solution_data: "01ab", jackpot: "00".repeat(32), config: validPearlVerifierConfig(1) }
+        ];
+        for (const verifier of results) {
+            const fixture = pearlShareFixture({ verifier });
+            pearlProfile.pool.verifySpecialShare(fixture.context);
+            assert.equal(fixture.calls.walletTrust, 0);
+            assert.deepEqual(fixture.calls.verified, []);
+        }
+        const fixture = pearlShareFixture({ verifier: null });
+        fixture.context.coinFuncs.verifyPearlAsync = (_header, _proof, _target, _miner, callback) => {
+            callback({ valid: true }, "verify-host-error");
+        };
+        pearlProfile.pool.verifySpecialShare(fixture.context);
+        assert.equal(fixture.calls.walletTrust, 0);
+        assert.deepEqual(fixture.calls.verified, []);
+    });
+
+    test("ignores repeated full verifier callbacks after success or failure", () => {
+        for (const firstInvalid of [false, true]) {
+            const fixture = pearlShareFixture({ verifier: null });
+            const valid = {
+                valid: true, full: true, solution_data: PEARL_SOLUTION_DATA.toString("hex"),
+                candidate: true, jackpot: "00".repeat(32), config: validPearlVerifierConfig(1)
+            };
+            fixture.context.coinFuncs.verifyPearlAsync = (_header, _proof, _target, _miner, callback) => {
+                callback(firstInvalid ? { valid: false } : valid);
+                callback(valid);
+            };
+            pearlProfile.pool.verifySpecialShare(fixture.context);
+            assert.equal(fixture.calls.walletTrust, firstInvalid ? 0 : 1);
+            assert.equal(fixture.calls.verified.length, firstInvalid ? 0 : 1);
+            assert.equal(fixture.calls.invalid.length, firstInvalid ? 1 : 0);
+        }
     });
 
     test("rejects a full verifier result with a different solution id", () => {
@@ -632,6 +693,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(fixture.calls.verifier, 1);
         assert.deepEqual(fixture.calls.invalid, ["invalid"]);
         assert.deepEqual(fixture.calls.verified, []);
+        assert.equal(fixture.calls.walletTrust, 0);
     });
 
     test("rejects claims outside the assigned share target before verification", () => {
@@ -674,6 +736,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             assert.equal(fixture.calls.verifier, index === 0 ? 1 : 0);
             assert.deepEqual(fixture.calls.invalid, ["invalid"]);
             assert.deepEqual(fixture.calls.verified, []);
+            assert.equal(fixture.calls.walletTrust, 0);
         }
     });
 

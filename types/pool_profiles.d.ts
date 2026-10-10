@@ -370,6 +370,8 @@ export interface PoolSubmissionKeyContext {
 }
 
 export interface PoolSpecialShareContext {
+    /** Credit this share's server-normalized work once after successful full verification. */
+    addWalletTrust?(): void;
     blockTemplate: PoolBlockTemplate;
     coinFuncs: PoolSpecialCoinRuntime;
     getBlockSubmitTestResultBuffer?(): Buffer | null;

@@ -1,5 +1,7 @@
 "use strict";
 const test = require("node:test");
+const pearl = require("../../../lib/coins/core/pearl.js");
+const pearlProfile = require("../../../lib/coins/pearl.js");
 
 const {
     assert,
@@ -65,6 +67,143 @@ function selectVerificationThenTrust() {
 }
 
 test.describe("pool runtime: trust", { concurrency: false }, () => {
+test("Pearl full verification credits normalized work once to the canonical payout trust key", async () => {
+    const { runtime } = await startHarness();
+    const originalTrustedMiners = global.config.pool.trustedMiners;
+    const originalGetJobProfile = global.coinFuncs.getJobProfile;
+    const socket = {};
+    let verificationCalls = 0;
+    let retainedContext;
+    const target = pearl.targetForDifficulty(1);
+    const networkTarget = pearl.targetForDifficulty(2);
+    const header = Buffer.alloc(pearl.PEARL_HEADER_BYTES);
+    header.writeUInt32LE(pearl.targetToCompact(networkTarget.target), 72);
+    const config = {
+        m: 1, n: 1, k: 128, rank: 128, experts: 0, top_k: 0,
+        expert_index: 0, t_rows: 1, t_cols: 1, adjustment_factor: 1, moe: false
+    };
+    const solutionId = "56".repeat(32);
+    function verifyPearl(ctx, valid) {
+        retainedContext = ctx;
+        return pearlProfile.pool.verifySpecialShare({
+            ...ctx,
+            blockTemplate: { ...ctx.blockTemplate, header: header.toString("base64"), target: networkTarget.targetDecimal },
+            job: { ...ctx.job, incomplete_header_bytes: header.toString("base64"), targetHex: target.targetHex },
+            params: { plain_proof: Buffer.from(ctx.params.nonce, "hex") },
+            coinFuncs: {
+                ...ctx.coinFuncs,
+                pearlSolutionId() { return { valid: true, solution_id: solutionId, config }; },
+                pearlSolutionIdFromData() { return solutionId; },
+                verifyPearlAsync(_header, _proof, _target, _miner, callback) {
+                    verificationCalls += 1;
+                    const result = valid ? {
+                        valid: true, full: true, candidate: true, solution_data: `01${solutionId}`,
+                        jackpot: target.targetHex, config
+                    } : { valid: false };
+                    callback(result);
+                    callback(result);
+                }
+            }
+        });
+    }
+    try {
+        global.config.pool.trustedMiners = true;
+        const loginReply = invokePoolMethod({
+            socket, id: 1900, method: "login",
+            params: { login: `${MAIN_WALLET}%25%${ALT_WALLET}`, pass: "special-trust" }
+        });
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find(entry => entry.id === jobId);
+        job.hashesPerDifficulty = 1_000_000;
+        job.coinHashFactor = 0.00025;
+        const normalizedWork = job.difficulty * job.hashesPerDifficulty * job.coinHashFactor;
+        assert.notEqual(normalizedWork, job.difficulty);
+        assert.notEqual(miner.trust_key, MAIN_WALLET);
+        state.walletTrust[MAIN_WALLET] = 100;
+        state.walletTrust[ALT_WALLET] = 200;
+        global.coinFuncs.getJobProfile = function specialProfile(shareJob) {
+            const profile = originalGetJobProfile.call(this, shareJob);
+            return { ...profile, pool: { ...profile.pool, verifySpecialShare(ctx) {
+                return verifyPearl(ctx, true);
+            } } };
+        };
+        const accepted = submitShare(socket, 1901, jobId, "00000090");
+        await flushTimers();
+        assert.deepEqual(accepted.replies, OK_REPLY);
+        assert.equal(state.walletTrust[miner.trust_key], normalizedWork);
+        assert.equal(state.walletTrust[MAIN_WALLET], 100);
+        assert.equal(state.walletTrust[ALT_WALLET], 200);
+        retainedContext.addWalletTrust();
+        const duplicate = submitShare(socket, 1902, jobId, "00000090");
+        assert.deepEqual(duplicate.replies, [{ error: "Duplicate share", result: undefined }]);
+        assert.equal(verificationCalls, 1);
+        assert.equal(state.walletTrust[miner.trust_key], normalizedWork);
+        assert.equal(runtime.getState().shareStats.normalShares, 1);
+
+        global.coinFuncs.getJobProfile = function invalidSpecialProfile(shareJob) {
+            const profile = originalGetJobProfile.call(this, shareJob);
+            return { ...profile, pool: { ...profile.pool, verifySpecialShare(ctx) {
+                return verifyPearl(ctx, false);
+            } } };
+        };
+        const invalid = submitShare(socket, 1903, jobId, "00000091");
+        await flushTimers();
+        assert.deepEqual(invalid.replies, [{ error: "Low difficulty share", result: undefined }]);
+        assert.equal(state.walletTrust[miner.trust_key], 0);
+        assert.equal(state.walletTrust[MAIN_WALLET], 100);
+        assert.equal(state.walletTrust[ALT_WALLET], 200);
+    } finally {
+        global.config.pool.trustedMiners = originalTrustedMiners;
+        global.coinFuncs.getJobProfile = originalGetJobProfile;
+        await runtime.stop();
+    }
+});
+
+test("special wallet credit refuses invalid normalized work, poisoned totals and unverified or completed shares", async () => {
+    const { runtime } = await startHarness();
+    const originalGetJobProfile = global.coinFuncs.getJobProfile;
+    const socket = {};
+    try {
+        const loginReply = invokePoolMethod({
+            socket, id: 1910, method: "login", params: { login: MAIN_WALLET, pass: "special-credit-boundary" }
+        });
+        const state = runtime.getState();
+        const miner = state.activeMiners.get(socket.miner_id);
+        const jobId = loginReply.replies[0].result.job.job_id;
+        const job = miner.validJobs.toarray().find(entry => entry.id === jobId);
+        const cases = [
+            { work: NaN, prior: 10 }, { work: Infinity, prior: 10 }, { work: 0, prior: 10 },
+            { work: -1, prior: 10 }, { work: Number.MAX_VALUE, prior: Number.MAX_VALUE },
+            { work: 1, prior: Infinity }, { work: 1, prior: NaN }, { work: 1, prior: -1 },
+            { work: 1, prior: 10, skipVerification: true }
+        ];
+        for (const [index, { work, prior, skipVerification }] of cases.entries()) {
+            state.walletTrust[miner.trust_key] = prior;
+            job.hashesPerDifficulty = 1;
+            job.coinHashFactor = work / job.difficulty;
+            global.coinFuncs.getJobProfile = function specialProfile(shareJob) {
+                const profile = originalGetJobProfile.call(this, shareJob);
+                return { ...profile, pool: { ...profile.pool, verifySpecialShare(ctx) {
+                    ctx.addWalletTrust();
+                    if (!skipVerification) ctx.startAsyncVerification();
+                    ctx.addWalletTrust();
+                    ctx.processShareCB(true);
+                    ctx.addWalletTrust();
+                    return true;
+                } } };
+            };
+            const reply = submitShare(socket, 1920 + index, jobId, (100 + index).toString(16).padStart(8, "0"));
+            assert.deepEqual(reply.replies, OK_REPLY);
+            assert.equal(state.walletTrust[miner.trust_key], prior);
+        }
+    } finally {
+        global.coinFuncs.getJobProfile = originalGetJobProfile;
+        await runtime.stop();
+    }
+});
+
 test("trusted miners can take the trusted-share fast path", async () => {
     const validVector = RX0_MAIN_SHARE_VECTORS[0];
     const { runtime } = await startHarness();
