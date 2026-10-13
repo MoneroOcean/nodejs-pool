@@ -223,13 +223,47 @@ test("removed miner-facing getWork methods are rejected while the session is una
     const { runtime } = await startHarness();
 
     try {
-        for (const method of ["eth_submitLogin", "eth_getWork", "eth_submitWork", "eth_submitHashrate", "eth_mining"]) {
+        for (const method of ["eth_submitLogin", "eth_getWork", "eth_submitWork", "eth_mining"]) {
             const reply = invokePoolMethod({
                 method,
                 params: []
             });
             assert.deepEqual(reply.finals, [{ error: "Unknown RPC method", timeout: undefined }], method);
             assert.equal(reply.replies.length, 0, method);
+        }
+    } finally {
+        await runtime.stop();
+    }
+});
+
+test("repeated eth_submitHashrate reports are acknowledged without affecting the session or share accounting", async () => {
+    const { runtime } = await startHarness();
+    const socket = { protocolErrorCount: 1 };
+
+    try {
+        const loginReply = invokePoolMethod({
+            socket,
+            method: "login",
+            params: { login: MAIN_WALLET, pass: "worker-hashrate" }
+        });
+        assertLoginAccepted(loginReply);
+        const miner = runtime.getState().activeMiners.get(socket.miner_id);
+
+        for (const hasSubmittedValidShare of [false, true]) {
+            miner.hasSubmittedValidShare = hasSubmittedValidShare;
+            for (let index = 0; index < 8; ++index) {
+                const reply = invokePoolMethod({
+                    socket,
+                    method: "eth_submitHashrate",
+                    params: ["0xffffffffffffffff", "0xworker"]
+                });
+                assert.deepEqual(reply.replies, [{ error: null, result: true }]);
+                assert.equal(reply.finals.length, 0);
+            }
+            assert.equal(socket.protocolErrorCount, 1);
+            assert.equal(runtime.getState().activeMiners.get(socket.miner_id), miner);
+            assert.equal(miner.hashes, 0);
+            assert.equal(miner.validShares, 0);
         }
     } finally {
         await runtime.stop();
