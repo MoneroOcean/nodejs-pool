@@ -40,6 +40,14 @@ class SpacedSpecReporter extends Transform {
     }
 
     _transform(event, encoding, callback) {
+        if (process.env.GITHUB_ACTIONS === "true" && event.type === "test:fail" &&
+            event.data.details?.error?.failureType !== "subtestsFailed") {
+            const error = event.data.details?.error;
+            const detail = error?.cause?.stack || error?.stack || String(error);
+            const message = `${event.data.name}\n${detail}`
+                .replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+            this.push(`::error title=Node.js test failure::${message}\n`);
+        }
         if (this.reporter.write(event, encoding)) return callback();
         this.reporter.once("drain", callback);
     }
