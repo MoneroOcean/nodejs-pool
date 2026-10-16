@@ -7,7 +7,12 @@ const {
     MAIN_PORT,
     ETH_PORT,
     MAIN_WALLET,
+    ALT_WALLET,
     VALID_RESULT,
+    openRawSocket,
+    waitForSocketClose,
+    requestRawJson,
+    createFrozenTime,
     startHarness,
     invokePoolMethod,
     createBaseTemplate,
@@ -86,6 +91,53 @@ function submitMainShare(socket, id, jobId, nonce, ip) {
 }
 
 test.describe("pool runtime: bans and updates", { concurrency: false }, () => {
+test("periodic wallet bans close an existing connection without closing another wallet on the same IP", async () => {
+    const { runtime } = await startHarness();
+    const bannedSocket = await openRawSocket(MAIN_PORT);
+    const healthySocket = await openRawSocket(MAIN_PORT);
+    const clock = createFrozenTime(Date.now());
+
+    try {
+        const bannedLogin = await requestRawJson(bannedSocket, {
+            id: 1821, method: "login", params: {login: MAIN_WALLET, pass: "existing-banned-wallet"}
+        });
+        const healthyLogin = await requestRawJson(healthySocket, {
+            id: 1822, method: "login", params: {login: ALT_WALLET, pass: "existing-healthy-wallet"}
+        });
+        assert.equal(bannedLogin.error, null);
+        assert.equal(healthyLogin.error, null);
+        const state = runtime.getState();
+        const bannedId = bannedLogin.result.id;
+        const healthyId = healthyLogin.result.id;
+        for (const miner of state.activeMiners.values()) miner.hasSubmittedValidShare = true;
+
+        // Establish the audit deadline before a cached ban arrives.
+        poolModule.checkAliveMiners();
+        await new Promise(resolve => setImmediate(resolve));
+        state.bannedAddresses[MAIN_WALLET] = "manual blocklist";
+        poolModule.checkAliveMiners();
+        assert.equal(state.activeMiners.has(bannedId), true);
+
+        clock.advance(6 * 60 * 60 * 1000);
+        for (const miner of state.activeMiners.values()) {
+            miner.lastProtocolActivity = Date.now();
+            miner.lastValidShareTimeMs = Date.now();
+            miner.lastContact = Date.now();
+        }
+        poolModule.checkAliveMiners();
+        await waitForSocketClose(bannedSocket, 1000);
+
+        assert.equal(state.activeMiners.has(bannedId), false);
+        assert.equal(state.activeMiners.has(healthyId), true);
+        assert.equal(healthySocket.destroyed, false);
+    } finally {
+        clock.restore();
+        bannedSocket.destroy();
+        healthySocket.destroy();
+        await runtime.stop();
+    }
+});
+
 test("ban threshold removes miners that cross the invalid share percentage", async () => {
     const { runtime } = await startHarness();
     const cluster = require("cluster");
