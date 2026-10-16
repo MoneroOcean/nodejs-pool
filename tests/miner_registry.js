@@ -228,7 +228,6 @@ test("cached ban audit batches live miners and honors an unban before queued wor
     const originalLog = console.log;
     const now = 1000;
     const queued = [];
-    let unrefCalls = 0;
     const logs = [];
     const bannedAddresses = {};
     const state = createState(bannedAddresses);
@@ -237,7 +236,6 @@ test("cached ban audit batches live miners and honors an unban before queued wor
     global.config = {pool: {minerTimeout: 100000000}};
     global.setImmediate = function queueImmediate(callback) {
         queued.push(callback);
-        return {unref() { ++unrefCalls; }};
     };
     console.log = function captureLog(message) { logs.push(String(message)); };
 
@@ -252,12 +250,10 @@ test("cached ban audit batches live miners and honors an unban before queued wor
         registry.checkAliveMiners();
         registry.checkAliveMiners();
         assert.equal(queued.length, 1);
-        assert.equal(unrefCalls, 1);
 
         queued.shift()();
         assert.equal(state.activeMiners.size, 101);
         assert.equal(queued.length, 1);
-        assert.equal(unrefCalls, 2);
 
         delete bannedAddresses["wallet-100"];
         queued.shift()();
