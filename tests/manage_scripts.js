@@ -820,6 +820,110 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         }, /confirm-reviewed-credit/);
     });
 
+    test("bridge-credit recovery restores only the verified fill amount with a reviewed baseline", function testMissingBridgeExpectation() {
+        for (const expectedIncreases of [{}, { USDT: 0 }]) {
+            const original = {
+                blockId: 12,
+                stage: "Exchange USDT trade",
+                baselineBalances: { USDT: 1.5 },
+                expectedIncreases,
+                recovered: true,
+                recoverySource: "legacy_cache"
+            };
+            const plan = fixHighBridgeCredit.buildTradeContextFix(original, 10.75, {
+                activeOrders: false,
+                reviewedCredit: true,
+                expectedIncrease: "7.25",
+                baselineBalance: "3.5"
+            });
+            assert.equal(plan.nextValue.expectedIncreases.USDT, 7.25);
+            assert.equal(plan.nextValue.baselineBalances.USDT, 3.5);
+            assert.equal(plan.nextValue.recoverySource, "reviewed_fill_records");
+            assert.equal(plan.nextValue.blockId, 12);
+            assert.equal(original.baselineBalances.USDT, 1.5);
+            assert.deepEqual(original.expectedIncreases, expectedIncreases);
+        }
+    });
+
+    test("bridge-credit recovery refuses unsupported or unverified missing expectations", function testMissingBridgeExpectationGuards() {
+        const context = {
+            stage: "Exchange USDT trade",
+            baselineBalances: { USDT: 1.5 },
+            expectedIncreases: { USDT: 0 },
+            recovered: true,
+            recoverySource: "legacy_cache"
+        };
+        const reviewed = { activeOrders: false, reviewedCredit: true, expectedIncrease: 7.25 };
+        const cases = [
+            [context, { ...reviewed, expectedIncrease: undefined }, /--expected-increase/],
+            [context, { ...reviewed, expectedIncrease: 0 }, /must be positive/],
+            [context, { ...reviewed, expectedIncrease: -1 }, /must be positive/],
+            [context, { ...reviewed, expectedIncrease: "invalid" }, /Invalid --expected-increase/],
+            [context, { ...reviewed, activeOrders: true }, /active exchange orders/],
+            [context, { ...reviewed, activeOrders: undefined }, /active exchange orders/],
+            [context, { ...reviewed, activeOrders: null }, /active exchange orders/],
+            [context, { ...reviewed, reviewedCredit: false }, /confirm-reviewed-credit/],
+            [{ ...context, submitPending: { pair: "ALT/USDT" } }, reviewed, /pending submit/],
+            [{ ...context, recoverySource: "balance_snapshot" }, reviewed, /--baseline-balance/],
+            [{ ...context, expectedIncreases: { USDT: -1 } }, reviewed, /invalid expected USDT/],
+            [context, { ...reviewed, baselineBalance: -1 }, /nonnegative/],
+            [context, { ...reviewed, baselineBalance: "invalid" }, /baseline/]
+        ];
+        for (const [trade, options, error] of cases) {
+            assert.throws(() => fixHighBridgeCredit.buildTradeContextFix(trade, 8.75, options), error);
+        }
+    });
+
+    test("bridge-credit recovery rejects unrelated balance increases and accepts rounding only", function testVerifiedBridgeCreditMatch() {
+        const context = {
+            stage: "Exchange USDT trade",
+            baselineBalances: { USDT: 1.5 },
+            expectedIncreases: { USDT: 0 },
+            recovered: true,
+            recoverySource: "legacy_cache"
+        };
+        const options = { activeOrders: false, reviewedCredit: true, expectedIncrease: 7.25 };
+        for (const balance of [8.74, 8.76, 10.75]) {
+            assert.throws(() => fixHighBridgeCredit.buildTradeContextFix(context, balance, options), /does not match verified fill credit/);
+        }
+        const plan = fixHighBridgeCredit.buildTradeContextFix(context, 8.750000001, options);
+        assert.equal(plan.nextValue.expectedIncreases.USDT, 7.25);
+        assert.equal(plan.nextValue.baselineBalances.USDT, 1.5);
+    });
+
+    test("bridge-credit snapshot recovery requires the explicit verified pre-fill baseline", function testBridgeSnapshotBaseline() {
+        const plan = fixHighBridgeCredit.buildTradeContextFix({
+            stage: "Exchange USDT trade",
+            baselineBalances: { USDT: 10.75 },
+            expectedIncreases: { USDT: 0 },
+            recovered: true,
+            recoverySource: "balance_snapshot"
+        }, 10.75, {
+            activeOrders: false,
+            reviewedCredit: true,
+            expectedIncrease: 7.25,
+            baselineBalance: 3.5
+        });
+        assert.equal(plan.nextValue.baselineBalances.USDT, 3.5);
+        assert.equal(plan.nextValue.expectedIncreases.USDT, 7.25);
+        assert.equal(plan.nextValue.recoverySource, "reviewed_fill_records");
+    });
+
+    test("bridge-credit overrides do not replace an existing positive expectation", function testBridgePositiveExpectationOverride() {
+        const context = {
+            stage: "Exchange USDT trade",
+            baselineBalances: { USDT: 1.5 },
+            expectedIncreases: { USDT: 7.25 }
+        };
+        for (const overrides of [{ expectedIncrease: 7.25 }, { baselineBalance: 1.5 }]) {
+            assert.throws(() => fixHighBridgeCredit.buildTradeContextFix(context, 8.75, {
+                activeOrders: false,
+                reviewedCredit: true,
+                ...overrides
+            }), /only support a missing or zero bridge expectation/);
+        }
+    });
+
     test("low XMR credit fix aligns expected XMR increase to the observed credited balance", function testLowXmrCreditFix() {
         const plan = fixLowXmrCredit.buildTradeContextFix({
             blockId: 12,

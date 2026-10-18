@@ -4,6 +4,9 @@
 // (BASE/BTC/USDT) credited differently than the persisted expectation.
 // Use only after confirming no active exchange orders and verifying the current
 // bridge balance belongs to the stuck trade.
+// A missing legacy expectation additionally requires the net bridge credit from
+// reviewed exchange fill records. A stale or snapshot baseline must be supplied
+// explicitly from those records as well.
 
 const {
     asFiniteNumber,
@@ -34,22 +37,45 @@ function getBridgeSymbol(input) {
     throw new Error(`altblock_exchange_trade is not at an intermediate bridge-credit stage: ${  formatJson(tradeContext)}`);
 }
 
-/** @param {unknown} input @param {unknown} currentBridgeBalance @param {{activeOrders?: boolean | null, reviewedCredit?: boolean, manualWithdrawalConfirmed?: boolean}} [options] @returns {import("./exchange_recovery_preview_common.js").FixPlan} */
+/** @param {unknown} input @param {unknown} currentBridgeBalance @param {{activeOrders?: boolean | null, reviewedCredit?: boolean, expectedIncrease?: unknown, baselineBalance?: unknown}} [options] @returns {import("./exchange_recovery_preview_common.js").FixPlan} */
 function buildTradeContextFix(input, currentBridgeBalance, options) {
     const tradeContext = requireTradeContext(input);
     const currentOptions = options || {};
     const bridgeSymbol = getBridgeSymbol(tradeContext);
-    const expectedIncrease = asFiniteNumber(
-        tradeContext.expectedIncreases[bridgeSymbol],
-        `altblock_exchange_trade is missing expected ${  bridgeSymbol  } increase`
+    const storedIncrease = tradeContext.expectedIncreases[bridgeSymbol];
+    const expectedIncrease = typeof storedIncrease === "undefined" ? 0 : asFiniteNumber(
+        storedIncrease,
+        `altblock_exchange_trade has invalid expected ${  bridgeSymbol  } increase`
     );
-    if (expectedIncrease <= 0) {
+    if (expectedIncrease < 0) {
         throw new Error(`altblock_exchange_trade has invalid expected ${  bridgeSymbol  } increase: ${  formatJson(tradeContext)}`);
     }
+    const restoringExpectation = expectedIncrease === 0;
+    const suppliedIncrease = currentOptions.expectedIncrease;
+    const hasSuppliedIncrease = suppliedIncrease !== null && typeof suppliedIncrease !== "undefined";
+    const suppliedBaseline = currentOptions.baselineBalance;
+    const hasSuppliedBaseline = suppliedBaseline !== null && typeof suppliedBaseline !== "undefined";
+    if (restoringExpectation && !hasSuppliedIncrease) {
+        throw new Error(`Missing expected ${bridgeSymbol} increase; supply --expected-increase=<net credit> only after verifying exchange fill records`);
+    }
+    if (!restoringExpectation && (hasSuppliedIncrease || hasSuppliedBaseline)) {
+        throw new Error("--expected-increase and --baseline-balance only support a missing or zero bridge expectation");
+    }
+    const verifiedIncrease = restoringExpectation
+        ? asFiniteNumber(suppliedIncrease, "Invalid --expected-increase value")
+        : expectedIncrease;
+    if (verifiedIncrease <= 0) throw new Error("--expected-increase must be positive");
+    if (tradeContext["recoverySource"] === "balance_snapshot" && !hasSuppliedBaseline) {
+        throw new Error("Balance snapshot recovery requires --baseline-balance=<verified pre-fill balance>");
+    }
+    if (tradeContext["submitPending"]) {
+        throw new Error("altblock_exchange_trade has an unresolved pending submit; refusing to rewrite bridge credit");
+    }
     const baseline = asFiniteNumber(
-        tradeContext.baselineBalances[bridgeSymbol],
+        hasSuppliedBaseline ? suppliedBaseline : tradeContext.baselineBalances[bridgeSymbol],
         `altblock_exchange_trade is missing ${  bridgeSymbol  } baseline`
     );
+    if (baseline < 0) throw new Error("Bridge baseline must be nonnegative");
     const currentBalance = asFiniteNumber(currentBridgeBalance, `Current exchange ${  bridgeSymbol  } balance is invalid`);
     if (currentBalance < baseline) {
         throw new Error(
@@ -58,8 +84,8 @@ function buildTradeContextFix(input, currentBridgeBalance, options) {
             }; this script only supports credited-balance recovery`
         );
     }
-    if (currentOptions.activeOrders === true) {
-        throw new Error("altblock_exchange_trade still has active exchange orders; refusing to rewrite bridge credit");
+    if (currentOptions.activeOrders !== false) {
+        throw new Error("Confirm no active exchange orders before rewriting bridge credit");
     }
     if (currentOptions.reviewedCredit !== true) {
         throw new Error("Rerun with --confirm-reviewed-credit=true after verifying the current bridge balance belongs to this trade");
@@ -71,15 +97,26 @@ function buildTradeContextFix(input, currentBridgeBalance, options) {
             } does not show credited balance above the stored baseline ${  baseline.toFixed(8)}`
         );
     }
+    if (restoringExpectation) {
+        // Permit floating-point cancellation, not an unexplained account credit.
+        const tolerance = Math.max(1e-8,
+            Number.EPSILON * Math.max(Math.abs(currentBalance), Math.abs(baseline)) * 8);
+        if (Math.abs(observedIncrease - verifiedIncrease) > tolerance) {
+            throw new Error(`Observed ${bridgeSymbol} increase ${observedIncrease} does not match verified fill credit ${verifiedIncrease}`);
+        }
+    }
 
     const nextTradeContext = clone(tradeContext);
-    nextTradeContext.expectedIncreases[bridgeSymbol] = observedIncrease;
+    const repairedIncrease = restoringExpectation ? verifiedIncrease : observedIncrease;
+    nextTradeContext.expectedIncreases[bridgeSymbol] = repairedIncrease;
+    if (hasSuppliedBaseline) nextTradeContext.baselineBalances[bridgeSymbol] = baseline;
+    if (restoringExpectation) nextTradeContext["recoverySource"] = "reviewed_fill_records";
 
     return {
         cacheKey: "altblock_exchange_trade",
         currentValue: clone(input),
         nextValue: nextTradeContext,
-        summary: `updated expected ${  bridgeSymbol  } bridge credit to ${  observedIncrease.toFixed(8)}`
+        summary: `updated expected ${  bridgeSymbol  } bridge credit to ${  repairedIncrease.toFixed(8)}`
     };
 }
 
@@ -107,7 +144,9 @@ async function buildFixPlan(cli, database) {
     ) === true;
     return buildTradeContextFix(tradeContext, currentBalance, {
         activeOrders,
-        reviewedCredit
+        reviewedCredit,
+        expectedIncrease: cli.get("expected-increase"),
+        baselineBalance: cli.get("baseline-balance")
     });
 }
 
