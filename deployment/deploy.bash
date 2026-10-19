@@ -45,7 +45,7 @@ WWW_DNS="${WWW_DNS:-moneroocean.stream}"
 API_DNS="${API_DNS:-api.moneroocean.stream}"
 CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN:-n/a}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-support@moneroocean.stream}"
-TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v6.0.0}"
+TARI_RELEASE_TAG="${TARI_RELEASE_TAG:-v6.2.0}"
 TARI_REPO_URL="${TARI_REPO_URL:-https://github.com/tari-project/tari.git}"
 TARI_NETWORK="${TARI_NETWORK:-mainnet}"
 TARI_INSTALL_DIR="${TARI_INSTALL_DIR:-/usr/local/src/tari}"
@@ -173,7 +173,7 @@ install_tari_suite() {
   if [ ! -x "$TARI_INSTALL_DIR/target/release/minotari_node" ] || [ ! -x "$TARI_INSTALL_DIR/target/release/minotari_merge_mining_proxy" ]; then
     rm -rf "$TARI_INSTALL_DIR/target"
   fi
-  TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy
+  TARI_TARGET_NETWORK="$TARI_NETWORK" cargo build --release --locked -p minotari_node -p minotari_merge_mining_proxy -p minotari_console_wallet
   if [ ! -f "$TARI_HOME/.tari/$TARI_NETWORK/config/config.toml" ]; then
     sudo -u "$TARI_USER" env HOME="$TARI_HOME" "$TARI_INSTALL_DIR/target/release/minotari_node" --init --network "$TARI_NETWORK" --non-interactive-mode --disable-splash-screen
   fi
