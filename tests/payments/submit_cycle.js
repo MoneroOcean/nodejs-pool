@@ -104,7 +104,7 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
         assert.match(output.log.join("\n"), /wallet_balance=10 XMR wallet_unlocked=10 XMR required_net=/);
         assert.match(output.log.join("\n"), /tx_hash=/);
         assert.match(output.log.join("\n"), /tx_key=/);
-        assert.match(output.log.join("\n"), /https:\/\/xmrchain\.net\/prove\//);
+        assert.match(output.log.join("\n"), /https:\/\/monero\.com\/payment\//);
         assert.ok(paymentEmail);
         assert.equal(paymentEmail.subject, `Payment sent: ${  harness.mysql.state.store.payments[0].amount / COIN  } XMR`);
         assert.match(paymentEmail.body, /Payment sent\n\nPool: MoneroOcean\nStatus: confirmed\nCoin: XMR/);
@@ -114,7 +114,7 @@ test.describe("submit cycle", { concurrency: false }, function submitCycleSuite(
         assert.match(paymentEmail.body, new RegExp(`Destination: ${  INTEGRATED}`));
         assert.match(paymentEmail.body, new RegExp(`Transaction hash: ${  "a".repeat(64)}`));
         assert.match(paymentEmail.body, new RegExp(`Transaction key: ${  longTxKey}`));
-        assert.match(paymentEmail.body, new RegExp(`Proof URL: https://xmrchain\\.net/prove/${  "a".repeat(64)  }/${  INTEGRATED  }/${  longTxKey}`));
+        assert.match(paymentEmail.body, new RegExp(`Proof URL: https://monero\\.com/payment/${  "a".repeat(64)  }/${  INTEGRATED  }/${  longTxKey}/`));
         assert.match(paymentEmail.body, /Unsubscribe: https:\/\/api\.moneroocean\.stream\/user\/unsubscribeEmail\/test-token/);
     });
 
