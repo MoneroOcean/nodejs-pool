@@ -99,6 +99,7 @@ export interface PoolMinerView {
     protocol: string;
     proxy: boolean;
     mo_native?: boolean;
+    pearlProofGzip?: boolean;
     nativeJobAlgo?: string;
     agent?: string;
     eth_extranonce?: string;
@@ -310,7 +311,7 @@ export interface PoolLoginContext {
     jobParams: PoolJobParams;
     miner: PoolMinerView;
     minerId: string;
-    sendReply(error: unknown, result?: unknown): void;
+    sendReply(error: unknown, result?: unknown, metadata?: {type?: string}): void;
     sendReplyFinal(error: unknown, delayReply?: number): void;
 }
 
@@ -484,7 +485,7 @@ export interface PoolProfileSettings {
     parseMiningSubmitParams?(context: {params: PoolSubmitParams}): boolean;
     normalizeNamedAuthorizeParams?(context: {params: PoolSubmitParams, port: number, profile: CoinProfile}): boolean;
     sendNamedLoginResult?(context: PoolLoginContext): void;
-    normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, coinFuncs?: CoinRuntime, job?: PoolJob, request?: ProtoMessage}): boolean;
+    normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, miner?: PoolMinerView, coinFuncs?: CoinRuntime, job?: PoolJob, request?: ProtoMessage}): boolean;
     sanitizeSubmitParams?(context: {params: PoolSubmitParams}): Record<string, unknown>;
     sensitiveSubmitData?: boolean;
     getTrustedQueueRetainedBytes?: (params: PoolSubmitParams) => number;

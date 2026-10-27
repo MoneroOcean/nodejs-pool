@@ -299,6 +299,46 @@ test("disabled miner debug skips formatting RPC bodies", () => {
     }
 });
 
+test("reply serialization keeps v2 metadata outside the boolean authorization result", () => {
+    const originalConfig = global.config;
+    const debug = function noopDebug() {};
+    debug.enabled = false;
+    let socket;
+
+    try {
+        global.config = { pool: {} };
+        const state = {
+            threadName: "(Test) ", activeConnectionsByIP: {}, activeConnectionsBySubnet: {},
+            activeMiners: new Map(), activeMinerSockets: new Map(), freeEthExtranonces: []
+        };
+        const serverFactory = createServerFactory({
+            debug, fs: require("node:fs"), net: require("node:net"), tls: require("node:tls"), state,
+            handleMinerData(_socket, _id, method, _params, _ip, _port, sendReply) {
+                if (method === "mining.authorize") sendReply(null, true, { type: "v2" });
+                else sendReply(null, true);
+            },
+            removeMiner() {}
+        });
+        const writes = [];
+        socket = new EventEmitter();
+        Object.assign(socket, {
+            remoteAddress: "127.0.0.2", writable: true, destroyed: false,
+            setKeepAlive() {}, setEncoding() {},
+            write(payload) { writes.push(JSON.parse(payload)); },
+            destroy() { socket.destroyed = true; socket.writable = false; }
+        });
+        serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" })(socket);
+        socket.emit("data", `${JSON.stringify({ id: 2, method: "mining.authorize", params: {} })}\n`);
+        socket.emit("data", `${JSON.stringify({ id: 3, method: "keepalive", params: {} })}\n`);
+
+        assert.deepEqual(writes[0], { jsonrpc: "2.0", id: 2, error: null, result: true, type: "v2" });
+        assert.deepEqual(writes[1], { jsonrpc: "2.0", id: 3, error: null, result: true });
+    } finally {
+        if (socket) socket.emit("close");
+        global.config = originalConfig;
+    }
+});
+
 test("reply serialization failures stay socket-local for asynchronous and delayed replies", async () => {
     const originalConfig = global.config;
     const circular = {};

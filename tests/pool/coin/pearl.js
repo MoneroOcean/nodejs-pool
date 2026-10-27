@@ -144,6 +144,56 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(pearl.decodePearlProof(zlib.gzipSync(Buffer.from("proof")).toString("base64"), "gzip")?.toString(), "proof");
     });
 
+    test("v2 sessions accept implicit gzip while keeping raw and explicit encodings compatible", () => {
+        const rawProof = Buffer.from("pearl-proof");
+        const compressedProof = zlib.gzipSync(rawProof);
+        const miner = { pearlProofGzip: true };
+        const implicit = { job_id: "7", plain_proof: compressedProof.toString("base64") };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params: implicit, wireParams: {}, miner }), true);
+        assert.deepEqual(implicit.plain_proof, rawProof);
+
+        for (const proof_encoding of [undefined, "none"]) {
+            const raw = { job_id: "7", plain_proof: rawProof.toString("base64"), ...(proof_encoding ? { proof_encoding } : {}) };
+            assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params: raw, wireParams: {}, miner }), true);
+            assert.deepEqual(raw.plain_proof, rawProof);
+        }
+
+        const explicitNone = { job_id: "7", plain_proof: compressedProof.toString("base64"), proof_encoding: "none" };
+        assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params: explicitNone, wireParams: {}, miner }), true);
+        assert.deepEqual(explicitNone.plain_proof, compressedProof);
+        assert.deepEqual(pearl.decodePearlProof(compressedProof.toString("base64")), compressedProof);
+    });
+
+    test("v2 implicit gzip rejects malformed streams and oversized expansion", () => {
+        const rawProof = Buffer.from("pearl-proof");
+        const compressedProof = zlib.gzipSync(rawProof);
+        const oversized = zlib.gzipSync(Buffer.alloc(pearl.PEARL_MAX_PROOF_BYTES + 1));
+        for (const proof of [compressedProof.subarray(0, compressedProof.length - 1), oversized]) {
+            const params = { job_id: "7", plain_proof: proof.toString("base64") };
+            assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({
+                params, wireParams: {}, miner: { pearlProofGzip: true }
+            }), false);
+        }
+        const rawWithPartialMagic = Buffer.from([0x1f, 0x8b, 0, 0]);
+        assert.deepEqual(pearl.decodePearlProof(rawWithPartialMagic.toString("base64"), undefined, true), rawWithPartialMagic);
+    });
+
+    test("named Pearl authorization advertises v2 without changing boolean success or legacy login", () => {
+        let jobs = 0;
+        const miner = { sendBestCoinJob() { jobs += 1; } };
+        const replies = [];
+        pearlProfile.pool.sendNamedLoginResult({ miner, sendReply(...args) { replies.push(args); } });
+        assert.deepEqual(replies, [[null, true, { type: "v2" }]]);
+        assert.equal(miner.pearlProofGzip, true);
+        assert.equal(jobs, 1);
+
+        const legacyMiner = { sendBestCoinJob() { jobs += 1; } };
+        pearlProfile.pool.sendLoginResult({ miner: legacyMiner, sendReply(...args) { replies.push(args); } });
+        assert.deepEqual(replies[1], [null, true]);
+        assert.equal(legacyMiner.pearlProofGzip, undefined);
+        assert.equal(jobs, 2);
+    });
+
     test("accepts and strips only the current submit certificate version", () => {
         const proof = Buffer.from("pearl-proof").toString("base64");
         const params = {
