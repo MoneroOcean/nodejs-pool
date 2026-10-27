@@ -484,7 +484,7 @@ export interface PoolProfileSettings {
     pushJob(this: PoolProfileSettings, context: PushJobContext): void;
     parseMiningSubmitParams?(context: {params: PoolSubmitParams}): boolean;
     normalizeNamedAuthorizeParams?(context: {params: PoolSubmitParams, port: number, profile: CoinProfile}): boolean;
-    sendNamedLoginResult?(context: PoolLoginContext): void;
+    sendNamedLoginResult?(context: Omit<PoolLoginContext, "jobParams">): void;
     normalizeNamedSubmitParams?(context: {params: PoolSubmitParams, wireParams: unknown, miner?: PoolMinerView, coinFuncs?: CoinRuntime, job?: PoolJob, request?: ProtoMessage}): boolean;
     sanitizeSubmitParams?(context: {params: PoolSubmitParams}): Record<string, unknown>;
     sensitiveSubmitData?: boolean;

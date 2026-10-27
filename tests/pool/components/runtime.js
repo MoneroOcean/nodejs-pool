@@ -7,6 +7,7 @@ const createPoolState = require("../../../lib/pool/state.js");
 const createProtocolHandler = require("../../../lib/pool/protocol.js");
 const createServerFactory = require("../../../lib/pool/servers.js");
 const createShareProcessor = require("../../../lib/pool/shares.js");
+const pearlProfile = require("../../../lib/coins/pearl.js");
 const { pool } = require("../../../lib/coins/core/factories.js");
 
 function clearObject(target) {
@@ -14,6 +15,106 @@ function clearObject(target) {
 }
 
 test.describe("pool components: runtime", { concurrency: false }, () => {
+test("Pearl authorization negotiates v2 before a template exists without changing other login dialects", () => {
+    function authorize(initialCoin, method, params) {
+        const originals = { config: global.config, coinFuncs: global.coinFuncs };
+        const { state, retention, touchTimedEntry } = createPoolState();
+        const socket = {};
+        const replies = [];
+        const finals = [];
+        const pushes = [];
+        let selectedCoin = initialCoin;
+        let miner;
+        global.config = { pool: { workerMax: 20, minerFirstShareTimeout: 0 } };
+        global.coinFuncs = {
+            getPoolProfile(key) {
+                return key === "PRL" ? pearlProfile : { pool: { sendLoginResult() {} } };
+            },
+            algoMainCheck() { return true; }
+        };
+        const handler = createProtocolHandler({
+            debug() {}, state, retention, touchTimedEntry,
+            utils: {
+                getNewId() { return "miner-1"; },
+                getNewEthExtranonceId() { return 1; },
+                ethExtranonce() { return "0001"; }
+            },
+            createMiner(id, login, _pass, worker, _ip, _diff, pushMessage) {
+                miner = {
+                    id, payout: login, identifier: worker, valid_miner: true,
+                    algos: { pearlhash: 1 }, connectTime: Date.now(),
+                    selectBestCoin() { return selectedCoin; },
+                    sendBestCoinJob() {
+                        if (selectedCoin !== false) pushMessage({ method: "mining.notify", params: {
+                            job_id: "pearl-job", cert_version: 3, proof_encodings: ["none", "gzip"]
+                        } });
+                    }
+                };
+                return miner;
+            },
+            addActiveMiner(value) { state.activeMiners.set(value.id, value); },
+            addProxyMiner() { return true; },
+            adjustMinerDiff() { return false; },
+            shareProcessor: { processShare() { assert.fail("Unexpected share submission"); } },
+            removeMiner(value) { state.activeMiners.delete(value.id); },
+            processSend() { assert.fail("Unexpected ban message"); },
+            getCoinJobParams() {
+                assert.notEqual(selectedCoin, false, "authorization must not read job params before a template exists");
+                return {};
+            }
+        });
+        try {
+            handler(socket, 2, method, params, "127.0.0.2", { port: 39001, difficulty: 1, portType: "pplns" },
+                (error, result, metadata) => replies.push({ error, result, ...metadata }),
+                error => finals.push(error), body => pushes.push(body));
+            const jobsAtLogin = pushes.length;
+            selectedCoin = "PRL";
+            if (miner) miner.sendBestCoinJob();
+            return {
+                replies, finals, jobsAtLogin, pushes, registered: state.activeMiners.size,
+                protocol: miner?.protocol, pearlProofGzip: miner?.pearlProofGzip === true
+            };
+        } finally {
+            if (socket.authTimer) clearTimeout(socket.authTimer);
+            if (socket.firstShareTimer) clearTimeout(socket.firstShareTimer);
+            state.activeMiners.clear();
+            for (const [key, value] of Object.entries(originals)) {
+                if (value === undefined) delete global[key];
+                else global[key] = value;
+            }
+        }
+    }
+
+    const params = { wallet: "example-wallet", worker: "example-worker", pass: "x~pearl" };
+    for (const initialCoin of [false, "PRL"]) {
+        const result = authorize(initialCoin, "mining.authorize", params);
+        assert.deepEqual(result.replies, [{ error: null, result: true, type: "v2" }]);
+        assert.deepEqual(result.finals, []);
+        assert.equal(result.protocol, "default");
+        assert.equal(result.pearlProofGzip, true);
+        assert.equal(result.jobsAtLogin, initialCoin === false ? 0 : 1);
+        assert.equal(result.pushes.at(-1).method, "mining.notify");
+        assert.equal(result.registered, 1);
+    }
+
+    const invalid = authorize(false, "mining.authorize", { ...params, wallet: "" });
+    assert.deepEqual(invalid.replies, []);
+    assert.deepEqual(invalid.finals, ["Invalid authorize params"]);
+    assert.equal(invalid.registered, 0);
+    assert.equal(invalid.pearlProofGzip, false);
+
+    for (const [initialCoin, method, loginParams, protocol] of [
+        [false, "mining.authorize", ["example-wallet", "worker"], "eth"],
+        ["PRL", "login", { login: "example-wallet", pass: "worker" }, "default"]
+    ]) {
+        const result = authorize(initialCoin, method, loginParams);
+        assert.deepEqual(result.replies, [{ error: null, result: true }]);
+        assert.deepEqual(result.finals, []);
+        assert.equal(result.protocol, protocol);
+        assert.equal(result.pearlProofGzip, false);
+    }
+});
+
 test("Pearl large-frame framing admits extension fields and defers their semantics", () => {
     function request(extraRequest = {}, extraParams = {}) {
         return {
