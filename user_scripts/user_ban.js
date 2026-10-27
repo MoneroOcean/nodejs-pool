@@ -2,10 +2,14 @@
 const cli = require("../script_utils.js")();
 const printBans = require("./user_bans_common.js");
 const insertBan = require("./user_ban_common.js");
-const user = cli.arg("user", "Please specify user address to ban");
-const reason = cli.arg("reason", "Please specify reason to ban");
+const user = process.argv.length === 2 ? null : cli.arg("user", "Please specify user address to ban");
+const reason = cli.get("reason") === null ? "Reported as botnet" : cli.arg("reason", "Please specify reason to ban");
 
 cli.init(function() {
+	if (user === null) {
+		printBans(function () { process.exit(0); });
+		return;
+	}
 	insertBan(user, reason).then(function () {
 		printBans(function () {
 			console.log("Done. User was banned.");

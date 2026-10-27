@@ -61,6 +61,34 @@ function withExitTrap(fn) {
     });
 }
 
+function runUserBanForTest(args) {
+    const scriptPath = path.resolve(__dirname, "../user_scripts/user_ban.js");
+    const scriptUtilsPath = path.resolve(__dirname, "../script_utils.js");
+    const source = `
+        const Module = require("node:module");
+        const originalLoad = Module._load;
+        const queries = [];
+        process.argv = [process.execPath, ${JSON.stringify(scriptPath)}, ...${JSON.stringify(args)}];
+        global.mysql = { query(sql, params) {
+            queries.push({ sql, params });
+            return Promise.resolve(sql === "SELECT * FROM bans"
+                ? [{ mining_address: "existing-wallet", reason: "existing reason" }]
+                : { affectedRows: 1 });
+        } };
+        Module._load = function mockLoad(request, parent, isMain) {
+            if (request === "./init_mini.js" && parent.filename === ${JSON.stringify(scriptUtilsPath)}) {
+                return { init(callback) { callback(); } };
+            }
+            return originalLoad(request, parent, isMain);
+        };
+        process.on("exit", () => console.error("TEST_QUERIES:" + JSON.stringify(queries)));
+        require(${JSON.stringify(scriptPath)});
+    `;
+    const result = spawnSync(process.execPath, ["-e", source], { encoding: "utf8" });
+    const queryLine = result.stderr.split("\n").find(line => line.startsWith("TEST_QUERIES:"));
+    return { ...result, queries: queryLine ? JSON.parse(queryLine.slice("TEST_QUERIES:".length)) : [] };
+}
+
 function runFixDaemonForTest(args, response, waitResponse = response) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fix-daemon-test-"));
     const bin = path.join(root, "bin");
@@ -709,6 +737,44 @@ test.describe("manage_scripts", { concurrency: false }, function suite() {
         } finally {
             if (typeof originalMysql === "undefined") delete global.mysql;
             else global.mysql = originalMysql;
+        }
+    });
+
+    test("user ban CLI lists current bans without arguments and never inserts", function testListBansDefault() {
+        const result = runUserBanForTest([]);
+        assert.equal(result.status, 0, result.stderr);
+        assert.deepEqual(result.queries, [{ sql: "SELECT * FROM bans" }]);
+        assert.match(result.stdout, /existing-wallet: existing reason/);
+        assert.doesNotMatch(result.stdout, /User was banned/);
+    });
+
+    test("user ban CLI defaults the reason and preserves custom reasons", function testBanReasons() {
+        for (const [args, reason] of [
+            [["--user", "wallet-address"], "Reported as botnet"],
+            [["--user", "wallet-address", "--reason", "custom reason"], "custom reason"]
+        ]) {
+            const result = runUserBanForTest(args);
+            assert.equal(result.status, 0, result.stderr);
+            assert.deepEqual(result.queries, [
+                {
+                    sql: "INSERT INTO bans (mining_address, reason) VALUES (?, ?) ON DUPLICATE KEY UPDATE id=id",
+                    params: ["wallet-address", reason]
+                },
+                { sql: "SELECT * FROM bans" }
+            ]);
+            assert.match(result.stdout, /Done\. User was banned\./);
+        }
+    });
+
+    test("user ban CLI rejects missing user and malformed option values without SQL", function testBanArgumentValidation() {
+        for (const args of [
+            ["--reason", "custom reason"], ["--user"], ["--user", ""],
+            ["--user", "wallet-address", "--reason"], ["--user", "wallet-address", "--reason="]
+        ]) {
+            const result = runUserBanForTest(args);
+            assert.equal(result.status, 1, result.stderr);
+            assert.deepEqual(result.queries, []);
+            assert.match(result.stderr, /Please specify (user address|reason) to ban/);
         }
     });
 
