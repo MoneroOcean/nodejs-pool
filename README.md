@@ -47,10 +47,9 @@ The backend is typically paired with the static [`mo-pool-ui`](https://github.co
 
 Leaf nodes need far less disk than a full single-node install because they do not need the full main-server footprint.
 
-`verify_shares_gzip_hosts` in `config.json` optionally lists verifier hosts that accept gzip Pearl proofs.
-Entries must exactly match `verify_shares_host`; the default empty list keeps existing raw transport.
-Upgrade each listed verifier before enabling it. The pool forwards validated miner gzip unchanged,
-or compresses raw proofs asynchronously when smaller. Other verifiers and mining protocols keep their existing transport.
+Pearl proof uploads use raw transport for localhost and loopback verifiers, and gzip for remote
+verifiers when smaller. The pool forwards validated miner gzip unchanged, or compresses raw proofs
+asynchronously. Remote verifiers must support gzip proof frames before updating the pool.
 
 > The deploy scripts assume a fresh host. They create a `user` account, install Monero, MySQL, Nginx, Node via NVM, PM2, wallet files, SQL schema, and base pool configuration.
 

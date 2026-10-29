@@ -1421,7 +1421,7 @@ test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
         setTimeout(callback) { timers.add(callback); return callback; },
         clearTimeout(timer) { timers.delete(timer); },
         global: {
-            config: { ...global.config, daemon: { ...global.config.daemon, port: 18081 }, verify_shares_host: ["host-a"] },
+            config: { ...global.config, daemon: { ...global.config.daemon, port: 18081 }, verify_shares_host: ["127.0.0.1"] },
             support: { sendAdminFyi() {} }, database: {}
         }
     };
@@ -1454,7 +1454,7 @@ test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
     assert.equal(timers.size, 0);
 });
 
-test("Pearl verifier compression follows its host allowlist and reuses miner gzip", async () => {
+test("Pearl verifier compression uses remote transport and reuses miner gzip", async () => {
     const vm = require("node:vm");
     const zlib = require("node:zlib");
     const { createRequire } = require("node:module");
@@ -1468,15 +1468,16 @@ test("Pearl verifier compression follows its host allowlist and reuses miner gzi
     originalGzip.writeUInt32LE(123, 4);
 
     for (const scenario of [
-        { host: "verifier.example", enabled: true, compressed: true },
-        { host: "verifier.example", enabled: true, compressed: true, minerGzip: true },
-        { host: "verifier.example", enabled: false, compressed: false },
-        { host: "127.0.0.1", enabled: true, compressed: true },
-        { host: "::1", enabled: false, compressed: false },
-        { host: "verifier.example", allowlist: ["127.0.0.1"], compressed: false },
-        { host: "verifier.example", enabled: true, compressed: false, gzipError: true },
-        { host: "verifier.example", enabled: true, compressed: false, incompressible: true },
-        { host: "verifier.example", enabled: true, cancelCompression: true }
+        { host: "verifier.example", compressed: true },
+        { host: "verifier.example", compressed: true, minerGzip: true },
+        { host: "127.0.0.1", compressed: false },
+        { host: "127.0.0.2", compressed: false },
+        { host: "localhost", compressed: false },
+        { host: "LOCALHOST", compressed: false, minerGzip: true },
+        { host: "::1", compressed: false },
+        { host: "verifier.example", compressed: false, gzipError: true },
+        { host: "verifier.example", compressed: false, incompressible: true },
+        { host: "verifier.example", cancelCompression: true }
     ]) {
         const sockets = [];
         const timers = new Set();
@@ -1504,8 +1505,7 @@ test("Pearl verifier compression follows its host allowlist and reuses miner gzi
             clearTimeout(timer) { timers.delete(timer); },
             global: {
                 config: { ...global.config, daemon: { ...global.config.daemon, port: 18081 },
-                    verify_shares_host: [scenario.host],
-                    verify_shares_gzip_hosts: scenario.allowlist || (scenario.enabled ? [scenario.host] : undefined) },
+                    verify_shares_host: [scenario.host] },
                 support: { sendAdminFyi() {} }, database: {}
             }
         };

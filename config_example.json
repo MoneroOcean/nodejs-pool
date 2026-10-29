@@ -7,7 +7,6 @@
   "hostname": "testpool.com",
   "db_storage_path": "CHANGEME",
   "verify_shares_host": null,
-  "verify_shares_gzip_hosts": [],
   "skipListenPorts": [],
   "coin": "xmr",
   "mysql": {
