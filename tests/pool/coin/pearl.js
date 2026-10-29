@@ -23,6 +23,13 @@ function pearlSolutionIdFromData(solutionData) {
     return blockTemplate.pearlSolutionId(solutionData).toString("hex");
 }
 
+function submitGatewayProof(context) {
+    return new Promise(resolve => pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, {
+        ...context,
+        replyFn(result, status) { resolve({ result, status }); }
+    }));
+}
+
 function workerRecipeFixture(header) {
     const coinbase = Buffer.from("0100000001000000000000000000000000000000000000000000000000000000000000000000", "hex");
     const offset = coinbase.length - 1;
@@ -144,7 +151,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(pearl.decodePearlProof(zlib.gzipSync(Buffer.from("proof")).toString("base64"), "gzip")?.toString(), "proof");
     });
 
-    test("retains validated explicit and implicit miner gzip only when a remote verifier is configured", () => {
+    test("retains validated miner gzip for gateway forwarding with either local or remote verification", () => {
         const previousConfig = global.config;
         const raw = Buffer.alloc(4096, 0x42);
         const compressed = zlib.gzipSync(raw, { level: 9 });
@@ -158,11 +165,61 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                     assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {},
                         miner: { pearlProofGzip: implicit } }), true);
                     assert.deepEqual(params.plain_proof, raw);
-                    assert.deepEqual(pearl.getPearlProofGzip(params.plain_proof), enabled ? compressed : undefined);
+                    assert.deepEqual(pearl.getPearlProofGzip(params.plain_proof), compressed);
+                    assert.equal(pearlProfile.pool.getTrustedQueueRetainedBytes(params), raw.length + compressed.length);
                 }
             }
         } finally {
             global.config = previousConfig;
+        }
+    });
+
+    test("gateway packing reuses validated miner gzip byte-for-byte and caches packed raw proofs", async () => {
+        const raw = Buffer.alloc(64 * 1024, 0x42);
+        const original = zlib.gzipSync(raw, { level: 9 });
+        original.writeUInt32LE(123, 4);
+        const decoded = pearl.decodePearlProof(original.toString("base64"), "gzip", false, true);
+        const nativeGzip = zlib.gzip;
+        let calls = 0;
+        zlib.gzip = function countGzip(...args) { calls += 1; return nativeGzip(...args); };
+        const pack = proof => new Promise((resolve, reject) => pearl.packPearlGatewayProof(proof,
+            (error, packed) => error ? reject(error) : resolve(packed)));
+        try {
+            assert.strictEqual(await pack(decoded), pearl.getPearlProofGzip(decoded));
+            assert.deepEqual(await pack(decoded), original);
+            assert.equal(calls, 0);
+            const packed = await pack(raw);
+            assert.deepEqual(zlib.gunzipSync(packed), raw);
+            assert.equal(calls, 1);
+            assert.strictEqual(await pack(raw), packed);
+            assert.equal(calls, 1);
+            assert.deepEqual(raw, Buffer.alloc(raw.length, 0x42));
+        } finally {
+            zlib.gzip = nativeGzip;
+        }
+    });
+
+    test("gateway packing bounds concurrent compression and releases its budget on failures", () => {
+        const nativeGzip = zlib.gzip;
+        const callbacks = [];
+        const errors = [];
+        zlib.gzip = function deferGzip(_proof, _options, callback) { callbacks.push(callback); };
+        const submit = () => pearl.packPearlGatewayProof(Buffer.alloc(pearl.PEARL_MAX_PROOF_BYTES), error => errors.push(error));
+        try {
+            submit();
+            submit();
+            submit();
+            assert.equal(callbacks.length, 2);
+            assert.match(errors[0].message, /busy/);
+            callbacks.shift()(new Error("compression failed"));
+            submit();
+            assert.equal(callbacks.length, 2, "released budget admits a later proof");
+            for (const callback of callbacks) callback(new Error("test cleanup"));
+            zlib.gzip = function throwGzip() { throw new Error("native failure"); };
+            submit();
+            assert.match(errors.at(-1).message, /compression failed/);
+        } finally {
+            zlib.gzip = nativeGzip;
         }
     });
 
@@ -903,7 +960,65 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(context.params.pearl_proof_id, "12".repeat(32));
     });
 
-    test("preserves bounded Pearl gateway rejection diagnostics without logging the proof", () => {
+    test("gateway submissions preserve validated miner gzip without repacking raw verification data", async () => {
+        const raw = Buffer.alloc(32 * 1024, 0x34);
+        const packed = zlib.gzipSync(raw, { level: 9 });
+        packed.writeUInt32LE(123, 4);
+        const proof = pearl.decodePearlProof(packed.toString("base64"), "gzip", false, true);
+        const originalGatewayRequest = pearl.gatewayRequest;
+        const nativeGzip = zlib.gzip;
+        let request;
+        zlib.gzip = () => assert.fail("validated miner gzip must not be repacked");
+        pearl.gatewayRequest = function captureRequest(method, params, callback) {
+            request = { method, params };
+            callback(null, { result: { status: "accepted", block_hash: "ab".repeat(32) } });
+        };
+        try {
+            const response = await submitGatewayProof({
+                blockData: raw.toString("base64"),
+                params: { plain_proof: proof },
+                job: { targetDecimal: "1", gatewayTarget: 1 }
+            });
+            assert.equal(response.status, 200);
+            assert.equal(request.params.plain_proof, packed.toString("base64"));
+            assert.equal(request.params.proof_encoding, "gzip");
+            assert.equal(request.params.proof_raw_bytes, raw.length);
+            assert.deepEqual(proof, raw);
+            assert.equal(response.result.pearl_diagnostic.proof_sha256,
+                crypto.createHash("sha256").update(raw).digest("hex"));
+        } finally {
+            pearl.gatewayRequest = originalGatewayRequest;
+            zlib.gzip = nativeGzip;
+        }
+    });
+
+    test("gateway packing failures never fall back to raw submissions", async () => {
+        const originalGatewayRequest = pearl.gatewayRequest;
+        const nativeGzip = zlib.gzip;
+        const proof = Buffer.from("compression-failure-proof");
+        let requests = 0;
+        pearl.gatewayRequest = () => { requests += 1; };
+        zlib.gzip = (_proof, _options, callback) => callback(new Error("native compression failed"));
+        try {
+            const response = await submitGatewayProof({
+                blockData: proof.toString("base64"), params: { plain_proof: proof },
+                job: { targetDecimal: "1" }
+            });
+            assert.equal(response.status, 0);
+            assert.equal(response.result.error.message, "Pearl proof compression failed");
+            const mismatch = await submitGatewayProof({
+                blockData: proof.toString("base64"), params: { plain_proof: Buffer.from("different") },
+                job: { targetDecimal: "1" }
+            });
+            assert.equal(mismatch.result.error.message, "Invalid Pearl proof submission");
+            assert.equal(requests, 0);
+        } finally {
+            pearl.gatewayRequest = originalGatewayRequest;
+            zlib.gzip = nativeGzip;
+        }
+    });
+
+    test("packs raw gateway proofs and preserves bounded diagnostics without logging the proof", async () => {
         const proof = Buffer.from("winning-proof");
         const proofBase64 = proof.toString("base64");
         const originalGatewayRequest = pearl.gatewayRequest;
@@ -914,7 +1029,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             callback(null, { error: { code: 17, message: "target mismatch", detail: "x".repeat(5000) } });
         };
         try {
-            pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, {
+            response = await submitGatewayProof({
                 blockData: proofBase64,
                 job: {
                     id: "pearl-job",
@@ -928,14 +1043,15 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
                     adjustment_factor: 7,
                     pearl_proof_id: "12".repeat(32),
                     plain_proof: proofBase64
-                },
-                replyFn(result, status) { response = { result, status }; }
+                }
             });
         } finally {
             pearl.gatewayRequest = originalGatewayRequest;
         }
         assert.equal(request.method, "submitPlainProof");
-        assert.equal(request.params.plain_proof, proofBase64);
+        assert.equal(request.params.proof_encoding, "gzip");
+        assert.equal(request.params.proof_raw_bytes, proof.length);
+        assert.deepEqual(zlib.gunzipSync(Buffer.from(request.params.plain_proof, "base64")), proof);
         assert.equal(response.status, 200);
         const data = response.result.error.data;
         assert.equal(data.pearl.job_id, "pearl-job");
@@ -954,7 +1070,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(logged.includes("plain_proof"), false);
     });
 
-    test("adds Pearl diagnostics to accepted and transport-failed gateway results", () => {
+    test("adds Pearl diagnostics to accepted and transport-failed gateway results", async () => {
         const proof = Buffer.from("winning-proof").toString("base64");
         const originalGatewayRequest = pearl.gatewayRequest;
         const replies = [];
@@ -974,11 +1090,11 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             pearl.gatewayRequest = function accepted(_method, _params, callback) {
                 callback(null, { result: { status: "accepted", block_hash: "ab".repeat(32) } });
             };
-            pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, context);
+            replies.push(await submitGatewayProof(context));
             const transportError = new Error("connection reset\nwith control text");
             transportError.code = "ECONNRESET";
             pearl.gatewayRequest = function failed(_method, _params, callback) { callback(transportError); };
-            pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, context);
+            replies.push(await submitGatewayProof(context));
         } finally {
             pearl.gatewayRequest = originalGatewayRequest;
         }

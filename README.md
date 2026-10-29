@@ -51,6 +51,12 @@ Pearl proof uploads use raw transport for localhost and loopback verifiers, and 
 verifiers when smaller. The pool forwards validated miner gzip unchanged, or compresses raw proofs
 asynchronously. Remote verifiers must support gzip proof frames before updating the pool.
 
+Pearl block submissions always send the large `plain_proof` field as gzip base64 inside the existing
+JSON-RPC request, with `proof_encoding: "gzip"` and the exact `proof_raw_bytes` length. Validated
+miner gzip and cached verifier gzip are reused without recompression. Upgrade the mining gateway
+to accept this format before updating a pool sender; the gateway must continue accepting legacy
+raw base64 submissions during a staged rollout.
+
 > The deploy scripts assume a fresh host. They create a `user` account, install Monero, MySQL, Nginx, Node via NVM, PM2, wallet files, SQL schema, and base pool configuration.
 
 If your DNS or certificate flow is different, adapt [`deployment/deploy.bash`](deployment/deploy.bash) before running it.

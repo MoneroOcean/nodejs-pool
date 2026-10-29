@@ -1514,7 +1514,7 @@ test("Pearl verifier compression uses remote transport and reuses miner gzip", a
         const proof = scenario.minerGzip
             ? pearl.decodePearlProof(originalGzip.toString("base64"), "gzip", false, true)
             : scenario.cancelCompression ? Buffer.alloc(8 * 1024 * 1024)
-                : scenario.incompressible ? crypto.randomBytes(rawProof.length) : rawProof;
+                : scenario.incompressible ? crypto.randomBytes(rawProof.length) : Buffer.from(rawProof);
         const results = [];
         const submit = () => coin.verifyPearlAsync("00".repeat(76), proof, "ff".repeat(32), "miner", (...args) => results.push(args));
         submit();
@@ -1541,6 +1541,7 @@ test("Pearl verifier compression uses remote transport and reuses miner gzip", a
             assert.equal(header.proof_raw_bytes, proof.length);
             assert.deepEqual(zlib.gunzipSync(body), rawProof);
             assert.ok(body.length < rawProof.length);
+            assert.strictEqual(pearl.getPearlProofGzip(proof), body, "gateway forwarding can reuse verifier gzip");
             if (scenario.minerGzip) assert.deepEqual(body, originalGzip);
         } else {
             assert.equal(header.proof_encoding, undefined);
