@@ -773,7 +773,7 @@ test("template manager preserves identical templates and accepts time-only recov
     assert.deepEqual(daemonFailureSince, {});
 });
 
-test("server final replies randomize within ten seconds even for long requests", () => {
+test("server final replies randomize within thirty seconds even for long requests", () => {
     const originalSetTimeout = global.setTimeout;
     const originalClearTimeout = global.clearTimeout;
     const originalMathRandom = Math.random;
@@ -814,7 +814,7 @@ test("server final replies randomize within ten seconds even for long requests",
         tls: require("node:tls"),
         state,
         handleMinerData(_socket, _id, method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
-            sendReplyFinal("Delayed ban reply", method === "long" ? 600 : 10);
+            sendReplyFinal("Delayed ban reply", method === "long" ? 600 : 30);
         },
         removeMiner() {}
     });
@@ -840,7 +840,7 @@ test("server final replies randomize within ten seconds even for long requests",
         socket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
 
         const delayedTimer = timers.find(function findReplyTimer(timer) {
-            return timer.delay === 5000 && timer.cleared === false;
+            return timer.delay === 15000 && timer.cleared === false;
         });
 
         assert.ok(delayedTimer);
@@ -862,12 +862,12 @@ test("server final replies randomize within ten seconds even for long requests",
         handleSocket(longSocket);
         longSocket.emit("data", `${JSON.stringify({ id: 2, method: "long", params: {} })}\n`);
         const longTimer = longSocket.finalReplyTimer;
-        assert.equal(longTimer.delay, 5000, "long requests are capped to the same ten-second window");
+        assert.equal(longTimer.delay, 15000, "long requests are capped to the same thirty-second window");
         longSocket.emit("close");
         assert.equal(longTimer.cleared, true);
         assert.equal(longSocket.endedPayload, undefined);
 
-        for (const [random, delay] of [[0, 1000], [1 - Number.EPSILON, 10000]]) {
+        for (const [random, delay] of [[0, 1000], [1 - Number.EPSILON, 30000]]) {
             Math.random = () => random;
             const rangeSocket = new EventEmitter();
             Object.assign(rangeSocket, {
@@ -929,7 +929,7 @@ test("server final replies bound pending sockets and release timers on disconnec
         tls: require("node:tls"),
         state,
         handleMinerData(_socket, _id, _method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
-            sendReplyFinal("Delayed ban reply", 10);
+            sendReplyFinal("Delayed ban reply", 30);
         },
         removeMiner() {}
     });
@@ -966,7 +966,7 @@ test("server final replies bound pending sockets and release timers on disconnec
         secondSocket.emit("data", `${JSON.stringify({ id: 2, method: "login", params: { login: "wallet" } })}\n`);
 
         const delayedTimers = timers.filter(function findReplyTimer(timer) {
-            return timer.delay === 5000 && timer.cleared === false;
+            return timer.delay === 15000 && timer.cleared === false;
         });
         assert.equal(delayedTimers.length, 1);
         assert.equal(firstSocket.endedPayload, undefined);

@@ -102,7 +102,7 @@ test("payment split logins reject temporarily banned payout targets", async () =
     });
 });
 
-test("payment split logins delay permanent banned payout targets within ten seconds", async () => {
+test("payment split logins delay permanent banned payout targets within thirty seconds", async () => {
     await expectLoginFinalError({
         login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
         pass: "worker-split-permanent-ban"
@@ -110,7 +110,7 @@ test("payment split logins delay permanent banned payout targets within ten seco
         prepare(runtime) {
             runtime.getState().bannedAddresses[ALT_WALLET] = "manual blocklist";
         },
-        timeout: 10
+        timeout: 30
     });
 });
 
@@ -122,7 +122,7 @@ test("payment split logins reject one-hour banned payout targets", async () => {
         prepare(runtime) {
             runtime.getState().bannedBigTmpWallets[ALT_WALLET] = 1;
         },
-        timeout: 10
+        timeout: 30
     });
 });
 
@@ -341,7 +341,7 @@ test("primary payout logins reject permanently banned addresses", async () => {
 
         assert.deepEqual(reply.finals, [{
             error: `Permanently banned payment address ${MAIN_WALLET} provided: manual blocklist`,
-            timeout: 10
+            timeout: 30
         }]);
         assert.equal(validationCalls, 0);
     } finally {
@@ -366,7 +366,7 @@ test("primary payout logins reject one-hour worker-limit bans", async () => {
 
         assert.deepEqual(reply.finals, [{
             error: "Temporary (one hour max) ban since you connected too many workers. Please use proxy (https://github.com/MoneroOcean/xmrig-proxy)",
-            timeout: 10
+            timeout: 30
         }]);
     } finally {
         await runtime.stop();

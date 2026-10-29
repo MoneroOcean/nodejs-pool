@@ -545,7 +545,7 @@ test("xmrig-proxy connections are limited by the proxy worker limit path", async
         assert.equal(second.replies.length, 0);
         assert.deepEqual(second.finals, [{
             error: "Temporary (one hour max) mining ban since you connected too many workers. Please use proxy (https://github.com/MoneroOcean/xmrig-proxy)",
-            timeout: 10
+            timeout: 30
         }]);
     } finally {
         global.config.pool.proxyWorkerMax = 40;
