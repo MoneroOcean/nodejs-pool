@@ -773,7 +773,7 @@ test("template manager preserves identical templates and accepts time-only recov
     assert.deepEqual(daemonFailureSince, {});
 });
 
-test("server final replies use exact short delays and preserve long-ban jitter", () => {
+test("server final replies randomize within ten seconds even for long requests", () => {
     const originalSetTimeout = global.setTimeout;
     const originalClearTimeout = global.clearTimeout;
     const originalMathRandom = Math.random;
@@ -840,7 +840,7 @@ test("server final replies use exact short delays and preserve long-ban jitter",
         socket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
 
         const delayedTimer = timers.find(function findReplyTimer(timer) {
-            return timer.delay === 10000 && timer.cleared === false;
+            return timer.delay === 5000 && timer.cleared === false;
         });
 
         assert.ok(delayedTimer);
@@ -861,11 +861,26 @@ test("server final replies use exact short delays and preserve long-ban jitter",
         });
         handleSocket(longSocket);
         longSocket.emit("data", `${JSON.stringify({ id: 2, method: "long", params: {} })}\n`);
-        const longTimer = timers.find(timer => timer.delay === 300000 && !timer.cleared);
-        assert.ok(longTimer, "long bans retain their random delay window");
+        const longTimer = longSocket.finalReplyTimer;
+        assert.equal(longTimer.delay, 5000, "long requests are capped to the same ten-second window");
         longSocket.emit("close");
         assert.equal(longTimer.cleared, true);
         assert.equal(longSocket.endedPayload, undefined);
+
+        for (const [random, delay] of [[0, 1000], [1 - Number.EPSILON, 10000]]) {
+            Math.random = () => random;
+            const rangeSocket = new EventEmitter();
+            Object.assign(rangeSocket, {
+                remoteAddress: "127.0.0.4", writable: true, destroyed: false,
+                setKeepAlive() {}, setEncoding() {},
+                end() { this.writable = false; },
+                destroy() { this.destroyed = true; this.writable = false; }
+            });
+            handleSocket(rangeSocket);
+            rangeSocket.emit("data", `${JSON.stringify({ id: 3, method: "long", params: {} })}\n`);
+            assert.equal(rangeSocket.finalReplyTimer.delay, delay);
+            rangeSocket.emit("close");
+        }
     } finally {
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
@@ -951,7 +966,7 @@ test("server final replies bound pending sockets and release timers on disconnec
         secondSocket.emit("data", `${JSON.stringify({ id: 2, method: "login", params: { login: "wallet" } })}\n`);
 
         const delayedTimers = timers.filter(function findReplyTimer(timer) {
-            return timer.delay === 10000 && timer.cleared === false;
+            return timer.delay === 5000 && timer.cleared === false;
         });
         assert.equal(delayedTimers.length, 1);
         assert.equal(firstSocket.endedPayload, undefined);
