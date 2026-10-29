@@ -102,6 +102,18 @@ test("payment split logins reject temporarily banned payout targets", async () =
     });
 });
 
+test("payment split logins delay permanent banned payout targets for ten seconds", async () => {
+    await expectLoginFinalError({
+        login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
+        pass: "worker-split-permanent-ban"
+    }, `Permanently banned payment address ${ALT_WALLET} provided: manual blocklist`, {
+        prepare(runtime) {
+            runtime.getState().bannedAddresses[ALT_WALLET] = "manual blocklist";
+        },
+        timeout: 10
+    });
+});
+
 test("payment split logins reject one-hour banned payout targets", async () => {
     await expectLoginFinalError({
         login: `${MAIN_WALLET}%1%${ALT_WALLET}`,
@@ -329,7 +341,7 @@ test("primary payout logins reject permanently banned addresses", async () => {
 
         assert.deepEqual(reply.finals, [{
             error: `Permanently banned payment address ${MAIN_WALLET} provided: manual blocklist`,
-            timeout: undefined
+            timeout: 10
         }]);
         assert.equal(validationCalls, 0);
     } finally {

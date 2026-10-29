@@ -773,7 +773,7 @@ test("template manager preserves identical templates and accepts time-only recov
     assert.deepEqual(daemonFailureSince, {});
 });
 
-test("server final replies honor explicit delay windows with random jitter", () => {
+test("server final replies use exact short delays and preserve long-ban jitter", () => {
     const originalSetTimeout = global.setTimeout;
     const originalClearTimeout = global.clearTimeout;
     const originalMathRandom = Math.random;
@@ -813,8 +813,8 @@ test("server final replies honor explicit delay windows with random jitter", () 
         net: require("node:net"),
         tls: require("node:tls"),
         state,
-        handleMinerData(_socket, _id, _method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
-            sendReplyFinal("Delayed ban reply", 10);
+        handleMinerData(_socket, _id, method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
+            sendReplyFinal("Delayed ban reply", method === "long" ? 600 : 10);
         },
         removeMiner() {}
     });
@@ -840,7 +840,7 @@ test("server final replies honor explicit delay windows with random jitter", () 
         socket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
 
         const delayedTimer = timers.find(function findReplyTimer(timer) {
-            return timer.delay === 5000 && timer.cleared === false;
+            return timer.delay === 10000 && timer.cleared === false;
         });
 
         assert.ok(delayedTimer);
@@ -850,6 +850,22 @@ test("server final replies honor explicit delay windows with random jitter", () 
 
         assert.equal(typeof socket.endedPayload, "string");
         assert.equal(JSON.parse(socket.endedPayload).error.message, "Delayed ban reply");
+        socket.emit("close");
+
+        const longSocket = new EventEmitter();
+        Object.assign(longSocket, {
+            remoteAddress: "127.0.0.3", writable: true, destroyed: false,
+            setKeepAlive() {}, setEncoding() {},
+            end(payload) { this.endedPayload = payload; this.writable = false; },
+            destroy() { this.destroyed = true; this.writable = false; }
+        });
+        handleSocket(longSocket);
+        longSocket.emit("data", `${JSON.stringify({ id: 2, method: "long", params: {} })}\n`);
+        const longTimer = timers.find(timer => timer.delay === 300000 && !timer.cleared);
+        assert.ok(longTimer, "long bans retain their random delay window");
+        longSocket.emit("close");
+        assert.equal(longTimer.cleared, true);
+        assert.equal(longSocket.endedPayload, undefined);
     } finally {
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
@@ -857,7 +873,7 @@ test("server final replies honor explicit delay windows with random jitter", () 
     }
 });
 
-test("server final replies allow one delayed socket per ip", () => {
+test("server final replies bound pending sockets and release timers on disconnect", () => {
     const originalSetTimeout = global.setTimeout;
     const originalClearTimeout = global.clearTimeout;
     const originalMathRandom = Math.random;
@@ -935,7 +951,7 @@ test("server final replies allow one delayed socket per ip", () => {
         secondSocket.emit("data", `${JSON.stringify({ id: 2, method: "login", params: { login: "wallet" } })}\n`);
 
         const delayedTimers = timers.filter(function findReplyTimer(timer) {
-            return timer.delay === 5000 && timer.cleared === false;
+            return timer.delay === 10000 && timer.cleared === false;
         });
         assert.equal(delayedTimers.length, 1);
         assert.equal(firstSocket.endedPayload, undefined);
@@ -948,6 +964,45 @@ test("server final replies allow one delayed socket per ip", () => {
         assert.equal(typeof firstSocket.endedPayload, "string");
         assert.equal(JSON.parse(firstSocket.endedPayload).error.message, "Delayed ban reply");
         assert.equal(state.delayedFinalSocketsByIP.has("127.0.0.9"), false);
+
+        const pendingSocket = createSocket("127.0.0.10");
+        handleSocket(pendingSocket);
+        pendingSocket.emit("data", `${JSON.stringify({ id: 3, method: "login", params: {} })}\n`);
+        const pendingTimer = pendingSocket.finalReplyTimer;
+        assert.ok(pendingTimer);
+        const timerCount = timers.length;
+        pendingSocket.emit("data", `${JSON.stringify({ id: 30, method: "login", params: {} })}\n`);
+        assert.equal(pendingSocket.destroyed, true);
+        assert.equal(timers.length, timerCount, "finalizing sockets cannot queue more rejection timers");
+        assert.equal(pendingTimer.cleared, true);
+        assert.equal(state.delayedFinalSocketsByIP.has("127.0.0.10"), false);
+        assert.equal(pendingSocket.endedPayload, undefined);
+
+        // Distributed sources must also respect a finite worker-wide pending limit.
+        for (let index = 0; index < 1024; ++index) {
+            state.delayedFinalSocketsByIP.set(`source-${index}`, createSocket(`source-${index}`));
+        }
+        const overflowSocket = createSocket("127.0.0.11");
+        handleSocket(overflowSocket);
+        overflowSocket.emit("data", `${JSON.stringify({ id: 4, method: "login", params: {} })}\n`);
+        assert.equal(overflowSocket.destroyReason, "delayed-final-limit");
+        assert.equal(overflowSocket.finalReplyTimer, undefined);
+        assert.equal(state.delayedFinalSocketsByIP.size, 1024);
+
+        state.delayedFinalSocketsByIP.delete("source-0");
+        const recoveredSocket = createSocket("127.0.0.11");
+        handleSocket(recoveredSocket);
+        recoveredSocket.emit("data", `${JSON.stringify({ id: 5, method: "login", params: {} })}\n`);
+        assert.equal(recoveredSocket.destroyed, false);
+        assert.ok(recoveredSocket.finalReplyTimer);
+        recoveredSocket.destroy();
+        assert.equal(state.delayedFinalSocketsByIP.size, 1023);
+
+        const unidentifiedSocket = createSocket("");
+        handleSocket(unidentifiedSocket);
+        unidentifiedSocket.emit("data", `${JSON.stringify({ id: 6, method: "login", params: {} })}\n`);
+        assert.equal(unidentifiedSocket.destroyReason, "delayed-final-limit");
+        assert.equal(unidentifiedSocket.finalReplyTimer, undefined);
     } finally {
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
