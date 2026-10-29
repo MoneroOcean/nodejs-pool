@@ -1454,6 +1454,104 @@ test("Pearl verifier admission bounds aggregate retained proof bytes", () => {
     assert.equal(timers.size, 0);
 });
 
+test("Pearl verifier compression follows its host allowlist and reuses miner gzip", async () => {
+    const vm = require("node:vm");
+    const zlib = require("node:zlib");
+    const { createRequire } = require("node:module");
+    const { EventEmitter } = require("node:events");
+    const filename = require.resolve("../../../lib/coins/index.js");
+    const nativeRequire = createRequire(filename);
+    const pearl = nativeRequire("./core/pearl.js");
+    const rawProof = Buffer.alloc(64 * 1024, 0x42);
+    // A non-default gzip header makes byte-for-byte reuse distinguishable from recompression.
+    const originalGzip = zlib.gzipSync(rawProof, { level: 9 });
+    originalGzip.writeUInt32LE(123, 4);
+
+    for (const scenario of [
+        { host: "verifier.example", enabled: true, compressed: true },
+        { host: "verifier.example", enabled: true, compressed: true, minerGzip: true },
+        { host: "verifier.example", enabled: false, compressed: false },
+        { host: "127.0.0.1", enabled: true, compressed: true },
+        { host: "::1", enabled: false, compressed: false },
+        { host: "verifier.example", allowlist: ["127.0.0.1"], compressed: false },
+        { host: "verifier.example", enabled: true, compressed: false, gzipError: true },
+        { host: "verifier.example", enabled: true, compressed: false, incompressible: true },
+        { host: "verifier.example", enabled: true, cancelCompression: true }
+    ]) {
+        const sockets = [];
+        const timers = new Set();
+        let pendingCompression;
+        let resolveWrites;
+        const written = new Promise(resolve => { resolveWrites = resolve; });
+        class Socket extends EventEmitter {
+            constructor() { super(); this.writes = []; sockets.push(this); }
+            connect(_port, host, callback) { this.host = host; this.connectCallback = callback; }
+            cork() {}
+            uncork() {}
+            write(value) { this.writes.push(value); if (this.writes.length === 2) resolveWrites(); }
+            destroy() {}
+        }
+        const sandbox = {
+            Buffer, process, console: { log() {}, error() {} }, module: { exports: {} },
+            require(name) {
+                if (name === "net") return { Socket };
+                if (name === "node:zlib" && scenario.cancelCompression) return { gzip(_proof, _options, callback) { pendingCompression = callback; } };
+                if (name === "node:zlib" && scenario.gzipError) return { gzip(_proof, _options, callback) { callback(new Error("gzip failed")); } };
+                return nativeRequire(name);
+            },
+            setInterval() {},
+            setTimeout(callback) { timers.add(callback); return callback; },
+            clearTimeout(timer) { timers.delete(timer); },
+            global: {
+                config: { ...global.config, daemon: { ...global.config.daemon, port: 18081 },
+                    verify_shares_host: [scenario.host],
+                    verify_shares_gzip_hosts: scenario.allowlist || (scenario.enabled ? [scenario.host] : undefined) },
+                support: { sendAdminFyi() {} }, database: {}
+            }
+        };
+        vm.runInNewContext(fs.readFileSync(filename, "utf8"), sandbox, { filename });
+        const coin = new sandbox.module.exports({});
+        const proof = scenario.minerGzip
+            ? pearl.decodePearlProof(originalGzip.toString("base64"), "gzip", false, true)
+            : scenario.cancelCompression ? Buffer.alloc(8 * 1024 * 1024)
+                : scenario.incompressible ? crypto.randomBytes(rawProof.length) : rawProof;
+        const results = [];
+        const submit = () => coin.verifyPearlAsync("00".repeat(76), proof, "ff".repeat(32), "miner", (...args) => results.push(args));
+        submit();
+        sockets[0].connectCallback();
+        if (scenario.cancelCompression) {
+            sockets[0].emit("error", new Error("connection failed during compression"));
+            submit();
+            assert.equal(sockets.length, 1);
+            assert.deepEqual(results[1], [null, "verify-host-overload"]);
+            pendingCompression(null, zlib.gzipSync(proof));
+            assert.deepEqual(sockets[0].writes, []);
+            assert.equal(timers.size, 0);
+            submit();
+            assert.equal(sockets.length, 2);
+            sockets[1].emit("error", new Error("test cleanup"));
+            continue;
+        }
+        await written;
+        const header = JSON.parse(sockets[0].writes[0]);
+        const body = sockets[0].writes[1];
+        assert.equal(header.proof_bytes, body.length);
+        if (scenario.compressed) {
+            assert.equal(header.proof_encoding, "gzip");
+            assert.equal(header.proof_raw_bytes, proof.length);
+            assert.deepEqual(zlib.gunzipSync(body), rawProof);
+            assert.ok(body.length < rawProof.length);
+            if (scenario.minerGzip) assert.deepEqual(body, originalGzip);
+        } else {
+            assert.equal(header.proof_encoding, undefined);
+            assert.equal(header.proof_raw_bytes, undefined);
+            assert.strictEqual(body, proof);
+        }
+        sockets[0].emit("error", new Error("test cleanup"));
+        assert.equal(timers.size, 0);
+    }
+});
+
 
 test("ETH reward lookup requires one valid receipt per transaction", () => {
     const { rpc } = require("../../../lib/coins/core/factories.js");

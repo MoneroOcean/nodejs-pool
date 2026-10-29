@@ -144,6 +144,28 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(pearl.decodePearlProof(zlib.gzipSync(Buffer.from("proof")).toString("base64"), "gzip")?.toString(), "proof");
     });
 
+    test("retains validated explicit and implicit miner gzip only for configured verifier transport", () => {
+        const previousConfig = global.config;
+        const raw = Buffer.alloc(4096, 0x42);
+        const compressed = zlib.gzipSync(raw, { level: 9 });
+        try {
+            for (const enabled of [false, true]) {
+                global.config = { ...previousConfig, verify_shares_host: ["127.0.0.1"],
+                    verify_shares_gzip_hosts: enabled ? ["127.0.0.1"] : [] };
+                for (const implicit of [false, true]) {
+                    const params = { job_id: "job", plain_proof: compressed.toString("base64"),
+                        ...(implicit ? {} : { proof_encoding: "gzip" }) };
+                    assert.equal(pearlProfile.pool.normalizeNamedSubmitParams({ params, wireParams: {},
+                        miner: { pearlProofGzip: implicit } }), true);
+                    assert.deepEqual(params.plain_proof, raw);
+                    assert.deepEqual(pearl.getPearlProofGzip(params.plain_proof), enabled ? compressed : undefined);
+                }
+            }
+        } finally {
+            global.config = previousConfig;
+        }
+    });
+
     test("v2 sessions accept implicit gzip while keeping raw and explicit encodings compatible", () => {
         const rawProof = Buffer.from("pearl-proof");
         const compressedProof = zlib.gzipSync(rawProof);

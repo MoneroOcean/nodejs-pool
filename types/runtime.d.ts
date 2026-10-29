@@ -431,6 +431,7 @@ export interface PoolConfig {
     rpc: RpcConfig;
     skipListenPorts: number[];
     verify_shares_host?: string[];
+    verify_shares_gzip_hosts?: string[];
     wallet: WalletConfig;
     worker_num: number;
     [section: string]: unknown;
