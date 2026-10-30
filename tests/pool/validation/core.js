@@ -427,7 +427,7 @@ test("wallet bans propagated through messageHandler reject later logins", async 
         assert.equal(reply.replies.length, 0);
         assert.deepEqual(reply.finals, [{
             error: `Temporary (10 minutes max) banned payment address ${MAIN_WALLET}`,
-            timeout: undefined
+            timeout: 30
         }]);
     } finally {
         cluster.isMaster = originalIsMaster;
