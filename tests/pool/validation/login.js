@@ -98,8 +98,7 @@ test("payment split logins reject temporarily banned payout targets", async () =
     }, `Temporary (10 minutes max) banned payment address ${ALT_WALLET}`, {
         prepare(runtime) {
             runtime.getState().bannedTmpWallets[ALT_WALLET] = 1;
-        },
-        timeout: 30
+        }
     });
 });
 
@@ -313,7 +312,7 @@ test("payment split logins reject invalid destination addresses", async () => {
 
         assert.deepEqual(reply.finals, [{
             error: "Invalid payment address provided: not-a-wallet. Please use 95_char_long_monero_wallet_address format",
-            timeout: 30
+            timeout: undefined
         }]);
     } finally {
         await runtime.stop();

@@ -1106,9 +1106,8 @@ test("server final replies bound pending sockets and release timers on disconnec
         net: require("node:net"),
         tls: require("node:tls"),
         state,
-        handleMinerData(_socket, _id, _method, params, _ip, _portData, sendReply, sendReplyFinal) {
-            if (params && params.valid) sendReply(null, { status: "OK" });
-            else sendReplyFinal("Delayed ban reply", 30);
+        handleMinerData(_socket, _id, _method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
+            sendReplyFinal("Delayed ban reply", 30);
         },
         removeMiner() {}
     });
@@ -1136,83 +1135,67 @@ test("server final replies bound pending sockets and release timers on disconnec
 
     try {
         const handleSocket = serverFactory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
-        const sockets = [];
-        function rejectLogin(ip) {
-            const socket = createSocket(ip);
-            sockets.push(socket);
-            handleSocket(socket);
-            socket.emit("data", '{"id":1,"method":"login","params":{}}\n');
-            return socket;
-        }
-        const parallel = Array.from({ length: 8 }, () => rejectLogin("127.0.0.9"));
-        assert.equal(state.delayedFinalSocketsByIP.get("127.0.0.9").size, 8);
-        assert.equal(parallel.every(socket => !socket.destroyed && !socket.endedPayload && socket.finalReplyTimer), true);
-        const ninth = rejectLogin("127.0.0.9");
-        assert.equal(ninth.destroyReason, "delayed-final-limit");
-        assert.equal(ninth.finalReplyTimer, undefined);
+        const firstSocket = createSocket("127.0.0.9");
+        const secondSocket = createSocket("127.0.0.9");
+        handleSocket(firstSocket);
+        handleSocket(secondSocket);
 
-        const firstTimer = parallel[0].finalReplyTimer;
-        firstTimer.callback(...firstTimer.args);
-        assert.equal(JSON.parse(parallel[0].endedPayload).error.message, "Delayed ban reply");
-        assert.equal(state.delayedFinalSocketsByIP.get("127.0.0.9").size, 7);
-        parallel[0].destroy(); // End followed by close must not decrement twice.
-        const closedTimer = parallel[1].finalReplyTimer;
-        parallel[1].destroy();
-        parallel[1].destroy();
-        assert.equal(closedTimer.cleared, true);
-        assert.equal(state.delayedFinalSocketsByIP.get("127.0.0.9").size, 6);
+        firstSocket.emit("data", `${JSON.stringify({ id: 1, method: "login", params: { login: "wallet" } })}\n`);
+        secondSocket.emit("data", `${JSON.stringify({ id: 2, method: "login", params: { login: "wallet" } })}\n`);
 
-        const staleTimer = parallel[2].finalReplyTimer;
-        parallel[2].destroyed = true;
-        parallel[2].writable = false; // An already closed socket whose close callback has not run.
-        const replacement = rejectLogin("127.0.0.9");
-        assert.equal(replacement.destroyed, false);
-        assert.equal(staleTimer.cleared, true);
-        assert.equal(state.delayedFinalSocketsByIP.get("127.0.0.9").has(parallel[2]), false);
-        parallel[2].emit("close");
-        assert.equal(state.delayedFinalSocketsByIP.get("127.0.0.9").size, 6);
+        const delayedTimers = timers.filter(function findReplyTimer(timer) {
+            return timer.delay === 15000 && timer.cleared === false;
+        });
+        assert.equal(delayedTimers.length, 1);
+        assert.equal(firstSocket.endedPayload, undefined);
+        assert.equal(secondSocket.destroyed, true);
+        assert.equal(secondSocket.destroyReason, "delayed-final-limit");
+        assert.equal(state.delayedFinalSocketsByIP.get("127.0.0.9"), firstSocket);
 
-        const pendingTimer = replacement.finalReplyTimer;
+        delayedTimers[0].callback(...delayedTimers[0].args);
+
+        assert.equal(typeof firstSocket.endedPayload, "string");
+        assert.equal(JSON.parse(firstSocket.endedPayload).error.message, "Delayed ban reply");
+        assert.equal(state.delayedFinalSocketsByIP.has("127.0.0.9"), false);
+
+        const pendingSocket = createSocket("127.0.0.10");
+        handleSocket(pendingSocket);
+        pendingSocket.emit("data", `${JSON.stringify({ id: 3, method: "login", params: {} })}\n`);
+        const pendingTimer = pendingSocket.finalReplyTimer;
+        assert.ok(pendingTimer);
         const timerCount = timers.length;
-        replacement.emit("data", '{"id":2,"method":"login","params":{}}\n');
-        assert.equal(replacement.destroyed, true);
-        assert.equal(pendingTimer.cleared, true);
+        pendingSocket.emit("data", `${JSON.stringify({ id: 30, method: "login", params: {} })}\n`);
+        assert.equal(pendingSocket.destroyed, true);
         assert.equal(timers.length, timerCount, "finalizing sockets cannot queue more rejection timers");
-        for (const socket of sockets) socket.destroy();
-        assert.equal(state.delayedFinalSocketsByIP.size, 0);
+        assert.equal(pendingTimer.cleared, true);
+        assert.equal(state.delayedFinalSocketsByIP.has("127.0.0.10"), false);
+        assert.equal(pendingSocket.endedPayload, undefined);
 
-        // Fill the total socket budget through admission, with eight sockets per source.
-        const distributed = Array.from({ length: 4096 }, (_unused, index) => rejectLogin(`source-${Math.floor(index / 8)}`));
-        assert.equal(distributed.every(socket => !socket.destroyed && socket.finalReplyTimer), true);
-        assert.equal(state.delayedFinalSocketsByIP.size, 512);
-        const overflow = rejectLogin("new-source");
-        assert.equal(overflow.destroyReason, "delayed-final-limit");
-        assert.equal(overflow.finalReplyTimer, undefined);
-        assert.equal(state.delayedFinalSocketsByIP.size, 512);
+        // Distributed sources must also respect a finite worker-wide pending limit.
+        for (let index = 0; index < 1024; ++index) {
+            state.delayedFinalSocketsByIP.set(`source-${index}`, createSocket(`source-${index}`));
+        }
+        const overflowSocket = createSocket("127.0.0.11");
+        handleSocket(overflowSocket);
+        overflowSocket.emit("data", `${JSON.stringify({ id: 4, method: "login", params: {} })}\n`);
+        assert.equal(overflowSocket.destroyReason, "delayed-final-limit");
+        assert.equal(overflowSocket.finalReplyTimer, undefined);
+        assert.equal(state.delayedFinalSocketsByIP.size, 1024);
 
-        // Successful logins from an IP with eight pending rejects bypass both pending limits.
-        const valid = createSocket("source-0");
-        valid.write = payload => { valid.reply = payload; return true; };
-        handleSocket(valid);
-        valid.emit("data", '{"id":3,"method":"login","params":{"valid":true}}\n');
-        assert.equal(JSON.parse(valid.reply).result.status, "OK");
-        assert.equal(valid.destroyed, false);
-        assert.equal(valid.finalReplyTimer, undefined);
-        assert.equal(state.delayedFinalSocketsByIP.get("source-0").size, 8);
-        valid.destroy();
+        state.delayedFinalSocketsByIP.delete("source-0");
+        const recoveredSocket = createSocket("127.0.0.11");
+        handleSocket(recoveredSocket);
+        recoveredSocket.emit("data", `${JSON.stringify({ id: 5, method: "login", params: {} })}\n`);
+        assert.equal(recoveredSocket.destroyed, false);
+        assert.ok(recoveredSocket.finalReplyTimer);
+        recoveredSocket.destroy();
+        assert.equal(state.delayedFinalSocketsByIP.size, 1023);
 
-        distributed[0].destroy();
-        distributed[0].destroy();
-        const recovered = rejectLogin("new-source");
-        assert.equal(recovered.destroyed, false);
-        assert.ok(recovered.finalReplyTimer);
-        assert.equal(rejectLogin("another-source").destroyReason, "delayed-final-limit", "double close must not free extra capacity");
-        for (const socket of sockets) socket.destroy();
-        assert.equal(state.delayedFinalSocketsByIP.size, 0);
-
-        const unidentified = rejectLogin("");
-        assert.equal(unidentified.destroyReason, "delayed-final-limit");
-        assert.equal(unidentified.finalReplyTimer, undefined);
+        const unidentifiedSocket = createSocket("");
+        handleSocket(unidentifiedSocket);
+        unidentifiedSocket.emit("data", `${JSON.stringify({ id: 6, method: "login", params: {} })}\n`);
+        assert.equal(unidentifiedSocket.destroyReason, "delayed-final-limit");
+        assert.equal(unidentifiedSocket.finalReplyTimer, undefined);
     } finally {
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
