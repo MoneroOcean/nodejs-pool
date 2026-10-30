@@ -25,6 +25,184 @@ async function captureConsole(run) {
 }
 
 test.describe("pool components: core", { concurrency: false }, () => {
+test("existing IP bans reject new plaintext and TLS sockets before reservation or handshake", async () => {
+    const originalConfig = global.config;
+    try {
+        global.config = { pool: {}, pplns: { enable: true } };
+        for (const ssl of [false, true]) {
+            const { state } = createPoolState();
+            state.bannedTmpIPs["198.51.100.11"] = 1;
+            let tlsServer;
+            let handshakeStarts = 0;
+            let secureConnection;
+            const factory = createServerFactory({
+                debug() {}, state, handleMinerData() {}, removeMiner() {},
+                fs: { readFileSync() { return Buffer.from("test"); } },
+                net: require("node:net"),
+                tls: { createServer(_options, onSecureConnection) {
+                    secureConnection = onSecureConnection;
+                    tlsServer = new EventEmitter();
+                    tlsServer.on("connection", socket => { if (!socket.destroyed) ++handshakeStarts; });
+                    tlsServer.listen = (_port, _host, onListen) => onListen();
+                    return tlsServer;
+                } }
+            });
+            if (ssl) await factory.startPortServers([{ port: 39001, portType: "pplns", ssl }]);
+            const handleSocket = factory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+            function makeSocket() {
+                const value = new EventEmitter();
+                Object.assign(value, {
+                    remoteAddress: "::ffff:198.51.100.11", remotePort: 45000, remoteFamily: "IPv6",
+                    localAddress: "::ffff:192.0.2.1", localPort: 39001, localFamily: "IPv6",
+                    writable: true, destroyed: false, setKeepAlive() {}, setEncoding() {},
+                    destroy() { if (!value.destroyed) { value.destroyed = true; value.emit("close"); } }
+                });
+                return value;
+            }
+            const rejected = makeSocket();
+            if (ssl) tlsServer.emit("connection", rejected);
+            else handleSocket(rejected);
+            assert.equal(rejected.destroyed, true);
+            assert.equal(rejected.destroyReason, "ip-banned");
+            assert.equal(rejected.authTimer, undefined);
+            assert.equal(rejected.finalReplyTimer, undefined);
+            assert.equal(rejected.listenerCount("close"), 0);
+            assert.equal(handshakeStarts, 0);
+            assert.deepEqual(state.activeConnectionsByIP, {});
+            assert.deepEqual(state.activeConnectionsBySubnet, {});
+            assert.equal(state.delayedFinalSocketsByIP, undefined);
+
+            // The rejected TLS tuple must not leave a stale reservation behind.
+            delete state.bannedTmpIPs["198.51.100.11"];
+            const accepted = makeSocket();
+            if (ssl) { tlsServer.emit("connection", accepted); secureConnection(accepted); }
+            else handleSocket(accepted);
+            assert.equal(accepted.destroyed, false);
+            assert.equal(state.activeConnectionsByIP["198.51.100.11"], 1);
+            assert.equal(handshakeStarts, ssl ? 1 : 0);
+            accepted.destroy();
+            assert.equal(state.activeConnectionsByIP["198.51.100.11"], undefined);
+            assert.equal(state.activeConnectionsBySubnet["198.51.100.0/24"], undefined);
+        }
+    } finally { global.config = originalConfig; }
+});
+
+test("early IP ban admission preserves whitelist, loopback, missing state and existing miners", () => {
+    const originalConfig = global.config;
+    try {
+        global.config = { pool: {} };
+        for (const remoteAddress of ["198.51.100.12", "::ffff:198.51.100.12", "127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+            const { state } = createPoolState();
+            state.bannedTmpIPs = { "198.51.100.12": 1, "127.0.0.1": 1 };
+            state.ipWhitelist["198.51.100.12"] = 0; // Membership, like the protocol gate, is authoritative.
+            let handled = 0;
+            const factory = createServerFactory({
+                debug() {}, state, fs: require("node:fs"), net: require("node:net"), tls: require("node:tls"),
+                handleMinerData() { ++handled; }, removeMiner() {}
+            });
+            const socket = new EventEmitter();
+            Object.assign(socket, {
+                remoteAddress, writable: true, destroyed: false, setKeepAlive() {}, setEncoding() {},
+                destroy() { if (!socket.destroyed) { socket.destroyed = true; socket.emit("close"); } }
+            });
+            factory.createPoolSocketHandler({ port: 39001, portType: "pplns" })(socket);
+            assert.equal(socket.destroyed, false, remoteAddress);
+            socket.miner_id = "authenticated-miner";
+            state.activeMiners.set(socket.miner_id, {});
+            delete state.ipWhitelist["198.51.100.12"];
+            socket.emit("data", '{"id":1,"method":"keepalived","params":{}}\n');
+            assert.equal(handled, 1, "a later ban does not disconnect an established miner");
+            socket.destroy();
+
+            delete state.bannedTmpIPs;
+            delete state.ipWhitelist;
+            const withoutBanState = new EventEmitter();
+            Object.assign(withoutBanState, {
+                remoteAddress, writable: true, setKeepAlive() {}, setEncoding() {},
+                destroy() { withoutBanState.emit("close"); }
+            });
+            factory.createPoolSocketHandler({ port: 39001, portType: "pplns" })(withoutBanState);
+            assert.equal(withoutBanState.destroyed, undefined);
+            withoutBanState.destroy();
+        }
+    } finally { global.config = originalConfig; }
+});
+
+test("real TLS rejects an already banned source and accepts it after whitelisting or unbanning", async () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const tls = require("node:tls");
+    const { once } = require("node:events");
+    const directory = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "pool-ip-ban-"));
+    const originalConfig = global.config;
+    const clients = [];
+    let server;
+    try {
+        require("node:child_process").execFileSync("openssl", [
+            "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+            "-keyout", path.join(directory, "cert.key"), "-out", path.join(directory, "cert.pem"),
+            "-days", "1", "-subj", "/CN=pool-test.invalid"
+        ], { stdio: "pipe" });
+        global.config = { bind_ip: "127.0.0.1", pool: {}, pplns: { enable: true } };
+        const { state } = createPoolState();
+        const address = "198.51.100.13";
+        state.bannedTmpIPs[address] = 1;
+        let secureConnections = 0;
+        let minerRequests = 0;
+        const factory = createServerFactory({
+            debug() {}, state, net: require("node:net"), tls,
+            fs: { readFileSync(name) { return fs.readFileSync(path.join(directory, name)); } },
+            handleMinerData(_socket, _id, _method, _params, _ip, _port, sendReply) {
+                ++minerRequests;
+                sendReply(null, { ok: true });
+            },
+            removeMiner() {}
+        });
+        [server] = await factory.startPortServers([{ port: 0, portType: "pplns", ssl: true }]);
+        // Local tests use a documentation address without changing production address handling.
+        const overrideAddress = socket => Object.defineProperty(socket, "remoteAddress", { value: address });
+        server.prependListener("connection", overrideAddress);
+        server.prependListener("secureConnection", overrideAddress);
+        server.on("secureConnection", () => { ++secureConnections; });
+        const port = server.address().port;
+        function connect() {
+            const socket = tls.connect({ host: "127.0.0.1", port, rejectUnauthorized: false });
+            clients.push(socket);
+            return socket;
+        }
+        const rejected = connect();
+        rejected.on("error", () => {});
+        await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("Banned TLS connection did not close")), 1000);
+            rejected.once("close", () => { clearTimeout(timer); resolve(); });
+        });
+        assert.equal(secureConnections, 0);
+        assert.equal(minerRequests, 0);
+        assert.deepEqual(state.activeConnectionsByIP, {});
+        assert.deepEqual(state.activeConnectionsBySubnet, {});
+
+        for (const whitelist of [true, false]) {
+            if (whitelist) state.ipWhitelist[address] = 1;
+            else { delete state.ipWhitelist[address]; delete state.bannedTmpIPs[address]; }
+            const allowed = connect();
+            await once(allowed, "secureConnect", { signal: AbortSignal.timeout(2000) });
+            const response = once(allowed, "data", { signal: AbortSignal.timeout(2000) });
+            allowed.write('{"id":1,"method":"keepalived","params":{}}\n');
+            const [payload] = await response;
+            assert.deepEqual(JSON.parse(payload.toString()).result, { ok: true });
+            allowed.destroy();
+            await once(allowed, "close", { signal: AbortSignal.timeout(2000) });
+        }
+        assert.equal(secureConnections, 2);
+        assert.equal(minerRequests, 2);
+    } finally {
+        for (const socket of clients) socket.destroy();
+        if (server) await new Promise(resolve => server.close(resolve));
+        global.config = originalConfig;
+        fs.rmSync(directory, { recursive: true });
+    }
+});
+
 test("Pearl large-packet admission is job-scoped and proof logs are redacted", () => {
     assert.equal(createServerFactory.hasPearlJob(undefined), false);
     assert.equal(createServerFactory.hasPearlJob({ validJobs: { toarray() { return [{ coin: "XMR" }]; } } }), false);
