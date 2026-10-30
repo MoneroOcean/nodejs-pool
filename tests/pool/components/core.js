@@ -28,7 +28,7 @@ test.describe("pool components: core", { concurrency: false }, () => {
 test("existing IP bans reject new plaintext and TLS sockets before reservation or handshake", async () => {
     const originalConfig = global.config;
     try {
-        global.config = { pool: {}, pplns: { enable: true } };
+        global.config = { pool: { maxConnectionsPerIP: 1 }, pplns: { enable: true } };
         for (const ssl of [false, true]) {
             const { state } = createPoolState();
             state.bannedTmpIPs["198.51.100.11"] = 1;
@@ -42,7 +42,10 @@ test("existing IP bans reject new plaintext and TLS sockets before reservation o
                 tls: { createServer(_options, onSecureConnection) {
                     secureConnection = onSecureConnection;
                     tlsServer = new EventEmitter();
-                    tlsServer.on("connection", socket => { if (!socket.destroyed) ++handshakeStarts; });
+                    tlsServer.on("connection", function originalTlsListener() {
+                        assert.equal(this, tlsServer);
+                        ++handshakeStarts;
+                    });
                     tlsServer.listen = (_port, _host, onListen) => onListen();
                     return tlsServer;
                 } }
@@ -80,6 +83,13 @@ test("existing IP bans reject new plaintext and TLS sockets before reservation o
             assert.equal(accepted.destroyed, false);
             assert.equal(state.activeConnectionsByIP["198.51.100.11"], 1);
             assert.equal(handshakeStarts, ssl ? 1 : 0);
+            const overLimit = makeSocket();
+            overLimit.remotePort = 45001;
+            if (ssl) tlsServer.emit("connection", overLimit);
+            else handleSocket(overLimit);
+            assert.equal(overLimit.destroyReason, "connection-limit");
+            assert.equal(overLimit.destroyed, true);
+            assert.equal(handshakeStarts, ssl ? 1 : 0, "rejected admission never invokes the original TLS listener");
             accepted.destroy();
             assert.equal(state.activeConnectionsByIP["198.51.100.11"], undefined);
             assert.equal(state.activeConnectionsBySubnet["198.51.100.0/24"], undefined);
@@ -132,6 +142,7 @@ test("real TLS rejects an already banned source and accepts it after whitelistin
     const fs = require("node:fs");
     const path = require("node:path");
     const tls = require("node:tls");
+    const net = require("node:net");
     const { once } = require("node:events");
     const directory = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "pool-ip-ban-"));
     const originalConfig = global.config;
@@ -165,31 +176,73 @@ test("real TLS rejects an already banned source and accepts it after whitelistin
         server.prependListener("secureConnection", overrideAddress);
         server.on("secureConnection", () => { ++secureConnections; });
         const port = server.address().port;
-        function connect() {
-            const socket = tls.connect({ host: "127.0.0.1", port, rejectUnauthorized: false });
+        function connect(session) {
+            const socket = tls.connect({ host: "127.0.0.1", port, rejectUnauthorized: false,
+                minVersion: "TLSv1.2", maxVersion: "TLSv1.2", session });
             clients.push(socket);
             return socket;
         }
-        const rejected = connect();
+        // Generate a real ClientHello locally, then send it with a raw socket so
+        // this assertion counts wire bytes rather than decrypted TLS data.
+        const capture = net.createServer();
+        await new Promise(resolve => capture.listen(0, "127.0.0.1", resolve));
+        let generator;
+        let peer;
+        let hello;
+        try {
+            const captured = new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error("ClientHello capture timed out")), 2000);
+                capture.once("connection", socket => {
+                    peer = socket;
+                    let buffer = Buffer.alloc(0);
+                    socket.on("data", chunk => {
+                        buffer = Buffer.concat([buffer, chunk]);
+                        if (buffer.length > 4096) { clearTimeout(timer); reject(new Error("Oversized ClientHello")); }
+                        else if (buffer.length >= 5 && buffer.length >= 5 + buffer.readUInt16BE(3)) {
+                            clearTimeout(timer);
+                            resolve(buffer);
+                        }
+                    });
+                });
+            });
+            generator = tls.connect({ host: "127.0.0.1", port: capture.address().port,
+                rejectUnauthorized: false, minVersion: "TLSv1.2", maxVersion: "TLSv1.2" });
+            generator.on("error", () => {});
+            hello = await captured;
+        } finally {
+            if (generator) generator.destroy();
+            if (peer) peer.destroy();
+            await new Promise(resolve => capture.close(resolve));
+        }
+        const rejected = net.createConnection({ host: "127.0.0.1", port });
+        clients.push(rejected);
+        let wireBytes = 0;
+        rejected.on("data", chunk => { wireBytes += chunk.length; });
         rejected.on("error", () => {});
+        rejected.once("connect", () => rejected.write(hello));
         await new Promise((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error("Banned TLS connection did not close")), 1000);
             rejected.once("close", () => { clearTimeout(timer); resolve(); });
         });
+        assert.equal(wireBytes, 0, "a banned ClientHello must receive no TLS or application bytes");
         assert.equal(secureConnections, 0);
         assert.equal(minerRequests, 0);
         assert.deepEqual(state.activeConnectionsByIP, {});
         assert.deepEqual(state.activeConnectionsBySubnet, {});
 
+        let session;
         for (const whitelist of [true, false]) {
             if (whitelist) state.ipWhitelist[address] = 1;
             else { delete state.ipWhitelist[address]; delete state.bannedTmpIPs[address]; }
-            const allowed = connect();
+            const allowed = connect(session);
             await once(allowed, "secureConnect", { signal: AbortSignal.timeout(2000) });
+            if (session) assert.equal(allowed.isSessionReused(), true, "TLS session ticket resumption is preserved");
             const response = once(allowed, "data", { signal: AbortSignal.timeout(2000) });
             allowed.write('{"id":1,"method":"keepalived","params":{}}\n');
             const [payload] = await response;
             assert.deepEqual(JSON.parse(payload.toString()).result, { ok: true });
+            session = allowed.getSession();
+            assert.equal(Buffer.isBuffer(session), true);
             allowed.destroy();
             await once(allowed, "close", { signal: AbortSignal.timeout(2000) });
         }
@@ -1003,9 +1056,10 @@ test("server final replies randomize within thirty seconds even for long request
     socket.finalizing = false;
     socket.setKeepAlive = function setKeepAlive() {};
     socket.setEncoding = function setEncoding() {};
-    socket.end = function end(payload) {
+    socket.end = function end(payload, onFlushed) {
         socket.writable = false;
         socket.endedPayload = payload;
+        if (onFlushed) onFlushed();
     };
     socket.destroy = function destroy() {
         socket.writable = false;
@@ -1034,7 +1088,7 @@ test("server final replies randomize within thirty seconds even for long request
         Object.assign(longSocket, {
             remoteAddress: "127.0.0.3", writable: true, destroyed: false,
             setKeepAlive() {}, setEncoding() {},
-            end(payload) { this.endedPayload = payload; this.writable = false; },
+            end(payload, onFlushed) { this.endedPayload = payload; this.writable = false; if (onFlushed) onFlushed(); },
             destroy() { this.destroyed = true; this.writable = false; }
         });
         handleSocket(longSocket);
@@ -1051,7 +1105,7 @@ test("server final replies randomize within thirty seconds even for long request
             Object.assign(rangeSocket, {
                 remoteAddress: "127.0.0.4", writable: true, destroyed: false,
                 setKeepAlive() {}, setEncoding() {},
-                end() { this.writable = false; },
+                end(_payload, onFlushed) { this.writable = false; if (onFlushed) onFlushed(); },
                 destroy() { this.destroyed = true; this.writable = false; }
             });
             handleSocket(rangeSocket);
@@ -1063,6 +1117,113 @@ test("server final replies randomize within thirty seconds even for long request
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
         Math.random = originalMathRandom;
+    }
+});
+
+test("final replies release server reservations even when a real peer keeps its write side open", async () => {
+    const net = require("node:net");
+    const { once } = require("node:events");
+    const originalConfig = global.config;
+    let server;
+    let client;
+    try {
+        global.config = { bind_ip: "127.0.0.1", pool: {}, pplns: { enable: true } };
+        const { state } = createPoolState();
+        const factory = createServerFactory({
+            debug() {}, state, net, tls: require("node:tls"), fs: require("node:fs"), removeMiner() {},
+            handleMinerData(_socket, _id, _method, _params, _ip, _port, _sendReply, sendReplyFinal) {
+                sendReplyFinal("Rejected login");
+            }
+        });
+        [server] = await factory.startPortServers([{ port: 0, portType: "pplns", ssl: false }]);
+        client = net.createConnection({ host: "127.0.0.1", port: server.address().port, allowHalfOpen: true });
+        client.setEncoding("utf8");
+        let payload = "";
+        client.on("data", chunk => { payload += chunk; });
+        await once(client, "connect", { signal: AbortSignal.timeout(2000) });
+        const ended = once(client, "end", { signal: AbortSignal.timeout(2000) });
+        client.write('{"id":1,"method":"login","params":{}}\n');
+        await ended;
+        assert.equal(JSON.parse(payload).error.message, "Rejected login");
+        assert.equal(client.writableEnded, false, "the client has not sent FIN");
+        const deadline = performance.now() + 1000;
+        while (state.activeConnectionsByIP["127.0.0.1"] && performance.now() < deadline) {
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        assert.equal(state.activeConnectionsByIP["127.0.0.1"], undefined);
+        assert.equal(state.activeConnectionsBySubnet["127.0.0.0/24"], undefined);
+    } finally {
+        if (client) client.destroy();
+        if (server) await new Promise(resolve => server.close(resolve));
+        global.config = originalConfig;
+    }
+});
+
+test("final reply flush deadlines close stalled writers and cancel on flush or client close", () => {
+    const originalConfig = global.config;
+    const originalSetTimeout = global.setTimeout;
+    const originalClearTimeout = global.clearTimeout;
+    const sockets = [];
+    try {
+        global.config = { pool: {} };
+        global.setTimeout = (callback, delay) => ({ callback, delay, cleared: false });
+        global.clearTimeout = timer => { if (timer) timer.cleared = true; };
+        const { state } = createPoolState();
+        const factory = createServerFactory({
+            debug() {}, state, net: require("node:net"), tls: require("node:tls"), fs: require("node:fs"), removeMiner() {},
+            handleMinerData(_socket, _id, _method, _params, _ip, _port, _sendReply, sendReplyFinal) {
+                sendReplyFinal("Rejected login");
+            }
+        });
+        const handle = factory.createPoolSocketHandler({ port: 39001, portType: "pplns" });
+        function rejectLogin() {
+            const socket = new EventEmitter();
+            Object.assign(socket, {
+                remoteAddress: "127.0.0.2", writable: true, destroyed: false, setKeepAlive() {}, setEncoding() {},
+                end(payload, onFlushed) { socket.payload = payload; socket.onFlushed = onFlushed; socket.writable = false; },
+                destroy() { socket.destroyed = true; socket.writable = false; socket.emit("close"); }
+            });
+            sockets.push(socket);
+            handle(socket);
+            socket.emit("data", '{"id":1,"method":"login","params":{}}\n');
+            return socket;
+        }
+        const stalled = rejectLogin();
+        const deadline = stalled.finalReplyTimer;
+        assert.equal(deadline.delay, 1000);
+        assert.equal(state.activeConnectionsByIP["127.0.0.2"], 1);
+        deadline.callback();
+        assert.equal(stalled.destroyed, true);
+        assert.equal(stalled.destroyReason, "final-reply-timeout");
+        assert.equal(stalled.finalReplyTimer, null);
+        stalled.onFlushed();
+        stalled.destroy();
+        assert.equal(stalled.destroyReason, "final-reply-timeout");
+        assert.equal(state.activeConnectionsByIP["127.0.0.2"], undefined);
+
+        const disconnected = rejectLogin();
+        const disconnectedTimer = disconnected.finalReplyTimer;
+        disconnected.destroy();
+        assert.equal(disconnectedTimer.cleared, true);
+        assert.equal(disconnected.finalReplyTimer, null);
+        disconnected.onFlushed();
+        assert.equal(state.activeConnectionsByIP["127.0.0.2"], undefined);
+
+        const flushed = rejectLogin();
+        const flushTimer = flushed.finalReplyTimer;
+        flushed.destroyReason = "existing-rejection";
+        flushed.onFlushed();
+        assert.equal(flushed.destroyed, true);
+        assert.equal(flushTimer.cleared, true);
+        assert.equal(flushed.finalReplyTimer, null);
+        assert.equal(flushed.destroyReason, "existing-rejection");
+        assert.equal(state.activeConnectionsByIP["127.0.0.2"], undefined);
+        assert.equal(state.activeConnectionsBySubnet["127.0.0.0/24"], undefined);
+    } finally {
+        for (const socket of sockets) socket.destroy();
+        global.config = originalConfig;
+        global.setTimeout = originalSetTimeout;
+        global.clearTimeout = originalClearTimeout;
     }
 });
 
@@ -1106,8 +1267,9 @@ test("server final replies bound pending sockets and release timers on disconnec
         net: require("node:net"),
         tls: require("node:tls"),
         state,
-        handleMinerData(_socket, _id, _method, _params, _ip, _portData, _sendReply, sendReplyFinal) {
-            sendReplyFinal("Delayed ban reply", 30);
+        handleMinerData(_socket, _id, _method, params, _ip, _portData, sendReply, sendReplyFinal) {
+            if (params && params.valid) sendReply(null, { status: "OK" });
+            else sendReplyFinal("Delayed ban reply", 30);
         },
         removeMiner() {}
     });
@@ -1120,10 +1282,11 @@ test("server final replies bound pending sockets and release timers on disconnec
         socket.finalizing = false;
         socket.setKeepAlive = function setKeepAlive() {};
         socket.setEncoding = function setEncoding() {};
-        socket.end = function end(payload) {
+        socket.end = function end(payload, onFlushed) {
             socket.writable = false;
             socket.endedPayload = payload;
-            socket.emit("close");
+            if (onFlushed) onFlushed();
+            else socket.emit("close");
         };
         socket.destroy = function destroy() {
             socket.writable = false;
@@ -1181,6 +1344,14 @@ test("server final replies bound pending sockets and release timers on disconnec
         assert.equal(overflowSocket.destroyReason, "delayed-final-limit");
         assert.equal(overflowSocket.finalReplyTimer, undefined);
         assert.equal(state.delayedFinalSocketsByIP.size, 1024);
+        const valid = createSocket("source-0");
+        valid.write = payload => { valid.reply = payload; return true; };
+        handleSocket(valid);
+        valid.emit("data", '{"id":7,"method":"login","params":{"valid":true}}\n');
+        assert.equal(JSON.parse(valid.reply).result.status, "OK");
+        assert.equal(valid.finalReplyTimer, undefined);
+        assert.equal(state.delayedFinalSocketsByIP.size, 1024, "successful logins bypass the full rejection budget");
+        valid.destroy();
 
         state.delayedFinalSocketsByIP.delete("source-0");
         const recoveredSocket = createSocket("127.0.0.11");
@@ -1362,6 +1533,27 @@ test("server startup skips configured listen ports while keeping other pplns por
     assert.deepEqual(listenCalls, [{ port: 39002, host: "127.0.0.1" }]);
 });
 
+test("TLS startup fails closed if no original connection listener is available", async () => {
+    const originalConfig = global.config;
+    let listened = false;
+    try {
+        global.config = { pool: {}, pplns: { enable: true } };
+        const { state } = createPoolState();
+        const factory = createServerFactory({
+            debug() {}, state, handleMinerData() {}, removeMiner() {}, net: require("node:net"),
+            fs: { readFileSync() { return Buffer.from("test"); } },
+            tls: { createServer() {
+                const server = new EventEmitter();
+                server.listen = () => { listened = true; };
+                return server;
+            } }
+        });
+        await assert.rejects(factory.startPortServers([{ port: 39001, portType: "pplns", ssl: true }]),
+            /TLS connection listener is unavailable/);
+        assert.equal(listened, false);
+    } finally { global.config = originalConfig; }
+});
+
 test("TLS stratum handshakes use the auth timeout and destroy failed handshakes", async () => {
     let tlsOptions;
     let tlsClientErrorHandler;
@@ -1382,17 +1574,14 @@ test("TLS stratum handshakes use the auth timeout and destroy failed handshakes"
     const tls = {
         createServer(options) {
             tlsOptions = options;
-            return {
-                once() {},
-                removeListener() {},
-                prependListener(event) {
-                    if (event === "connection") tlsConnectionListenerPrepended = true;
-                },
-                on(event, handler) {
-                    if (event === "tlsClientError") tlsClientErrorHandler = handler;
-                },
-                listen(_port, _host, callback) { callback(); }
-            };
+            const server = new EventEmitter();
+            server.on("connection", () => {});
+            server.on("newListener", (event, handler) => {
+                if (event === "connection") tlsConnectionListenerPrepended = true;
+                if (event === "tlsClientError") tlsClientErrorHandler = handler;
+            });
+            server.listen = (_port, _host, callback) => callback();
+            return server;
         }
     };
     const serverFactory = createServerFactory({

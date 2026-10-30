@@ -49,6 +49,7 @@ test.describe("pool runtime", { concurrency: false }, function poolRuntimeSuite(
     });
 
     require("./pool/components/core.js");
+    require("./pool/components/worker_limit_ip_ban.js");
     require("./pool/components/runtime.js");
     require("./pool/coin/basics.js");
     require("./pool/coin/pearl.js");

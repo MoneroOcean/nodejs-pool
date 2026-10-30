@@ -142,6 +142,7 @@ export interface PoolMiner extends PoolMinerView {
     error: string;
     valid_miner: boolean;
     delay_reply?: number;
+    workerLimitLogin?: boolean;
     removed_miner: boolean;
     xmrig_proxy: boolean;
     ipAddress: string;

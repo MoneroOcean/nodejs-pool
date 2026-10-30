@@ -114,7 +114,9 @@ test("replacement workers retain their logical ID when cluster IDs differ", () =
     const listeners = {};
     const forkEnvironments = [];
     const cluster = {
+        SCHED_NONE: 1, schedulingPolicy: 2,
         fork(env) {
+            assert.equal(this.schedulingPolicy, this.SCHED_NONE, "direct acceptance is selected before every fork");
             forkEnvironments.push(env);
             const worker = {id: 10 + workers.length, process: {pid: 100 + workers.length}, on() {}};
             workers.push(worker);
