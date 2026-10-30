@@ -108,15 +108,20 @@ test("worker startup loads the IP whitelist before starting port servers", () =>
     }
 });
 
-test("replacement workers retain their logical ID when cluster IDs differ", () => {
-    const saved = {config: global.config, support: global.support, setInterval, setTimeout, log: console.log, error: console.error};
+for (const {name, override, initialPolicy, expectedPolicy} of [
+    {name: "default direct acceptance", override: undefined, initialPolicy: 2, expectedPolicy: 1},
+    {name: "explicit round robin", override: "rr", initialPolicy: 2, expectedPolicy: 2},
+    {name: "explicit direct acceptance", override: "none", initialPolicy: 1, expectedPolicy: 1}
+]) {
+test(`replacement workers retain their logical ID with ${name}`, () => {
+    const saved = {config: global.config, support: global.support, setInterval, setTimeout, log: console.log, error: console.error, schedulingOverride: process.env.NODE_CLUSTER_SCHED_POLICY};
     const workers = [];
     const listeners = {};
     const forkEnvironments = [];
     const cluster = {
-        SCHED_NONE: 1, schedulingPolicy: 2,
+        SCHED_NONE: 1, schedulingPolicy: initialPolicy,
         fork(env) {
-            assert.equal(this.schedulingPolicy, this.SCHED_NONE, "direct acceptance is selected before every fork");
+            assert.equal(this.schedulingPolicy, expectedPolicy, "the selected policy survives every fork");
             forkEnvironments.push(env);
             const worker = {id: 10 + workers.length, process: {pid: 100 + workers.length}, on() {}};
             workers.push(worker);
@@ -125,6 +130,8 @@ test("replacement workers retain their logical ID when cluster IDs differ", () =
         on(event, listener) { listeners[event] = listener; }
     };
     try {
+        if (override === undefined) delete process.env.NODE_CLUSTER_SCHED_POLICY;
+        else process.env.NODE_CLUSTER_SCHED_POLICY = override;
         global.config = {ports: [], worker_num: 1, daemon: {}, general: {adminEmail: "ops@example.com"}, bind_ip: "127.0.0.1", hostname: "test"};
         global.support = {sendEmail() {}, sendAdminFyi() {}};
         global.setInterval = () => null;
@@ -146,5 +153,8 @@ test("replacement workers retain their logical ID when cluster IDs differ", () =
         global.setTimeout = saved.setTimeout;
         console.log = saved.log;
         console.error = saved.error;
+        if (saved.schedulingOverride === undefined) delete process.env.NODE_CLUSTER_SCHED_POLICY;
+        else process.env.NODE_CLUSTER_SCHED_POLICY = saved.schedulingOverride;
     }
 });
+}
