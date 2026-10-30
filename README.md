@@ -84,7 +84,15 @@ When the script finishes:
 su - user
 cd ~/nodejs-pool
 source ~/.nvm/nvm.sh
-pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
+NODE_CLUSTER_SCHED_POLICY=none pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
+pm2 save
+```
+
+`NODE_CLUSTER_SCHED_POLICY=none` selects direct worker acceptance and matches the pool default.
+Apply it to an existing PM2 app with:
+
+```bash
+NODE_CLUSTER_SCHED_POLICY=none pm2 restart pool --update-env
 pm2 save
 ```
 

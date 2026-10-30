@@ -640,7 +640,8 @@ pm2 describe worker >/dev/null 2>&1 || pm2 start init.js --name=worker --log-dat
 pm2 describe remote_share >/dev/null 2>&1 || pm2 start init.js --name=remote_share --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=remote_share
 pm2 describe long_runner >/dev/null 2>&1 || pm2 start init.js --name=long_runner --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=long_runner
 fi
-#pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
+# Direct worker acceptance matches the pool default.
+# NODE_CLUSTER_SCHED_POLICY=none pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 if [ "$POOL_DEPLOY_PREPARE" != 1 ]; then
   sleep 20
   pm2 describe pool_stats >/dev/null 2>&1 || pm2 start init.js --name=pool_stats --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool_stats

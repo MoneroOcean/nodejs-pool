@@ -757,7 +757,8 @@ openssl x509 -in cert.pem -noout -checkend 0
 test "\$(openssl x509 -in cert.pem -pubkey -noout)" = "\$(openssl pkey -in cert.key -pubout)" || { echo 'cert.key and cert.pem do not match' >&2; exit 1; }
 # A leaf is not allowed to accept miners until its copied production config,
 # certificates, firewall rules, and relay services have been verified.
-# pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
+# Direct worker acceptance matches the pool default.
+# NODE_CLUSTER_SCHED_POLICY=none pm2 start init.js --name=pool --log-date-format="YYYY-MM-DD HH:mm:ss:SSS Z" -- --module=pool
 EOF
 
 configure_pool_health_guard
