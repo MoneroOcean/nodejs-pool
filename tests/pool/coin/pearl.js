@@ -533,6 +533,23 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
         assert.equal(newJob.cert_version, pearl.PEARL_CERT_VERSION);
     });
 
+    test("tags Pearl notifications only for native switching clients", () => {
+        const job = { job_id: "pearl-job" };
+        for (const native of [false, true]) {
+            const messages = [];
+            pearlProfile.pool.pushJob({
+                job,
+                miner: { pushMessage(message) { messages.push(message); } },
+                params: { algo_name: "pearlhash" },
+                native
+            });
+            assert.deepEqual(messages, [{
+                method: "mining.notify", params: job, id: null,
+                ...(native ? { algo: "pearlhash" } : {})
+            }]);
+        }
+    });
+
     test("fails closed when adjustment would overflow a 256-bit target", () => {
         assert.equal(pearl.adjustedNetworkTarget(pearl.UINT256_MAX.toString(10), 2), null);
         assert.equal(pearl.isPearlNetworkCandidate("00".repeat(32), pearl.UINT256_MAX.toString(10), 2), false);
