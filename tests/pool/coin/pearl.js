@@ -18,17 +18,24 @@ function validPearlVerifierConfig(adjustment_factor) {
 
 const PEARL_SOLUTION_DATA = Buffer.from([1, ...Buffer.alloc(32, 0x56)]);
 const PEARL_SOLUTION_ID = blockTemplate.pearlSolutionId(PEARL_SOLUTION_DATA).toString("hex");
+const PEARL_GATEWAY_WORKER_ID = 7;
 
 function pearlSolutionIdFromData(solutionData) {
     return blockTemplate.pearlSolutionId(solutionData).toString("hex");
 }
 
-function submitGatewayProof(context) {
-    return new Promise(resolve => pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, {
-        blockTemplate: { height: 123 },
-        ...context,
-        replyFn(result, status) { resolve({ result, status }); }
-    }));
+async function submitGatewayProof(context) {
+    const previousCoinFuncs = global.coinFuncs;
+    global.coinFuncs = { ...previousCoinFuncs, uniqueWorkerId: PEARL_GATEWAY_WORKER_ID };
+    try {
+        return await new Promise(resolve => pearlProfile.pool.submitBlockRpc.call(pearlProfile.pool, {
+            blockTemplate: { height: 123 },
+            ...context,
+            replyFn(result, status) { resolve({ result, status }); }
+        }));
+    } finally {
+        global.coinFuncs = previousCoinFuncs;
+    }
 }
 
 function capturePearlLogs(t) {
@@ -1249,6 +1256,7 @@ test.describe("pool coin helpers: Pearl", { concurrency: false }, () => {
             pearl.gatewayRequest = originalGatewayRequest;
         }
         assert.equal(request.method, "submitPlainProof");
+        assert.equal(request.params.mining_job.worker_id, PEARL_GATEWAY_WORKER_ID);
         assert.equal(request.params.proof_encoding, "gzip");
         assert.equal(request.params.proof_raw_bytes, proof.length);
         assert.deepEqual(zlib.gunzipSync(Buffer.from(request.params.plain_proof, "base64")), proof);
