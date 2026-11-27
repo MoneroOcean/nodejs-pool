@@ -34,6 +34,7 @@ block_template_is_stuck
 ex_keys.json
 
 # Local runtime control files
+.pool-started-boot-id
 *.stop.txt*
 extra_wallet_verify.txt
 ip_whitelist.txt

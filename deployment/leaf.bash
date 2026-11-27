@@ -81,6 +81,8 @@ SSH_FAIL2BAN_IGNORE_IPS="${SSH_FAIL2BAN_IGNORE_IPS:-}"
 MONERO_P2P_SOURCE_IPV4S="${MONERO_P2P_SOURCE_IPV4S:-}"
 LEAF_SKIP_SYNC_WAIT="${LEAF_SKIP_SYNC_WAIT:-0}"
 LEAF_FINALIZE_SYNC_ONLY="${LEAF_FINALIZE_SYNC_ONLY:-0}"
+LEAF_NETWORK_WATCHDOG_INTERFACE="${LEAF_NETWORK_WATCHDOG_INTERFACE:-}"
+LEAF_NETWORK_WATCHDOG_PROBES="${LEAF_NETWORK_WATCHDOG_PROBES:-}"
 MONERO_SYNC_TIMEOUT_SECONDS="${MONERO_SYNC_TIMEOUT_SECONDS:-172800}"
 TARI_SYNC_TIMEOUT_SECONDS="${TARI_SYNC_TIMEOUT_SECONDS:-172800}"
 SYNC_POLL_INTERVAL_SECONDS="${SYNC_POLL_INTERVAL_SECONDS:-10}"
@@ -653,6 +655,9 @@ packages=(
   libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev
   libzmq3-dev libcap2-bin kmod
 )
+if [ -n "$LEAF_NETWORK_WATCHDOG_INTERFACE" ]; then
+  packages+=(iputils-ping)
+fi
 retry_command apt-get -o Acquire::Retries=3 install -y "${packages[@]}"
 configure_pool_conntrack
 timedatectl set-timezone Etc/UTC
@@ -762,6 +767,10 @@ test "\$(openssl x509 -in cert.pem -pubkey -noout)" = "\$(openssl pkey -in cert.
 EOF
 
 configure_pool_health_guard
+if [ -n "$LEAF_NETWORK_WATCHDOG_INTERFACE" ] && ! is_test_mode; then
+  bash /home/user/nodejs-pool/deployment/configure-leaf-network-watchdog.bash \
+    "$LEAF_NETWORK_WATCHDOG_INTERFACE" "$LEAF_NETWORK_WATCHDOG_PROBES"
+fi
 
 if [ "$LEAF_SKIP_SYNC_WAIT" = 1 ]; then
   if [ -z "$TARI_EXTERNAL_IP" ]; then

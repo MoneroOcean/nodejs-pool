@@ -1,0 +1,15 @@
+[Unit]
+Description=Leaf network transmit hang recovery
+After=systemd-journald.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/moneroocean/leaf-network-watchdog.conf
+ExecStart=/bin/bash /usr/local/libexec/moneroocean/leaf-network-watchdog
+StateDirectory=moneroocean-network-watchdog
+StateDirectoryMode=0700
+RuntimeDirectory=moneroocean-network-watchdog
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+TimeoutStartSec=2min
+UMask=0077

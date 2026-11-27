@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the leaf network for transmit hangs
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

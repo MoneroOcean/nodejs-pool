@@ -4,6 +4,52 @@ const fs = require("node:fs");
 const test = require("node:test");
 const createLifecycle = require("../lib/pool/lifecycle.js");
 
+test("pool startup reports a host reboot once per boot", () => {
+    const emails = [];
+    let bootId = "boot-one\n";
+    let marker;
+    const saved = {config: global.config, support: global.support, setInterval, setTimeout, log: console.log};
+    try {
+        global.config = {ports: [], daemon: {}, general: {adminEmail: "ops@example.invalid"}, hostname: "test"};
+        global.support = {sendEmail(_recipient, subject) { emails.push(subject); }};
+        global.setInterval = () => null;
+        global.setTimeout = () => null;
+        console.log = () => {};
+        function startPool() {
+            createLifecycle({
+                cluster: {on() {}},
+                fs: {
+                    readFileSync(file) {
+                        if (file === "/proc/sys/kernel/random/boot_id") return bootId;
+                        assert.equal(file, ".pool-started-boot-id");
+                        return marker;
+                    },
+                    existsSync() { return marker !== undefined; },
+                    writeFileSync(_file, value) { marker = value; }
+                },
+                os: {cpus: () => []}, net: {createServer: () => ({listen() {}})},
+                state: {threadName: "", newCoinHashFactor: {}, lastCoinHashFactor: {}, lastCoinHashFactorMM: {}},
+                minerRegistry: {registerPool() {}}, templateManager: {templateUpdate() {}}
+            }).startMaster();
+        }
+        startPool();
+        startPool();
+        bootId = "boot-two\n";
+        startPool();
+        assert.deepEqual(emails, [
+            "Pool server test online after host reboot",
+            "Pool server test online",
+            "Pool server test online after host reboot"
+        ]);
+    } finally {
+        global.config = saved.config;
+        global.support = saved.support;
+        global.setInterval = saved.setInterval;
+        global.setTimeout = saved.setTimeout;
+        console.log = saved.log;
+    }
+});
+
 test("worker startup rejects invalid database IDs and exhausted extranonce capacity", async () => {
     const originalConfig = global.config;
     const originalMysql = global.mysql;
