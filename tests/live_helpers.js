@@ -1182,18 +1182,32 @@ test.describe("live miner helpers", { concurrency: false }, () => {
             }
         });
 
-        const descendantCode = "process.on('SIGINT', () => process.exit(0)); setInterval(() => {}, 1000);";
+        const descendantCode = [
+            "process.on('SIGINT', () => process.exit(0));",
+            "if (process.send) process.send('ready');",
+            "setInterval(() => {}, 1000);"
+        ].join("");
         const fixtureCode = [
             "const fs = require('node:fs');",
             "const { spawn } = require('node:child_process');",
             `const marker = ${JSON.stringify(markerPath)};`,
-            `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantCode)}], { stdio: 'ignore' });`,
-            "const stat = fs.readFileSync('/proc/' + child.pid + '/stat', 'utf8');",
-            "const startTicks = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\\s+/)[19];",
-            "fs.writeFileSync(marker, JSON.stringify({ pid: child.pid, startTicks }));",
-            "process.stdout.write('Connected to fixture pool\\n');",
-            "process.stdout.write('Accepted share\\n');",
             "process.on('SIGINT', () => process.exit(0));",
+            `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantCode)}], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });`,
+            "const childReady = new Promise((resolve, reject) => {",
+            "    child.once('message', (message) => message === 'ready' ? resolve() : reject(new Error('unexpected child readiness message')));",
+            "    child.once('error', reject);",
+            "    child.once('exit', (code, signal) => reject(new Error('descendant exited before readiness')));",
+            "});",
+            "childReady.then(() => {",
+            "    const stat = fs.readFileSync('/proc/' + child.pid + '/stat', 'utf8');",
+            "    const startTicks = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\\s+/)[19];",
+            "    fs.writeFileSync(marker, JSON.stringify({ pid: child.pid, startTicks }));",
+            "    process.stdout.write('Connected to fixture pool\\n');",
+            "    process.stdout.write('Accepted share\\n');",
+            "}).catch((error) => {",
+            "    process.stderr.write(error.message + '\\n');",
+            "    process.exit(1);",
+            "});",
             "setInterval(() => {}, 1000);"
         ].join("");
         const events = [];
@@ -1227,7 +1241,7 @@ test.describe("live miner helpers", { concurrency: false }, () => {
 
         const { pid, startTicks } = JSON.parse(fs.readFileSync(markerPath, "utf8"));
         assert.match(startTicks, /^\d+$/);
-        assert.equal(result.success, true);
+        assert.equal(result.success, true, JSON.stringify(result));
         assert.equal(result.processCleanupComplete, true);
         assert.equal(result.processCleanupNatural, true);
         assert.equal(result.processCleanupForced, false);
